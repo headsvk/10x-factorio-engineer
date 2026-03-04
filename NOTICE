@@ -1,0 +1,15 @@
+10x Factorio Engineer — Production Calculator
+Copyright (c) 2026
+
+This product includes data files sourced from the Factorio Calculator by
+KirkMcDonald, available at:
+
+  https://github.com/KirkMcDonald/kirkmcdonald.github.io
+
+Those data files (data/vanilla-2.0.55.json, data/space-age-2.0.55.json) are
+licensed under the Apache License, Version 2.0:
+
+  https://www.apache.org/licenses/LICENSE-2.0
+
+The source code of this project (cli.py, test_cli.py) is separately licensed
+under the MIT License; see the LICENSE file for details.
