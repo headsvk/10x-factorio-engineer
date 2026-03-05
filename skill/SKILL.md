@@ -27,14 +27,14 @@ Tone: direct, technical, Factorio-knowledgeable. No fluff. Use exact numbers.
 
 ## 2. Calculator — Always Use the CLI
 
-The repo ships with `cli.py`, a zero-dependency Python calculator that resolves
+The repo ships with `skill/assets/cli.py`, a zero-dependency Python calculator that resolves
 full production chains and emits clean JSON. **Always call it** for any question
 involving machine counts, raw resource rates, belt counts, or throughput.
 
 ### Invocation pattern
 
 ```bash
-python cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
+python skill/assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 ```
 
 | Option | Default | Notes |
@@ -52,16 +52,16 @@ python cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 
 ```bash
 # How many machines for 45 science packs/min?
-python cli.py --item automation-science-pack --rate 45
+python skill/assets/cli.py --item automation-science-pack --rate 45
 
 # Processing units with prod-3 modules
-python cli.py --item processing-unit --rate 10 --prod-module 3 --furnace electric
+python skill/assets/cli.py --item processing-unit --rate 10 --prod-module 3 --furnace electric
 
 # Space Age holmium plates
-python cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
+python skill/assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
 
 # Force light-oil path for solid fuel
-python cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
+python skill/assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
 ```
 
 ### Reading the output
@@ -188,7 +188,7 @@ Always re-derive `bottlenecks` after any state change:
 ### Step-by-step
 
 1. Identify the item(s) and rate(s) the player is asking about.
-2. Run `python cli.py` with the appropriate flags from factory state:
+2. Run `python skill/assets/cli.py` with the appropriate flags from factory state:
    `--assembler`, `--furnace`, `--prod-module`, `--speed`, `--dataset`, plus
    `--recipe ITEM=RECIPE` for every entry in `recipe_overrides` and
    `--machine CATEGORY=MACHINE` for every entry in `machine_overrides`.
@@ -264,7 +264,7 @@ artifact update is a full paste — never a diff.
 
 To preview the dashboard locally without Claude, run:
 ```bash
-python skill/scripts/generate_preview.py
+python dev/generate_preview.py
 ```
 This writes `skill/assets/preview.html` — a self-contained file that opens
 directly in any browser.
@@ -915,7 +915,7 @@ When starting a new session:
 ### "How many machines do I need for X at Y/min?"
 
 ```
-run: python cli.py --item X --rate Y [--assembler N] [--furnace T] [--prod-module P]
+run: python skill/assets/cli.py --item X --rate Y [--assembler N] [--furnace T] [--prod-module P]
 format: lead with machine count for X, then key dependencies, then raw resources
 ```
 
@@ -940,7 +940,7 @@ format: lead with machine count for X, then key dependencies, then raw resources
 
 ```
 1. For each science pack in the current research tier:
-   run: python cli.py --item <pack> --rate 45
+   run: python skill/assets/cli.py --item <pack> --rate 45
 2. Aggregate all production steps, dedup shared ingredients (by adding rates)
 3. Present a consolidated machine list grouped by ingredient
 4. Add all packs as lines in factory state
