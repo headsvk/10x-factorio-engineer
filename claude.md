@@ -23,7 +23,9 @@ A `SKILL.md` that tells Claude how to behave as a planning assistant: when and
 how to call the CLI, how to track the player's factory conversationally, and how
 to render a React artifact dashboard showing science-pack progress, bottlenecks,
 and per-line machine counts. The dashboard component lives in
-`skill/assets/dashboard.jsx`.
+`skill/assets/dashboard.jsx`. A strategy reference file
+(`skill/references/strategy-topics.md`) is loaded on demand for layout,
+combat, power, Space Age, and other non-math questions.
 
 ---
 
@@ -33,13 +35,13 @@ and per-line machine counts. The dashboard component lives in
 
 | Trigger | Required follow-up action |
 |---------|--------------------------|
-| `skill/assets/dashboard.jsx` is modified | Replace the entire ` ```jsx … ``` ` fenced block inside `## 6. React Dashboard Component` in `skill/SKILL.md` with the full updated contents of `dashboard.jsx`. Do this in the same turn, not as a separate step. |
+| `skill/assets/dashboard.jsx` is modified | No change to `SKILL.md` required — Section 6 references the file directly. Run `python skill/scripts/generate_preview.py` to update the local preview. |
 | `cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `skill/SKILL.md` Section 2. |
 | New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `skill/SKILL.md` Section 2. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new CLI flags, new features, changed behaviour, etc.). |
 
-The goal is that `claude.md` always accurately describes the codebase and `SKILL.md` Section 6 always contains a runnable copy of `dashboard.jsx`.
+The goal is that `claude.md` always accurately describes the codebase. `SKILL.md` Section 6 references `skill/assets/dashboard.jsx` — keep that file up to date.
 
 ---
 
@@ -51,9 +53,10 @@ The goal is that `claude.md` always accurately describes the codebase and `SKILL
 | `test_cli.py` | `unittest` suite (59 tests, stdlib only) |
 | `data/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
 | `data/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
-| `skill/SKILL.md` | Skill definition — Claude co-pilot behaviour |
+| `skill/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
 | `skill/assets/dashboard.jsx` | React artifact — factory dashboard component |
-| `generate_preview.py` | Script that builds `skill/assets/preview.html` for local dev |
+| `skill/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
+| `skill/scripts/generate_preview.py` | Script that builds `skill/assets/preview.html` for local dev |
 
 Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missing.
 
@@ -345,13 +348,16 @@ Stdlib only — no `pip install` required: `argparse`, `json`, `math`, `os`, `sy
 ### Purpose
 
 `skill/SKILL.md` is a system-prompt document that turns Claude into an active
-Factorio factory co-pilot. It defines two responsibilities:
+Factorio gameplay assistant. It defines three responsibilities:
 
 1. **Precise calculations** — always call `python cli.py`, never compute
    production chains mentally.
 2. **Conversational factory tracking** — parse freeform player updates ("just
    placed 12 electric furnaces on copper"), maintain a structured factory-state
    JSON in context, detect bottlenecks, and suggest next steps.
+3. **Strategy guidance** — load `skill/references/strategy-topics.md` on demand
+   to answer questions about layouts, trains, megabases, Space Age planets,
+   power, combat, and more.
 
 ### skill/SKILL.md sections
 
@@ -367,6 +373,7 @@ Factorio factory co-pilot. It defines two responsibilities:
 | 8 — Common Workflows | Scripts for "how many machines", "I just built N", "plan science", etc. |
 | 9 — Item ID Quick Reference | Player shorthand → internal item ID map |
 | 10 — Error Handling | Unknown items, no-recipe items, direct oil product requests |
+| 11 — Strategy Guide Reference | When/how to load `skill/references/strategy-topics.md` for layout, combat, power, and Space Age questions |
 
 ### Factory State JSON Schema
 
@@ -447,7 +454,7 @@ bottleneck/next-step free-text strings. Known machines use a handcrafted map
 (`assembling-machine-3` → `Assembler 3`); everything else falls back to
 title-cased label conversion.
 
-**Local preview:** run `python generate_preview.py` to produce
+**Local preview:** run `python skill/scripts/generate_preview.py` to produce
 `skill/assets/preview.html` — a single self-contained file (React + Babel from
 CDN) that opens directly in any browser without a dev server.
 

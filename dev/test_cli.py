@@ -2,14 +2,16 @@
 Unit / integration tests for cli.py.
 
 Run with:
-    python -m pytest test_cli.py -v
+    python -m pytest dev/test_cli.py -v
   or
-    python -m unittest test_cli -v
+    python -m unittest dev.test_cli -v
 """
 
 import math
 import unittest
 from fractions import Fraction
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'skill', 'assets')))
 
 import cli
 

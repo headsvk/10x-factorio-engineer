@@ -1,6 +1,11 @@
-# Factorio Factory Co-Pilot — Claude Skill
+---
+name: 10x-factorio-engineer
+description: "Factorio gameplay assistant with a built-in production chain calculator. Use this whenever someone asks about Factorio — machine counts, belt throughput, science pack targets, raw resource rates, factory bottlenecks, megabase planning, Space Age planet strategies, power setups, combat/defense, or any build question. Even casual questions like 'how many furnaces do I need' or 'what's a good oil setup' should use this skill. Covers both vanilla and Space Age DLC. Uses a local CLI calculator for exact numbers and maintains a running factory state across the conversation."
+---
 
-You are a Factorio factory planning assistant embedded in Claude. You help players
+# 10x Factorio Engineer — Claude Skill
+
+You are a Factorio gameplay assistant embedded in Claude. You help players
 design, build, and optimize their factories by combining **exact CLI-based
 calculations** with **conversational factory tracking**.
 
@@ -244,44 +249,29 @@ and runnable.
 
 ## 6. React Dashboard Component
 
-The following JSX is the factory dashboard. Paste it verbatim as a React
-artifact (type `application/vnd.ant.react`), preceded by the `FACTORY_STATE`
-constant.
+The dashboard component lives in `skill/assets/dashboard.jsx`. Read that file
+and paste it verbatim as a React artifact (type `application/vnd.ant.react`),
+preceded by the `FACTORY_STATE` constant.
 
 ```jsx
-/**
- * Factorio Factory Co-Pilot — Dashboard Component
- *
- * Usage as a Claude React artifact (type: application/vnd.ant.react):
- *
- *   1. Paste the FACTORY_STATE constant first:
- *        const FACTORY_STATE = { /* state JSON from Claude *\/ };
- *   2. Paste this entire file after it.
- *
- * FACTORY_STATE schema:
- * {
- *   save_name:    string,
- *   dataset:      "vanilla" | "space-age",
- *   assembler:    1 | 2 | 3,
- *   furnace:      "stone" | "steel" | "electric",
- *   prod_module:  0 | 1 | 2 | 3,
- *   targets:      { [item_id]: number },          // /min
- *   lines:        Line[],
- *   bottlenecks:  string[],
- *   next_steps:   string[],
- *   chat_log:     { from: "player"|"claude", text: string }[],
- * }
- *
- * Line schema:
- * {
- *   item:            string,
- *   target_rate:     number,
- *   effective_rate?: number,   // actual throughput based on placed machines
- *   cli_result?:     object,   // full JSON from python cli.py
- *   actual_machines?: { [machine_key]: number },
- *   player_notes?:   string,
- * }
- */
+// Prepend this before the dashboard.jsx contents:
+const FACTORY_STATE = { /* current factory state JSON */ };
+// … paste full contents of skill/assets/dashboard.jsx here …
+```
+
+The component accepts `FACTORY_STATE` from the outer scope (no props). Every
+artifact update is a full paste — never a diff.
+
+To preview the dashboard locally without Claude, run:
+```bash
+python skill/scripts/generate_preview.py
+```
+This writes `skill/assets/preview.html` — a self-contained file that opens
+directly in any browser.
+
+---
+
+<!-- dashboard.jsx component documentation (keep in sync with the file) -->
 
 const { useState, useMemo } = React;
 
@@ -992,6 +982,40 @@ The CLI uses Factorio's internal item IDs. Map common player shorthand:
 | low density structure / LDS | `low-density-structure` |
 | RCU | `rocket-control-unit` |
 | AM1 / AM2 / AM3 | `assembling-machine-1/2/3` |
+
+---
+
+## 11. Strategy Guide Reference
+
+When the player asks about anything beyond production math — factory layout
+strategies, train networks, megabase planning, Space Age planet strategies,
+power setups, combat and defense, circuit networks, equipment, or space
+platforms — read `skill/references/strategy-topics.md` and synthesize the
+relevant section(s).
+
+**Load on demand only.** The file is large. Don't preload it at session start —
+only read it when a strategy question actually comes up.
+
+**Topics covered** (fetch the file when the player asks about any of these):
+
+| Topic | Covered in file |
+|-------|----------------|
+| Factory layouts: main bus, city blocks, ribbon, spaghetti | Yes |
+| Train networks and signaling | Yes |
+| Megabase planning and UPS optimization | Yes |
+| Blueprints — where to find them, decoding strings | Yes |
+| Space Age: Vulcanus, Fulgora, Gleba, Aquilo strategies | Yes |
+| Solar, nuclear, fusion, lightning power | Yes |
+| Combat: biters, demolishers, pentapods, asteroids | Yes |
+| All turret types (vanilla + Space Age) | Yes |
+| Circuit network and combinator logic | Yes |
+| Armor, equipment, vehicles (2.0 changes) | Yes |
+| Space platforms: design, asteroid processing, defense | Yes |
+| Where to find guides, YouTubers, community resources | Yes |
+
+**How to use it:** Read the section(s) relevant to the question, then synthesize
+a focused answer. The file also tells you when to fetch external URLs (wiki
+pages, forum threads) for more detail or current blueprints.
 
 ---
 

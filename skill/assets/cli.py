@@ -40,7 +40,7 @@ Solver notes
 * Productivity and speed module bonuses are applied uniformly per --prod / --speed.
 
 Dataset files (vanilla-2.0.55.json, space-age-2.0.55.json) are vendored in
-./data/  and automatically downloaded from KirkMcDonald's calculator GitHub repo
+./assets/  and automatically downloaded from KirkMcDonald's calculator GitHub repo
 on first run.
 """
 
@@ -57,7 +57,7 @@ from fractions import Fraction
 # Constants
 # ---------------------------------------------------------------------------
 
-DATA_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DATA_DIR   = os.path.dirname(os.path.abspath(__file__))
 PREFS_FILE = "factorio-prefs.json"   # auto-loaded from CWD if present
 
 DATA_FILES = {
@@ -237,7 +237,6 @@ def load_data(dataset: str) -> dict:
     """Return parsed JSON for *dataset*, downloading the file if absent."""
     path = os.path.join(DATA_DIR, DATA_FILES[dataset])
     if not os.path.exists(path):
-        os.makedirs(DATA_DIR, exist_ok=True)
         url = DATA_URLS[dataset]
         sys.stderr.write(f"Downloading {url} ...\n")
         urllib.request.urlretrieve(url, path)
