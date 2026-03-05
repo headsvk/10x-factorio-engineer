@@ -8,14 +8,14 @@ Kept up-to-date so Claude can understand the full project without needing conver
 
 Two components that work together to act as a Factorio factory co-pilot:
 
-**Component 1 — CLI Calculator** (`cli.py`)
+**Component 1 — CLI Calculator** (`skill/assets/cli.py`)
 Single-file zero-dependency Python CLI. Takes an item + target rate and emits
 precise JSON covering machine counts, raw resource rates, miner counts, and belt
 requirements. Based on KirkMcDonald's recipe data. Claude calls this for all
 production math — it never does the recursive recipe tree in its head.
 
 ```
-python cli.py --item <item-id> --rate <N> [options]
+python skill/assets/cli.py --item <item-id> --rate <N> [options]
 ```
 
 **Component 2 — Claude Skill** (`skill/`)
@@ -35,8 +35,8 @@ combat, power, Space Age, and other non-math questions.
 
 | Trigger | Required follow-up action |
 |---------|--------------------------|
-| `skill/assets/dashboard.jsx` is modified | No change to `SKILL.md` required — Section 6 references the file directly. Run `python skill/scripts/generate_preview.py` to update the local preview. |
-| `cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `skill/SKILL.md` Section 2. |
+| `skill/assets/dashboard.jsx` is modified | No change to `SKILL.md` required — Section 6 references the file directly. Run `python dev/generate_preview.py` to update the local preview. |
+| `skill/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `skill/SKILL.md` Section 2. |
 | New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `skill/SKILL.md` Section 2. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new CLI flags, new features, changed behaviour, etc.). |
@@ -49,14 +49,14 @@ The goal is that `claude.md` always accurately describes the codebase. `SKILL.md
 
 | Path | Purpose |
 |------|---------|
-| `cli.py` | Calculator — entire implementation, stdlib only |
-| `test_cli.py` | `unittest` suite (59 tests, stdlib only) |
-| `data/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
-| `data/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
+| `skill/assets/cli.py` | Calculator — entire implementation, stdlib only |
+| `skill/assets/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
+| `skill/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
+| `dev/test_cli.py` | `unittest` suite (59 tests, stdlib only) — dev only |
 | `skill/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
 | `skill/assets/dashboard.jsx` | React artifact — factory dashboard component |
 | `skill/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
-| `skill/scripts/generate_preview.py` | Script that builds `skill/assets/preview.html` for local dev |
+| `dev/generate_preview.py` | Script that builds `skill/assets/preview.html` for local dev |
 
 Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missing.
 
@@ -274,10 +274,10 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 ## Tests
 
 ```bash
-python -m unittest test_cli -v
+python -m unittest dev.test_cli -v
 ```
 
-`test_cli.py` contains 59 tests covering:
+`dev/test_cli.py` contains 59 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -350,7 +350,7 @@ Stdlib only — no `pip install` required: `argparse`, `json`, `math`, `os`, `sy
 `skill/SKILL.md` is a system-prompt document that turns Claude into an active
 Factorio gameplay assistant. It defines three responsibilities:
 
-1. **Precise calculations** — always call `python cli.py`, never compute
+1. **Precise calculations** — always call `python skill/assets/cli.py`, never compute
    production chains mentally.
 2. **Conversational factory tracking** — parse freeform player updates ("just
    placed 12 electric furnaces on copper"), maintain a structured factory-state
@@ -454,7 +454,7 @@ bottleneck/next-step free-text strings. Known machines use a handcrafted map
 (`assembling-machine-3` → `Assembler 3`); everything else falls back to
 title-cased label conversion.
 
-**Local preview:** run `python skill/scripts/generate_preview.py` to produce
+**Local preview:** run `python dev/generate_preview.py` to produce
 `skill/assets/preview.html` — a single self-contained file (React + Babel from
 CDN) that opens directly in any browser without a dev server.
 
