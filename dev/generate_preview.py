@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate skill/assets/preview.html from skill/assets/dashboard.jsx.
+Generate dev/preview.html from 10x-factorio-engineer/assets/dashboard.jsx.
 
 Produces a single self-contained HTML file that opens directly in a browser
 (no server needed) using Babel Standalone + React from CDN.
@@ -13,7 +13,7 @@ import os
 import re
 
 REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKILL_DIR  = os.path.join(REPO_ROOT, "skill")
+SKILL_DIR  = os.path.join(REPO_ROOT, "10x-factorio-engineer")
 JSX_PATH   = os.path.join(SKILL_DIR, "assets", "dashboard.jsx")
 OUT_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preview.html")
 

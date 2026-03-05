@@ -8,23 +8,23 @@ Kept up-to-date so Claude can understand the full project without needing conver
 
 Two components that work together to act as a Factorio factory co-pilot:
 
-**Component 1 — CLI Calculator** (`skill/assets/cli.py`)
+**Component 1 — CLI Calculator** (`10x-factorio-engineer/assets/cli.py`)
 Single-file zero-dependency Python CLI. Takes an item + target rate and emits
 precise JSON covering machine counts, raw resource rates, miner counts, and belt
 requirements. Based on KirkMcDonald's recipe data. Claude calls this for all
 production math — it never does the recursive recipe tree in its head.
 
 ```
-python skill/assets/cli.py --item <item-id> --rate <N> [options]
+python 10x-factorio-engineer/assets/cli.py --item <item-id> --rate <N> [options]
 ```
 
-**Component 2 — Claude Skill** (`skill/`)
+**Component 2 — Claude Skill** (`10x-factorio-engineer/`)
 A `SKILL.md` that tells Claude how to behave as a planning assistant: when and
 how to call the CLI, how to track the player's factory conversationally, and how
 to render a React artifact dashboard showing science-pack progress, bottlenecks,
 and per-line machine counts. The dashboard component lives in
-`skill/assets/dashboard.jsx`. A strategy reference file
-(`skill/references/strategy-topics.md`) is loaded on demand for layout,
+`10x-factorio-engineer/assets/dashboard.jsx`. A strategy reference file
+(`10x-factorio-engineer/references/strategy-topics.md`) is loaded on demand for layout,
 combat, power, Space Age, and other non-math questions.
 
 ---
@@ -35,13 +35,13 @@ combat, power, Space Age, and other non-math questions.
 
 | Trigger | Required follow-up action |
 |---------|--------------------------|
-| `skill/assets/dashboard.jsx` is modified | No change to `SKILL.md` required — Section 6 references the file directly. Run `python dev/generate_preview.py` to update the local preview. |
-| `skill/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `skill/SKILL.md` Section 2. |
-| New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `skill/SKILL.md` Section 2. |
+| `10x-factorio-engineer/assets/dashboard.jsx` is modified | No change to `SKILL.md` required — Section 6 references the file directly. Run `python dev/generate_preview.py` to update the local preview. |
+| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `10x-factorio-engineer/SKILL.md` Section 2. |
+| New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `10x-factorio-engineer/SKILL.md` Section 2. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new CLI flags, new features, changed behaviour, etc.). |
 
-The goal is that `claude.md` always accurately describes the codebase. `SKILL.md` Section 6 references `skill/assets/dashboard.jsx` — keep that file up to date.
+The goal is that `claude.md` always accurately describes the codebase. `SKILL.md` Section 6 references `10x-factorio-engineer/assets/dashboard.jsx` — keep that file up to date.
 
 ---
 
@@ -49,14 +49,14 @@ The goal is that `claude.md` always accurately describes the codebase. `SKILL.md
 
 | Path | Purpose |
 |------|---------|
-| `skill/assets/cli.py` | Calculator — entire implementation, stdlib only |
-| `skill/assets/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
-| `skill/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
+| `10x-factorio-engineer/assets/cli.py` | Calculator — entire implementation, stdlib only |
+| `10x-factorio-engineer/assets/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
+| `10x-factorio-engineer/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
 | `dev/test_cli.py` | `unittest` suite (59 tests, stdlib only) — dev only |
-| `skill/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
-| `skill/assets/dashboard.jsx` | React artifact — factory dashboard component |
-| `skill/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
-| `dev/generate_preview.py` | Script that builds `skill/assets/preview.html` for local dev |
+| `10x-factorio-engineer/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
+| `10x-factorio-engineer/assets/dashboard.jsx` | React artifact — factory dashboard component |
+| `10x-factorio-engineer/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
+| `dev/generate_preview.py` | Script that builds `10x-factorio-engineer/assets/preview.html` for local dev |
 
 Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missing.
 
@@ -347,19 +347,19 @@ Stdlib only — no `pip install` required: `argparse`, `json`, `math`, `os`, `sy
 
 ### Purpose
 
-`skill/SKILL.md` is a system-prompt document that turns Claude into an active
+`10x-factorio-engineer/SKILL.md` is a system-prompt document that turns Claude into an active
 Factorio gameplay assistant. It defines three responsibilities:
 
-1. **Precise calculations** — always call `python skill/assets/cli.py`, never compute
+1. **Precise calculations** — always call `python 10x-factorio-engineer/assets/cli.py`, never compute
    production chains mentally.
 2. **Conversational factory tracking** — parse freeform player updates ("just
    placed 12 electric furnaces on copper"), maintain a structured factory-state
    JSON in context, detect bottlenecks, and suggest next steps.
-3. **Strategy guidance** — load `skill/references/strategy-topics.md` on demand
+3. **Strategy guidance** — load `10x-factorio-engineer/references/strategy-topics.md` on demand
    to answer questions about layouts, trains, megabases, Space Age planets,
    power, combat, and more.
 
-### skill/SKILL.md sections
+### 10x-factorio-engineer/SKILL.md sections
 
 | Section | Contents |
 |---------|----------|
@@ -373,7 +373,7 @@ Factorio gameplay assistant. It defines three responsibilities:
 | 8 — Common Workflows | Scripts for "how many machines", "I just built N", "plan science", etc. |
 | 9 — Item ID Quick Reference | Player shorthand → internal item ID map |
 | 10 — Error Handling | Unknown items, no-recipe items, direct oil product requests |
-| 11 — Strategy Guide Reference | When/how to load `skill/references/strategy-topics.md` for layout, combat, power, and Space Age questions |
+| 11 — Strategy Guide Reference | When/how to load `10x-factorio-engineer/references/strategy-topics.md` for layout, combat, power, and Space Age questions |
 
 ### Factory State JSON Schema
 
@@ -427,7 +427,7 @@ player message:
 }
 ```
 
-### skill/assets/dashboard.jsx
+### 10x-factorio-engineer/assets/dashboard.jsx
 
 A self-contained React component (no external dependencies, dark theme) that
 reads from an injected `FACTORY_STATE` const. Rendered by Claude as a
@@ -455,7 +455,7 @@ bottleneck/next-step free-text strings. Known machines use a handcrafted map
 title-cased label conversion.
 
 **Local preview:** run `python dev/generate_preview.py` to produce
-`skill/assets/preview.html` — a single self-contained file (React + Babel from
+`10x-factorio-engineer/assets/preview.html` — a single self-contained file (React + Babel from
 CDN) that opens directly in any browser without a dev server.
 
 **FACTORY_STATE injection pattern** (Claude prepends this before the JSX):

@@ -4,25 +4,26 @@ A Factorio factory co-pilot built on two components:
 
 | Component | What it does |
 |-----------|-------------|
-| **CLI Calculator** (`cli.py`) | Zero-dependency Python CLI — resolves full production chains and emits clean JSON |
-| **Claude Skill** (`skill/`) | System-prompt + React dashboard that turns Claude into an active planning assistant |
+| **CLI Calculator** (`assets/cli.py`) | Zero-dependency Python CLI — resolves full production chains and emits clean JSON |
+| **Claude Skill** (`10x-factorio-engineer/`) | System-prompt + React dashboard that turns Claude into an active planning assistant |
 
 ---
 
 ## Repository Structure
 
 ```
-cli.py                      # Calculator — entire implementation
-test_cli.py                 # unittest suite (59 tests, stdlib only)
-generate_preview.py         # Builds skill/assets/preview.html for local dev
-data/
-  vanilla-2.0.55.json       # KirkMcDonald dataset — base game
-  space-age-2.0.55.json     # KirkMcDonald dataset — Space Age DLC
-skill/
+10x-factorio-engineer/
   SKILL.md                  # Skill definition document
   assets/
+    cli.py                  # Calculator — entire implementation
     dashboard.jsx           # React factory dashboard component
-    preview.html            # Generated — run generate_preview.py (gitignored)
+    vanilla-2.0.55.json     # KirkMcDonald dataset — base game
+    space-age-2.0.55.json   # KirkMcDonald dataset — Space Age DLC
+  references/
+    strategy-topics.md      # On-demand strategy reference
+dev/
+  test_cli.py               # unittest suite (59 tests, stdlib only)
+  generate_preview.py       # Builds dev/preview.html for local dev
 ```
 
 Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run.
@@ -40,19 +41,19 @@ Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run
 
 ```bash
 # Basic usage
-python cli.py --item electronic-circuit --rate 60
+python assets/cli.py --item electronic-circuit --rate 60
 
 # With specific machines and productivity modules
-python cli.py --item processing-unit --rate 10 --assembler 3 --furnace electric --prod-module 3
+python assets/cli.py --item processing-unit --rate 10 --assembler 3 --furnace electric --prod-module 3
 
 # Override which recipe to use for an item
-python cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
+python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
 
 # Space Age DLC
-python cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
+python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
 
 # Pipe into jq for specific keys
-python cli.py --item processing-unit --rate 10 | jq .raw_resources
+python assets/cli.py --item processing-unit --rate 10 | jq .raw_resources
 ```
 
 ### CLI Flags
@@ -215,7 +216,7 @@ are never boosted regardless of the flag.
 ### Running Tests
 
 ```bash
-python -m unittest test_cli -v
+python -m unittest dev.test_cli -v
 ```
 
 59 tests, stdlib only.
@@ -226,18 +227,18 @@ python -m unittest test_cli -v
 
 The skill turns Claude into an active factory co-pilot. It has two parts:
 
-### skill/SKILL.md
+### SKILL.md
 
 A system-prompt document defining Claude's behaviour as a planning assistant:
 
-- **Always call `python cli.py`** for production math — never compute chains mentally.
+- **Always call `python assets/cli.py`** for production math — never compute chains mentally.
 - **Track the factory conversationally** — parse freeform player updates
   ("just placed 12 electric furnaces on copper"), maintain a structured
   factory-state JSON in context, detect bottlenecks, suggest next steps.
 - **Launch/update a React artifact** (the dashboard) when the player wants
   a visual overview.
 
-### skill/assets/dashboard.jsx
+### assets/dashboard.jsx
 
 A self-contained React component (dark theme, no external dependencies).
 Claude renders it as a `application/vnd.ant.react` artifact by prepending
@@ -267,7 +268,7 @@ All machine and item IDs are displayed as friendly names (`assembling-machine-3`
 → `Assembler 3`, `logistic-science-pack` → `Logistic Science`) everywhere in
 the UI, including free-text bottleneck and next-step strings.
 
-**Local preview:** `python generate_preview.py` builds `skill/assets/preview.html` —
+**Local preview:** `python dev/generate_preview.py` builds `dev/preview.html` —
 a single self-contained HTML file that opens in any browser without a server.
 
 ### Factory State Schema
@@ -311,8 +312,8 @@ the same data that powers <https://kirkmcdonald.github.io/calc.html>.
 
 ## License
 
-The source code (`cli.py`, `test_cli.py`, `skill/`) is MIT licensed — see [LICENSE](LICENSE).
+The source code (`10x-factorio-engineer/`, `dev/`) is MIT licensed — see [LICENSE](LICENSE).
 
-The vendored data files (`data/*.json`) are from KirkMcDonald's Factorio
+The vendored data files (`10x-factorio-engineer/assets/*.json`) are from KirkMcDonald's Factorio
 Calculator and are licensed under the **Apache License 2.0**. See [NOTICE](NOTICE)
 for attribution details.
