@@ -22,8 +22,9 @@ python 10x-factorio-engineer/assets/cli.py --item <item-id> --rate <N> [options]
 A `SKILL.md` that tells Claude how to behave as a planning assistant: when and
 how to call the CLI, how to track the player's factory conversationally, and how
 to render a React artifact dashboard showing science-pack progress, bottlenecks,
-and per-line machine counts. The dashboard component lives in
-`10x-factorio-engineer/assets/dashboard.jsx`. A strategy reference file
+and per-line machine counts. The dashboard component source lives in
+`dev/dashboard.jsx`; the minified build (`npm run build`) is written to
+`10x-factorio-engineer/assets/dashboard.min.js`. A strategy reference file
 (`10x-factorio-engineer/references/strategy-topics.md`) is loaded on demand for layout,
 combat, power, Space Age, and other non-math questions.
 
@@ -35,13 +36,13 @@ combat, power, Space Age, and other non-math questions.
 
 | Trigger | Required follow-up action |
 |---------|--------------------------|
-| `10x-factorio-engineer/assets/dashboard.jsx` is modified | No change to `SKILL.md` required — Section 6 references the file directly. Run `python dev/generate_preview.py` to update the local preview. |
+| `dev/dashboard.jsx` is modified | Run `npm run build` to rebuild `assets/dashboard.min.js`, then run `python dev/generate_preview.py` to update the local preview. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `10x-factorio-engineer/SKILL.md` Section 2. |
 | New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `10x-factorio-engineer/SKILL.md` Section 2. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new CLI flags, new features, changed behaviour, etc.). |
 
-The goal is that `claude.md` always accurately describes the codebase. `SKILL.md` Section 6 references `10x-factorio-engineer/assets/dashboard.jsx` — keep that file up to date.
+The goal is that `claude.md` always accurately describes the codebase. `SKILL.md` Section 6 references `10x-factorio-engineer/assets/dashboard.min.js` — rebuild it from `dev/dashboard.jsx` via `npm run build` whenever the source changes.
 
 ---
 
@@ -54,9 +55,11 @@ The goal is that `claude.md` always accurately describes the codebase. `SKILL.md
 | `10x-factorio-engineer/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
 | `dev/test_cli.py` | `unittest` suite (59 tests, stdlib only) — dev only |
 | `10x-factorio-engineer/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
-| `10x-factorio-engineer/assets/dashboard.jsx` | React artifact — factory dashboard component |
+| `dev/dashboard.jsx` | React artifact — factory dashboard component (source) |
+| `10x-factorio-engineer/assets/dashboard.min.js` | Minified build of `dev/dashboard.jsx` — loaded by the skill |
 | `10x-factorio-engineer/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
-| `dev/generate_preview.py` | Script that builds `10x-factorio-engineer/assets/preview.html` for local dev |
+| `dev/generate_preview.py` | Script that builds `dev/preview.html` for local dev |
+| `package.json` | Node dev toolchain — `npm run build` minifies `dev/dashboard.jsx` → `assets/dashboard.min.js` |
 
 Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missing.
 
@@ -368,7 +371,7 @@ Factorio gameplay assistant. It defines three responsibilities:
 | 3 — Factory State Model | Full JSON schema Claude keeps in context |
 | 4 — Answering Planning Questions | 5-step protocol: identify → run CLI → parse → format → update state |
 | 5 — Dashboard Artifact | When/how to launch, FACTORY_STATE injection protocol |
-| 6 — React Dashboard | Full inline JSX for copy-paste into a React artifact |
+| 6 — React Dashboard | Minified JS reference (`assets/dashboard.min.js`) for copy-paste into a React artifact |
 | 7 — Session Start | Greeting + dataset/assembler/module onboarding |
 | 8 — Common Workflows | Scripts for "how many machines", "I just built N", "plan science", etc. |
 | 9 — Item ID Quick Reference | Player shorthand → internal item ID map |
@@ -427,11 +430,12 @@ player message:
 }
 ```
 
-### 10x-factorio-engineer/assets/dashboard.jsx
+### dev/dashboard.jsx → assets/dashboard.min.js
 
 A self-contained React component (no external dependencies, dark theme) that
 reads from an injected `FACTORY_STATE` const. Rendered by Claude as a
-`application/vnd.ant.react` artifact.
+`application/vnd.ant.react` artifact. Source lives in `dev/dashboard.jsx`;
+run `npm run build` to rebuild the minified `assets/dashboard.min.js`.
 
 **Header:** compact one-line brand label (`10x Factorio Engineer`) left +
 config pills right (`[Space Age]` when applicable, `[Assembler 3]`,
@@ -462,7 +466,7 @@ CDN) that opens directly in any browser without a dev server.
 
 ```js
 const FACTORY_STATE = { /* state JSON */ };
-// … full dashboard.jsx follows …
+// … full dashboard.min.js follows …
 ```
 
 Every dashboard update is a full paste (not a diff) — the artifact is always

@@ -16,14 +16,16 @@ A Factorio factory co-pilot built on two components:
   SKILL.md                  # Skill definition document
   assets/
     cli.py                  # Calculator — entire implementation
-    dashboard.jsx           # React factory dashboard component
+    dashboard.min.js        # Minified dashboard component (built by npm run build)
     vanilla-2.0.55.json     # KirkMcDonald dataset — base game
     space-age-2.0.55.json   # KirkMcDonald dataset — Space Age DLC
   references/
     strategy-topics.md      # On-demand strategy reference
 dev/
+  dashboard.jsx             # React factory dashboard component (source)
   test_cli.py               # unittest suite (59 tests, stdlib only)
   generate_preview.py       # Builds dev/preview.html for local dev
+package.json                # npm run build → minifies dashboard.jsx → assets/dashboard.min.js
 ```
 
 Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run.
@@ -238,15 +240,16 @@ A system-prompt document defining Claude's behaviour as a planning assistant:
 - **Launch/update a React artifact** (the dashboard) when the player wants
   a visual overview.
 
-### assets/dashboard.jsx
+### assets/dashboard.min.js
 
-A self-contained React component (dark theme, no external dependencies).
+A self-contained React component (dark theme, no external dependencies),
+minified from `dev/dashboard.jsx` via `npm run build`.
 Claude renders it as a `application/vnd.ant.react` artifact by prepending
 a `FACTORY_STATE` constant:
 
 ```js
 const FACTORY_STATE = { /* current factory state JSON */ };
-// … full dashboard.jsx follows …
+// … full dashboard.min.js follows …
 ```
 
 **Header:** compact brand label (`10x Factorio Engineer`) + config pills

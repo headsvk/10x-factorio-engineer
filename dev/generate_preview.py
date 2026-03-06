@@ -14,9 +14,9 @@ import re
 import webbrowser
 
 REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKILL_DIR  = os.path.join(REPO_ROOT, "10x-factorio-engineer")
-JSX_PATH   = os.path.join(SKILL_DIR, "assets", "dashboard.jsx")
-OUT_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preview.html")
+DEV_DIR    = os.path.dirname(os.path.abspath(__file__))
+JSX_PATH   = os.path.join(DEV_DIR, "dashboard.jsx")
+OUT_PATH   = os.path.join(DEV_DIR, "preview.html")
 
 # ---------------------------------------------------------------------------
 # Sample FACTORY_STATE — generated from cli.py runs:

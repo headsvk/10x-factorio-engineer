@@ -221,7 +221,7 @@ these IDs to friendly names automatically.
 
 When the player wants to see their factory state visually — or after a
 significant update — launch or update a React artifact using the dashboard
-component defined in `assets/dashboard.jsx`.
+component defined in `assets/dashboard.min.js`.
 
 ### When to launch the artifact
 
@@ -247,7 +247,7 @@ after the `FACTORY_STATE` constant.
 ### Artifact update protocol
 
 - **First render**: paste the full artifact — `FACTORY_STATE` constant followed
-  by the complete contents of `assets/dashboard.jsx`.
+  by the complete contents of `assets/dashboard.min.js`.
 - **Subsequent updates**: replace only the `FACTORY_STATE` block at the top of
   the existing artifact. Leave the rest of the artifact code untouched. This
   keeps updates fast — only the state JSON changes, not the ~600-line component.
@@ -256,14 +256,14 @@ after the `FACTORY_STATE` constant.
 
 ## 6. React Dashboard Component
 
-The dashboard component lives in `assets/dashboard.jsx`. Read that file
+The dashboard component lives in `assets/dashboard.min.js`. Read that file
 and paste it verbatim as a React artifact (type `application/vnd.ant.react`),
 preceded by the `FACTORY_STATE` constant.
 
 ```jsx
-// Prepend this before the dashboard.jsx contents:
+// Prepend this before the dashboard.min.js contents:
 const FACTORY_STATE = { /* current factory state JSON */ };
-// … paste full contents of assets/dashboard.jsx here …
+// … paste full contents of assets/dashboard.min.js here …
 ```
 
 The component accepts `FACTORY_STATE` from the outer scope (no props). On first
@@ -274,7 +274,7 @@ To preview the dashboard locally without Claude, run:
 ```bash
 python dev/generate_preview.py
 ```
-This writes `assets/preview.html` — a self-contained file that opens
+This writes `dev/preview.html` — a self-contained file that opens
 directly in any browser.
 
 
@@ -335,7 +335,7 @@ format: lead with machine count for X, then key dependencies, then raw resources
 ```
 First time:
 1. Assemble FACTORY_STATE from current factory state
-2. Create a React artifact: FACTORY_STATE constant + full assets/dashboard.jsx
+2. Create a React artifact: FACTORY_STATE constant + full assets/dashboard.min.js
 
 Subsequent updates:
 1. Assemble updated FACTORY_STATE
