@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """
-Generate dev/preview.html from 10x-factorio-engineer/assets/dashboard.jsx.
+Generate a local preview HTML from the dashboard source.
 
-Produces a single self-contained HTML file that opens directly in a browser
-(no server needed) using Babel Standalone + React from CDN.
+Default: reads dev/dashboard.jsx, transpiles via Babel Standalone in-browser.
+--minified: reads assets/dashboard.min.js, uses it as a plain script (no Babel).
+            Writes dev/preview-min.html. Use this to verify the esbuild output.
 
 Usage:
     python dev/generate_preview.py
+    python dev/generate_preview.py --minified
 """
 
+import argparse
 import os
 import re
 import webbrowser
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--minified", action="store_true",
+                    help="Build preview from assets/dashboard.min.js instead of dashboard.jsx")
+args = parser.parse_args()
+
 REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEV_DIR    = os.path.dirname(os.path.abspath(__file__))
 JSX_PATH   = os.path.join(DEV_DIR, "dashboard.jsx")
-OUT_PATH   = os.path.join(DEV_DIR, "preview.html")
+MIN_PATH   = os.path.join(REPO_ROOT, "10x-factorio-engineer", "assets", "dashboard.min.js")
+OUT_PATH   = os.path.join(DEV_DIR, "preview-min.html" if args.minified else "preview.html")
 
 # ---------------------------------------------------------------------------
 # Sample FACTORY_STATE — generated from cli.py runs:
@@ -142,23 +151,63 @@ const FACTORY_STATE = {
 """.strip()
 
 # ---------------------------------------------------------------------------
-# Read and transform dashboard.jsx
+# Build HTML — two modes
 # ---------------------------------------------------------------------------
 
-with open(JSX_PATH, encoding="utf-8") as f:
-    jsx = f.read()
+if args.minified:
+    with open(MIN_PATH, encoding="utf-8") as f:
+        min_js = f.read()
 
-# 1. Strip the leading JSDoc block  /** ... */
-jsx = re.sub(r"^/\*\*.*?\*/\s*", "", jsx, flags=re.DOTALL)
+    HTML = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Factory Dashboard — Minified Preview</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ background: #111; }}
+  </style>
+  <!-- React + ReactDOM (production builds match the artifact environment) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+</head>
+<body>
+  <div id="root"></div>
 
-# 2. Remove `export default` so the function is just a plain declaration
-jsx = jsx.replace("export default function FactoryDashboard", "function FactoryDashboard")
+  <script>
+    /* ── Factory state ───────────────────────────────────────────────── */
+    {FACTORY_STATE_JS}
 
-# ---------------------------------------------------------------------------
-# Assemble HTML
-# ---------------------------------------------------------------------------
+    /* ── Dashboard component (assets/dashboard.min.js) ──────────────── */
+    {min_js}
 
-HTML = f"""<!DOCTYPE html>
+    /* ── Mount ───────────────────────────────────────────────────────── */
+    ReactDOM.createRoot(document.getElementById("root"))
+      .render(React.createElement(FactoryDashboard));
+  </script>
+</body>
+</html>
+"""
+
+    with open(OUT_PATH, "w", encoding="utf-8") as f:
+        f.write(HTML)
+
+    print(f"Written: {os.path.relpath(OUT_PATH, REPO_ROOT)}")
+    print(f"  Minified source: {os.path.relpath(MIN_PATH, REPO_ROOT)}  ({len(min_js):,} bytes)")
+    print(f"  Output size:     {len(HTML):,} bytes")
+
+else:
+    with open(JSX_PATH, encoding="utf-8") as f:
+        jsx = f.read()
+
+    # 1. Strip the leading JSDoc block  /** ... */
+    jsx = re.sub(r"^/\*\*.*?\*/\s*", "", jsx, flags=re.DOTALL)
+
+    # 2. Remove `export default` so the function is just a plain declaration
+    jsx = jsx.replace("export default function FactoryDashboard", "function FactoryDashboard")
+
+    HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -192,11 +241,11 @@ HTML = f"""<!DOCTYPE html>
 </html>
 """
 
-with open(OUT_PATH, "w", encoding="utf-8") as f:
-    f.write(HTML)
+    with open(OUT_PATH, "w", encoding="utf-8") as f:
+        f.write(HTML)
 
-print(f"Written: {os.path.relpath(OUT_PATH, REPO_ROOT)}")
-print(f"  JSX source:  {os.path.relpath(JSX_PATH, REPO_ROOT)}  ({jsx.count(chr(10))} lines)")
-print(f"  Output size: {len(HTML):,} bytes")
-print()
+    print(f"Written: {os.path.relpath(OUT_PATH, REPO_ROOT)}")
+    print(f"  JSX source:  {os.path.relpath(JSX_PATH, REPO_ROOT)}  ({jsx.count(chr(10))} lines)")
+    print(f"  Output size: {len(HTML):,} bytes")
+
 webbrowser.open(OUT_PATH)

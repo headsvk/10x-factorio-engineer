@@ -30,3 +30,4 @@ package-lock.json
 # Generated preview (rebuilt by generate_preview.py)
 skill/assets/preview.html
 dev/preview.html
+dev/preview-min.html
