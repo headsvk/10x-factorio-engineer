@@ -63,7 +63,7 @@ function scienceGradient(name) {
     "cryogenic-science-pack":       ["#186888", "#28a8c8"],  // Aquilo — ice cyan
     "promethium-science-pack":      ["#4a1070", "#7820b0"],  // Space Platform — void purple
   };
-  return map[name] ?? ["#555", "#888"];
+  return map[name] || ["#555", "#888"];
 }
 
 /**
@@ -143,7 +143,7 @@ function humanizeText(text) {
   if (!text) return text;
   return String(text).replace(
     /\bAM[123]\b|assembling-machine-[123]|[a-z]+(?:-[a-z0-9]+)+/g,
-    token => MACHINE_NAMES[token] ?? label(token),
+    token => MACHINE_NAMES[token] || label(token),
   );
 }
 
@@ -162,7 +162,7 @@ function ScienceBar({ name, actual, target }) {
       }}>
         <span style={{ fontWeight: 600 }}>{label(name)}</span>
         <span style={{ color: statusColor, fontVariantNumeric: "tabular-nums" }}>
-          {actual ?? "?"}&thinsp;/&thinsp;{target}&thinsp;/min &nbsp;({p}%)
+          {actual != null ? actual : "?"}&thinsp;/&thinsp;{target}&thinsp;/min &nbsp;({p}%)
         </span>
       </div>
       <div style={{ background: "#2a2a2a", borderRadius: 4, height: 10, overflow: "hidden" }}>
@@ -179,7 +179,7 @@ function ScienceBar({ name, actual, target }) {
 // ── Machine Table Row ────────────────────────────────────────────────────────
 
 function MachineRow({ step, actualMachines }) {
-  const placed = actualMachines?.[step.machine] ?? null;
+  const placed = (actualMachines && actualMachines[step.machine] != null) ? actualMachines[step.machine] : null;
   const needed = step.machine_count_ceil;
   const statusColor =
     placed === null ? "#666"
@@ -214,11 +214,11 @@ function MachineRow({ step, actualMachines }) {
 function LineCard({ line }) {
   const [open, setOpen] = useState(false);
 
-  const steps  = line.cli_result?.production_steps ?? [];
-  const belts  = line.cli_result?.belts_for_output ?? {};
-  const raw    = line.cli_result?.raw_resources    ?? {};
-  const miners = line.cli_result?.miners_needed    ?? {};
-  const p      = pct(line.effective_rate ?? line.target_rate ?? 0, line.target_rate ?? 0);
+  const steps  = (line.cli_result && line.cli_result.production_steps) || [];
+  const belts  = (line.cli_result && line.cli_result.belts_for_output) || {};
+  const raw    = (line.cli_result && line.cli_result.raw_resources)    || {};
+  const miners = (line.cli_result && line.cli_result.miners_needed)    || {};
+  const p      = pct(line.effective_rate != null ? line.effective_rate : (line.target_rate || 0), line.target_rate || 0);
 
   const headerBg =
     p >= 100 ? "#182818" :
@@ -319,7 +319,7 @@ function LineCard({ line }) {
                   <div key={color} style={{
                     background: "#111", borderRadius: 4, padding: "3px 10px", fontSize: 12,
                   }}>
-                    <span style={{ color: beltColors[color] ?? "#aaa", fontWeight: 700 }}>{color}</span>
+                    <span style={{ color: beltColors[color] || "#aaa", fontWeight: 700 }}>{color}</span>
                     {": "}
                     <span style={{ color: "#ccc" }}>{info.belts_needed?.toFixed(3)} lanes</span>
                   </div>
@@ -461,7 +461,7 @@ export default function FactoryDashboard() {
     const rates = {};
     for (const line of lines) {
       if (line.item in targets) {
-        rates[line.item] = line.effective_rate ?? line.target_rate ?? 0;
+        rates[line.item] = line.effective_rate != null ? line.effective_rate : (line.target_rate || 0);
       }
     }
     return rates;
@@ -566,7 +566,7 @@ export default function FactoryDashboard() {
             </div>
           ) : (
             lines.map(line => {
-              const p = pct(line.effective_rate ?? line.target_rate ?? 0, line.target_rate ?? 0);
+              const p = pct(line.effective_rate != null ? line.effective_rate : (line.target_rate || 0), line.target_rate || 0);
               const barColor = p >= 100 ? "#4eca4e" : p >= 75 ? "#caa040" : "#ca4040";
               return (
                 <div key={line.item} style={{
