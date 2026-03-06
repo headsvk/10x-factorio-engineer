@@ -246,9 +246,11 @@ after the `FACTORY_STATE` constant.
 
 ### Artifact update protocol
 
-Every time you update the artifact, paste the full component (not a diff) with
-the updated `FACTORY_STATE`. This ensures the artifact is always self-contained
-and runnable.
+- **First render**: paste the full artifact — `FACTORY_STATE` constant followed
+  by the complete contents of `assets/dashboard.jsx`.
+- **Subsequent updates**: replace only the `FACTORY_STATE` block at the top of
+  the existing artifact. Leave the rest of the artifact code untouched. This
+  keeps updates fast — only the state JSON changes, not the ~600-line component.
 
 ---
 
@@ -264,8 +266,9 @@ const FACTORY_STATE = { /* current factory state JSON */ };
 // … paste full contents of assets/dashboard.jsx here …
 ```
 
-The component accepts `FACTORY_STATE` from the outer scope (no props). Every
-artifact update is a full paste — never a diff.
+The component accepts `FACTORY_STATE` from the outer scope (no props). On first
+render paste the full file; on subsequent updates replace only the
+`FACTORY_STATE` block — the component code stays untouched.
 
 To preview the dashboard locally without Claude, run:
 ```bash
@@ -330,9 +333,13 @@ format: lead with machine count for X, then key dependencies, then raw resources
 ### "Show dashboard" / "Update factory view"
 
 ```
+First time:
 1. Assemble FACTORY_STATE from current factory state
-2. Paste the full dashboard JSX (Section 6) as a React artifact,
-   preceded by: const FACTORY_STATE = <current state JSON>;
+2. Create a React artifact: FACTORY_STATE constant + full assets/dashboard.jsx
+
+Subsequent updates:
+1. Assemble updated FACTORY_STATE
+2. Edit the existing artifact — replace only the FACTORY_STATE block at the top
 ```
 
 ---
