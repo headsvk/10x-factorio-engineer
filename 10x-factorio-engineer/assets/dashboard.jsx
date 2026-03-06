@@ -120,6 +120,10 @@ const MACHINE_NAMES = {
   "big-mining-drill":        "Big Mining Drill",
   "pumpjack":                "Pumpjack",
   "offshore-pump":           "Offshore Pump",
+  // Shorthands Claude may emit in free-text strings
+  "AM1": "Assembler 1",
+  "AM2": "Assembler 2",
+  "AM3": "Assembler 3",
   // Space Age
   "foundry":                 "Foundry",
   "electromagnetic-plant":   "Electromagnetic Plant",
@@ -138,7 +142,7 @@ const MACHINE_NAMES = {
 function humanizeText(text) {
   if (!text) return text;
   return String(text).replace(
-    /assembling-machine-[123]|[a-z]+(?:-[a-z0-9]+)+/g,
+    /\bAM[123]\b|assembling-machine-[123]|[a-z]+(?:-[a-z0-9]+)+/g,
     token => MACHINE_NAMES[token] ?? label(token),
   );
 }

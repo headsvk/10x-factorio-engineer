@@ -181,6 +181,11 @@ Always re-derive `bottlenecks` after any state change:
 - A raw resource is a bottleneck if the player hasn't confirmed miners/pumps
   for it yet.
 
+**Machine names in `bottlenecks` and `next_steps` strings:** always use the
+full kebab-case machine ID (e.g. `assembling-machine-3`, `electric-furnace`),
+never shorthand like `AM3`. The dashboard's `humanizeText()` function converts
+these IDs to friendly names automatically.
+
 ---
 
 ## 4. Answering Planning Questions
