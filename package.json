@@ -2,7 +2,7 @@
   "name": "10x-factorio-engineer-dev",
   "private": true,
   "scripts": {
-    "build": "esbuild dev/dashboard.jsx --bundle=false --minify --outfile=10x-factorio-engineer/assets/dashboard.min.js"
+    "build": "esbuild dev/dashboard.jsx --bundle=false --minify --target=es2020 --outfile=10x-factorio-engineer/assets/dashboard.min.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"
