@@ -11,6 +11,7 @@ Usage:
 
 import os
 import re
+import webbrowser
 
 REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL_DIR  = os.path.join(REPO_ROOT, "10x-factorio-engineer")
@@ -198,5 +199,4 @@ print(f"Written: {os.path.relpath(OUT_PATH, REPO_ROOT)}")
 print(f"  JSX source:  {os.path.relpath(JSX_PATH, REPO_ROOT)}  ({jsx.count(chr(10))} lines)")
 print(f"  Output size: {len(HTML):,} bytes")
 print()
-print("Open in browser:")
-print(f"  {OUT_PATH}")
+webbrowser.open(OUT_PATH)
