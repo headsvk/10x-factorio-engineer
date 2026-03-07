@@ -16,6 +16,7 @@ A Factorio factory co-pilot built on two components:
   SKILL.md                  # Skill definition document
   assets/
     cli.py                  # Calculator — entire implementation
+    dashboard.html          # Built artifact — paste into claude.ai as application/vnd.ant.html
     vanilla-2.0.55.json     # KirkMcDonald dataset — base game
     space-age-2.0.55.json   # KirkMcDonald dataset — Space Age DLC
   references/
@@ -27,11 +28,6 @@ dev/
   test_cli.py               # unittest suite (59 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite (window.claude, window.storage, CDN loading, etc.)
   artifact-api.md           # Field research doc for claude.ai artifact APIs
-  assets/
-    cli.py
-    dashboard.html            # Built artifact — paste into claude.ai as application/vnd.ant.html
-    vanilla-2.0.55.json
-    space-age-2.0.55.json
 ```
 
 Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run.
