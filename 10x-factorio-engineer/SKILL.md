@@ -42,11 +42,20 @@ python assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 | `--assembler 1\|2\|3` | `3` | Assembling machine tier |
 | `--furnace stone\|steel\|electric` | `electric` | Furnace type |
 | `--miner electric\|big` | `electric` | `big` = Space Age big mining drill |
-| `--prod-module 0\|1\|2\|3` | `0` | Fill all eligible slots with prod modules |
-| `--speed <float>` | `0.0` | Speed bonus e.g. `0.5` = +50 % |
 | `--dataset vanilla\|space-age` | `vanilla` | |
+| `--machine-quality QUALITY` | `normal` | Machine quality: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
+| `--beacon-quality QUALITY` | `normal` | Beacon housing quality (same enum) |
+| `--belt TIER` | _(none)_ | Solid output belt tier: `yellow`/`red`/`blue`/`turbo` |
+| `--pump QUALITY` | _(none)_ | Fluid output pump quality (same enum) |
+| `--modules MACHINE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Module config per machine; repeatable |
+| `--beacon MACHINE=COUNT:TIER:QUALITY` | _(none)_ | Beacon config (speed modules) per machine; repeatable |
 | `--recipe ITEM=RECIPE` | _(none)_ | Override recipe; repeatable |
 | `--machine CATEGORY=MACHINE` | _(none)_ | Override machine for a recipe category; repeatable |
+| `--recipe-machine RECIPE=MACHINE` | _(none)_ | Override machine for a specific recipe; repeatable |
+| `--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Per-recipe module override; repeatable |
+| `--recipe-beacon RECIPE=COUNT:TIER:QUALITY` | _(none)_ | Per-recipe beacon override; repeatable |
+| `--recipe-belt RECIPE=TIER` | _(none)_ | Per-recipe belt tier override; repeatable |
+| `--recipe-pump RECIPE=QUALITY` | _(none)_ | Per-recipe pump quality override; repeatable |
 
 ### Examples
 
@@ -54,8 +63,11 @@ python assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 # How many machines for 45 science packs/min?
 python assets/cli.py --item automation-science-pack --rate 45
 
-# Processing units with prod-3 modules
-python assets/cli.py --item processing-unit --rate 10 --prod-module 3 --furnace electric
+# Processing units with 4× prod-3 modules in assembler-3
+python assets/cli.py --item processing-unit --rate 10 --modules assembling-machine-3=4:prod:3:normal --furnace electric
+
+# Assembler-3 with 8× legendary tier-3 beacons
+python assets/cli.py --item electronic-circuit --rate 60 --beacon assembling-machine-3=8:3:legendary
 
 # Space Age holmium plates
 python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
@@ -70,10 +82,13 @@ The JSON stdout has these top-level keys:
 
 | Key | What it tells you |
 |-----|------------------|
-| `production_steps` | Every recipe in the chain — machine type, exact count, ceil count, rate/min |
+| `production_steps` | Every recipe in the chain — machine type, exact count, ceil count, rate/min, `beacon_speed_bonus` |
 | `raw_resources` | Ore / crude-oil / water rates you need from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields) |
-| `belts_for_output` | Yellow / red / blue (/ turbo) belt lanes needed for the target output |
+| `belt` + `belts_needed` | Present when `--belt` is set: tier name + lanes for the solid output |
+| `pump` + `pumps_needed` | Present when `--pump` is set: quality name + pumps for fluid output |
+| `module_configs` | Present when `--modules` was passed: module specs per machine |
+| `beacon_configs` | Present when `--beacon` was passed: beacon spec per machine |
 
 **Critical rule**: Never report a machine count or resource rate to the player
 without first running the CLI and citing the exact value from its JSON output.
@@ -110,8 +125,16 @@ working context and update it after every player message.
   "dataset": "vanilla",               // "vanilla" | "space-age"
   "assembler": 3,                     // player's current assembler tier
   "furnace": "electric",              // furnace type
-  "prod_module": 0,                   // prod module tier (0 = none)
-  "speed_bonus": 0.0,                 // speed bonus decimal
+  "machine_quality": "normal",        // "normal"|"uncommon"|"rare"|"epic"|"legendary"
+  "beacon_quality": "normal",         // beacon housing quality (same enum)
+
+  // Module/beacon configs — each entry becomes --modules/--beacon MACHINE=... on every CLI call
+  "module_configs": {
+    // e.g. "assembling-machine-3": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]
+  },
+  "beacon_configs": {
+    // e.g. "assembling-machine-3": {"count": 8, "tier": 3, "quality": "normal"}
+  },
 
   // Persisted CLI overrides — applied as flags on every cli.py invocation
   "recipe_overrides": {
@@ -175,6 +198,8 @@ When a player says something like:
 - *"I use the foundry for iron"* → add `"metallurgy": "foundry"` to
   `machine_overrides`, re-run CLI for affected lines.
 - *"I use blue belts"* → set `preferred_belt: "blue"`.
+- *"I use 4 prod-3 modules in all assemblers"* → set `module_configs["assembling-machine-3"] = [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines.
+- *"I have 8 legendary beacons on each assembler-3"* → set `beacon_configs["assembling-machine-3"] = {"count": 8, "tier": 3, "quality": "normal"}`, re-run CLI for all affected lines.
 
 Always re-derive `bottlenecks` after any state change:
 - A line is a bottleneck if `effective_rate < target_rate * 0.95`.
@@ -194,8 +219,10 @@ these IDs to friendly names automatically.
 
 1. Identify the item(s) and rate(s) the player is asking about.
 2. Run `python assets/cli.py` with the appropriate flags from factory state:
-   `--assembler`, `--furnace`, `--prod-module`, `--speed`, `--dataset`, plus
-   `--recipe ITEM=RECIPE` for every entry in `recipe_overrides` and
+   `--assembler`, `--furnace`, `--dataset`, `--machine-quality`, `--beacon-quality`,
+   `--modules MACHINE=...` for every entry in `module_configs`,
+   `--beacon MACHINE=...` for every entry in `beacon_configs`,
+   `--recipe ITEM=RECIPE` for every entry in `recipe_overrides`, and
    `--machine CATEGORY=MACHINE` for every entry in `machine_overrides`.
 3. Parse the JSON output.
 4. Format a human-readable answer:
@@ -257,30 +284,7 @@ paste the JSON. Use it as the initial factory state for the session.
 
 ---
 
-## 6. Dashboard Development
-
-The dashboard is a single vanilla HTML file — no React, no build toolchain, no
-external dependencies. The source lives in `dev/dashboard.html`; the built
-(minified) artifact is `10x-factorio-engineer/assets/dashboard.html`.
-
-To rebuild after source changes:
-```bash
-python dev/build_dashboard.py
-```
-
-To preview locally:
-```bash
-python dev/build_dashboard.py --open
-```
-
-The artifact uses `window.storage` (requires publishing) with `localStorage` fallback.
-The chat panel calls `window.claude.complete()` — available without publishing as long
-as the user is signed into Claude.ai.
-
-
----
-
-## 7. Session Start Protocol
+## 6. Session Start Protocol
 
 When starting a new session:
 
@@ -293,12 +297,12 @@ When starting a new session:
 
 ---
 
-## 8. Common Workflows
+## 7. Common Workflows
 
 ### "How many machines do I need for X at Y/min?"
 
 ```
-run: python assets/cli.py --item X --rate Y [--assembler N] [--furnace T] [--prod-module P]
+run: python assets/cli.py --item X --rate Y [--assembler N] [--furnace T] [--modules MACHINE=...] [--beacon MACHINE=...]
 format: lead with machine count for X, then key dependencies, then raw resources
 ```
 
@@ -339,7 +343,7 @@ format: lead with machine count for X, then key dependencies, then raw resources
 
 ---
 
-## 9. Item ID Quick-Reference
+## 8. Item ID Quick-Reference
 
 The CLI uses Factorio's internal item IDs. Map common player shorthand:
 
@@ -367,7 +371,19 @@ The CLI uses Factorio's internal item IDs. Map common player shorthand:
 
 ---
 
-## 11. Strategy Guide Reference
+## 9. Error Handling
+
+- **Unknown item**: If the CLI exits non-zero or returns no output, tell the
+  player the item ID was not found and ask them to verify the spelling.
+- **No recipe**: If `production_steps` is empty, the item is a raw resource
+  (ore, crude-oil) — report it directly as a mining problem.
+- **Oil products requested directly**: Remind the player that petroleum-gas,
+  light-oil, and heavy-oil are intermediates. Ask which end-product they're
+  ultimately after and run the CLI for that instead.
+
+---
+
+## 10. Strategy Guide Reference
 
 When the player asks about anything beyond production math — factory layout
 strategies, train networks, megabase planning, Space Age planet strategies,
@@ -398,18 +414,6 @@ only read it when a strategy question actually comes up.
 **How to use it:** Read the section(s) relevant to the question, then synthesize
 a focused answer. The file also tells you when to fetch external URLs (wiki
 pages, forum threads) for more detail or current blueprints.
-
----
-
-## 10. Error Handling
-
-- **Unknown item**: If the CLI exits non-zero or returns no output, tell the
-  player the item ID was not found and ask them to verify the spelling.
-- **No recipe**: If `production_steps` is empty, the item is a raw resource
-  (ore, crude-oil) — report it directly as a mining problem.
-- **Oil products requested directly**: Remind the player that petroleum-gas,
-  light-oil, and heavy-oil are intermediates. Ask which end-product they're
-  ultimately after and run the CLI for that instead.
 
 ---
 

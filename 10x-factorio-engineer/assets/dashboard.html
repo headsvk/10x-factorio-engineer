@@ -231,7 +231,9 @@ return JSON.parse(value); // backward compat: plain JSON
 const STORAGE_KEY = 'factorio_engineer_state';
 const DEFAULT_STATE = {
 save_name: 'My Factory', dataset: 'vanilla', assembler: 3,
-furnace: 'electric', prod_module: 0, speed_bonus: 0.0,
+furnace: 'electric', machine_quality: 'normal', beacon_quality: 'normal',
+module_configs: {}, beacon_configs: {}, recipe_overrides: {}, machine_overrides: {},
+preferred_belt: 'blue',
 targets: {}, lines: [], bottlenecks: [], next_steps: [], chat_log: [],
 };
 const SCIENCE_ORDER = [
@@ -336,7 +338,7 @@ const [cls, txt] = map[storageMode] || map.none;
 return `<span class="storage-pill ${cls}">${txt}</span>`;
 }
 function renderHeader() {
-const { save_name, dataset, assembler, furnace, prod_module } = STATE;
+const { save_name, dataset, assembler, furnace, machine_quality, module_configs } = STATE;
 return `
 <div class="header">
 <div class="header-left">
@@ -351,7 +353,8 @@ ${renderStoragePill()}
 ${dataset === 'space-age' ? '<span class="badge purple">Space Age</span>' : ''}
 <span class="badge">AM${assembler}</span>
 <span class="badge">${label(furnace)} Furnace</span>
-${prod_module > 0 ? `<span class="badge">Prod ${prod_module}</span>` : ''}
+${(machine_quality && machine_quality !== 'normal') ? `<span class="badge">${label(machine_quality)} Machines</span>` : ''}
+${Object.keys(module_configs ?? {}).length ? '<span class="badge">Modules</span>' : ''}
 </div>
 <div class="btn-group">
 <button class="btn" id="btn-export">↓ Export</button>
@@ -456,7 +459,8 @@ const sc  = statusClass(p);
 const col = statusColor(p);
 const isOpen = expandedCards.has(line.item);
 const steps  = line.cli_result?.production_steps ?? [];
-const belts  = line.cli_result?.belts_for_output ?? {};
+const belt       = line.cli_result?.belt;
+const beltsNeeded = line.cli_result?.belts_needed;
 const raw    = line.cli_result?.raw_resources ?? {};
 const miners = line.cli_result?.miners_needed ?? {};
 let body = '';
@@ -500,12 +504,10 @@ const countCl = isYield ? '#fbbf24' : '#e4e4e7';
 return `<span class="chip">${esc(r)}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:#52525b">${esc(machineLabel(info.machine))}</span></span>`;
 }).join('')}</div>
 </div>` : '';
-const beltSection = Object.keys(belts).length ? `
+const beltSection = belt != null ? `
 <div class="card-section">
 <div class="section-label">Output Belts</div>
-<div class="chips">${Object.entries(belts).map(([color, info]) =>
-`<span class="chip"><span style="color:${BELT_COLORS[color]||'#aaa'};font-weight:700">${color}</span>: <span style="color:#71717a">${info.belts_needed?.toFixed(3)} lanes</span></span>`
-).join('')}</div>
+<div class="chips"><span class="chip"><span style="color:${BELT_COLORS[belt]||'#aaa'};font-weight:700">${belt}</span>: <span style="color:#71717a">${beltsNeeded?.toFixed(3)} lanes</span></span></div>
 </div>` : '';
 const noteSection = line.player_notes ? `
 <div style="font-size:12px;color:#52525b;font-style:italic;border-top:1px solid #27272a;padding-top:10px;margin-top:-4px">

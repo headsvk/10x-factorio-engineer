@@ -37,8 +37,9 @@ chat panel is powered by `window.claude.complete()`. A strategy reference
 | Trigger | Required follow-up action |
 |---------|--------------------------|
 | `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. |
-| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `10x-factorio-engineer/SKILL.md` Section 2. |
-| New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `10x-factorio-engineer/SKILL.md` Section 2. |
+| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table in this file **and** `10x-factorio-engineer/SKILL.md` §2 (output keys table). Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. |
+| New CLI flag added | Add it to the **CLI Flags** table in this file **and** the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
+| Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample-state.json` to match the new schema. 4. Run `python dev/gen_sample_state.py` to regenerate `dev/sample-state.b64`. 5. Run `python dev/build_dashboard.py` to rebuild the artifact. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new CLI flags, new features, changed behaviour, etc.). |
 
@@ -59,6 +60,8 @@ The goal is that `claude.md` always accurately describes the codebase.
 | `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
+| `dev/sample-state.json` | Source JSON for the sample state — edit this, then run `python dev/gen_sample_state.py` to rebuild `sample-state.b64` |
+| `dev/gen_sample_state.py` | Encodes `dev/sample-state.json` → `dev/sample-state.b64` (minified JSON → UTF-8 → base64) |
 | `dev/test_cli.py` | `unittest` suite (106 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
@@ -500,73 +503,9 @@ Factorio gameplay assistant. It defines three responsibilities:
    to answer questions about layouts, trains, megabases, Space Age planets,
    power, combat, and more.
 
-### 10x-factorio-engineer/SKILL.md sections
-
-| Section | Contents |
-|---------|----------|
-| 1 — Role | Co-pilot persona: exact numbers, CLI-first, no mental math |
-| 2 — Calculator | CLI flags, examples, JSON output schema, item ID resolution |
-| 3 — Factory State Model | Full JSON schema Claude keeps in context |
-| 4 — Answering Planning Questions | 5-step protocol: identify → run CLI → parse → format → update state |
-| 5 — Dashboard Artifact | When/how to launch, FACTORY_STATE injection protocol |
-| 6 — React Dashboard | Minified JS reference (`assets/dashboard.min.js`) for copy-paste into a React artifact |
-| 7 — Session Start | Greeting + dataset/assembler/module onboarding |
-| 8 — Common Workflows | Scripts for "how many machines", "I just built N", "plan science", etc. |
-| 9 — Item ID Quick Reference | Player shorthand → internal item ID map |
-| 10 — Error Handling | Unknown items, no-recipe items, direct oil product requests |
-| 11 — Strategy Guide Reference | When/how to load `10x-factorio-engineer/references/strategy-topics.md` for layout, combat, power, and Space Age questions |
-
 ### Factory State JSON Schema
 
-Claude maintains this object in conversation context, updating it after every
-player message:
-
-```jsonc
-{
-  "save_name": "My Factory",
-  "dataset": "vanilla",           // "vanilla" | "space-age"
-  "assembler": 3,                 // 1 | 2 | 3
-  "furnace": "electric",          // "stone" | "steel" | "electric"
-  "prod_module": 0,               // 0–3
-  "speed_bonus": 0.0,
-
-  "recipe_overrides": {           // item-id → recipe-key; --recipe flags on every CLI call
-    "heavy-oil": "coal-liquefaction"
-  },
-  "machine_overrides": {          // recipe-category → machine-key; --machine flags on every CLI call
-    "organic-or-assembling": "assembling-machine-3"
-  },
-  "preferred_belt": "blue",       // "yellow"|"red"|"blue"|"turbo"; lead with this tier in answers
-
-  "targets": {                    // science-pack (or any item) target rates/min
-    "automation-science-pack": 45
-  },
-
-  "lines": [
-    {
-      "item": "electronic-circuit",
-      "target_rate": 60.0,
-      "effective_rate": 52.0,     // derived from actual_machines
-      "cli_result": { /* full cli.py JSON output */ },
-      "actual_machines": {        // placed counts as told by player
-        "assembling-machine-3": 3
-      },
-      "player_notes": "still need furnaces"
-    }
-  ],
-
-  "bottlenecks": [
-    "iron-plate: need 60/min, actual ~45/min — add 1 electric furnace"
-  ],
-  "next_steps": [
-    "Build copper-plate smelting: 3 electric furnaces for 90/min"
-  ],
-  "chat_log": [
-    { "from": "player", "text": "just placed 12 electric furnaces on copper" },
-    { "from": "claude", "text": "Copper-plate line can now produce 120/min …" }
-  ]
-}
-```
+See `10x-factorio-engineer/SKILL.md` §3 for the canonical factory-state schema Claude tracks in every gameplay session.
 
 ### Dashboard (`dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html`)
 

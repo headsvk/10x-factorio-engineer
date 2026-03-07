@@ -24,6 +24,8 @@ A Factorio factory co-pilot built on two components:
 dev/
   dashboard.html            # Dashboard source — single vanilla HTML, no build deps
   build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html
+  gen_sample_state.py       # Encodes sample-state.json → sample-state.b64
+  sample-state.json         # Sample factory state source JSON — edit this, then run gen_sample_state.py
   sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
   test_cli.py               # unittest suite (106 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite (window.claude, window.storage, CDN loading, etc.)
@@ -284,8 +286,13 @@ Both the CLI skill and the dashboard share this JSON schema:
   "dataset": "vanilla",           // "vanilla" | "space-age"
   "assembler": 3,                 // 1 | 2 | 3
   "furnace": "electric",          // "stone" | "steel" | "electric"
-  "prod_module": 0,               // 0–3
-  "speed_bonus": 0.0,
+  "machine_quality": "normal",    // machine housing quality: normal/uncommon/rare/epic/legendary
+  "beacon_quality": "normal",     // beacon housing quality: same enum
+  "module_configs": {},           // machine-key → [{count, type, tier, quality}]; becomes --modules flags
+  "beacon_configs": {},           // machine-key → {count, tier, quality}; becomes --beacon flags
+  "recipe_overrides": {},         // item-id → recipe-key; becomes --recipe flags
+  "machine_overrides": {},        // category → machine-key; becomes --machine flags
+  "preferred_belt": "blue",       // "yellow"|"red"|"blue"|"turbo"
   "targets": { "automation-science-pack": 45 },
   "lines": [
     {
@@ -308,7 +315,7 @@ Both the CLI skill and the dashboard share this JSON schema:
 Defines Claude's behaviour as a planning assistant:
 
 - **Always call `python assets/cli.py`** for production math — never compute chains mentally.
-- **Track the factory conversationally** — parse freeform player updates, maintain `FACTORY_STATE` in context, detect bottlenecks, suggest next steps.
+- **Track the factory conversationally** — parse freeform player updates, maintain `FACTORY_STATE` in context (with `module_configs`, `beacon_configs`, and other overrides applied as CLI flags every run), detect bottlenecks, suggest next steps.
 - **Output `FACTORY_STATE` JSON** at session end for import into the dashboard.
 - **Load `references/strategy-topics.md`** on demand for layout, trains, megabases, Space Age, power, and combat questions.
 
