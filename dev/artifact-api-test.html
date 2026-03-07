@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Artifact API Test Suite</title>
+  <!--
+    Section H CDN test: marked.js loaded from cdnjs.
+    If typeof marked === 'undefined' on load, the CDN tag is blocked by CSP.
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #111; color: #ddd; min-height: 100vh; padding: 20px; }
+    h1 { font-size: 15px; color: #fff; margin-bottom: 2px; }
+    .subtitle { color: #555; font-size: 11px; margin-bottom: 24px; }
+    .section { margin-bottom: 28px; }
+    .section-title { color: #888; border-bottom: 1px solid #2e2e2e; padding-bottom: 4px;
+                     font-size: 13px; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
+    .row { display: flex; gap: 12px; margin: 3px 0; font-size: 13px; }
+    .row-label { color: #555; min-width: 260px; flex-shrink: 0; }
+    .ok   { color: #4ec94e; }
+    .warn { color: #c9a040; }
+    .fail { color: #c94040; }
+    .dim  { color: #888; }
+    pre.output { background: #1a1a1a; border: 1px solid #2e2e2e; padding: 10px; border-radius: 4px;
+                 font-size: 12px; margin: 6px 0; white-space: pre-wrap; word-break: break-all; color: #ccc; }
+    button { background: #1a1a1a; border: 1px solid #2e2e2e; color: #ddd; padding: 5px 14px;
+             border-radius: 4px; cursor: pointer; margin-right: 8px; margin-bottom: 6px;
+             font-size: 13px; font-family: monospace; }
+    button:disabled { color: #555; cursor: default; }
+    input { background: #1a1a1a; border: 1px solid #2e2e2e; color: #ddd; padding: 5px 10px;
+            border-radius: 4px; font-family: monospace; font-size: 12px;
+            margin-right: 8px; margin-bottom: 6px; }
+    .note { color: #555; font-size: 11px; margin-bottom: 8px; }
+    .chat-history { background: #1a1a1a; border: 1px solid #2e2e2e; border-radius: 4px;
+                    padding: 10px; max-height: 180px; overflow-y: auto; margin-bottom: 8px; font-size: 12px; }
+    .chat-user      { color: #7ab0f0; }
+    .chat-assistant { color: #90d090; }
+  </style>
+</head>
+<body>
+  <h1>Claude Artifact API Test Suite</h1>
+  <p class="subtitle">Compare results against dev/artifact-api.md &middot; Run A&ndash;H top to bottom &middot; Reload to increment persistence counter</p>
+
+  <!-- A. Auto-probes -->
+  <div class="section">
+    <div class="section-title">A. Auto-probes (run on load)</div>
+    <div id="auto-probes"></div>
+  </div>
+
+  <!-- B. complete() -->
+  <div class="section">
+    <div class="section-title">B. window.claude.complete() &mdash; expected: returns string</div>
+    <p class="note">Expected return type: string &middot; Baseline latency: ~2100&ndash;2700 ms</p>
+    <input id="complete-prompt" value="Reply with exactly: PING" style="width:340px">
+    <button onclick="runComplete()">Run</button>
+    <div id="complete-result"></div>
+  </div>
+
+  <!-- C. sendConversationMessage -->
+  <div class="section">
+    <div class="section-title">C. window.claude.sendConversationMessage() &mdash; expected: returns undefined, no visible chat message</div>
+    <p class="note">Check: does a message appear in the Claude.ai conversation after clicking Send?</p>
+    <input id="scm-msg" value="Hello from the artifact!" style="width:340px">
+    <button onclick="runSCM()">Send</button>
+    <div id="scm-result"></div>
+  </div>
+
+  <!-- D. openExternal -->
+  <div class="section">
+    <div class="section-title">D. window.claude.openExternal() &mdash; expected: confirmation dialog, then opens URL, returns undefined</div>
+    <input id="ext-url" value="https://example.com" style="width:300px">
+    <button onclick="runOpenExternal()">Open</button>
+    <div id="ext-result"></div>
+  </div>
+
+  <!-- E. downloadFile -->
+  <div class="section">
+    <div class="section-title">E. window.claude.downloadFile() &mdash; expected: file downloads, returns undefined</div>
+    <input id="dl-name" value="test.txt" style="width:140px" placeholder="filename">
+    <input id="dl-content" value="Hello from artifact" style="width:220px" placeholder="content">
+    <button onclick="runDownload()">Download</button>
+    <div id="dl-result"></div>
+  </div>
+
+  <!-- F. window.storage -->
+  <div class="section">
+    <div class="section-title">F. window.storage &mdash; expected: only works when artifact is published</div>
+    <p class="note">
+      Expected set()  &rarr; {"key","value","shared":false,"@type":"...StorageSetResponse"}<br>
+      Expected get()  &rarr; {"key","value","shared":false,"@type":"...StorageGetResponse"}<br>
+      Expected list() &rarr; {"keys":[],"prefix":null,"shared":false,"@type":"...StorageListResponse"}
+    </p>
+    <div>
+      <input id="stor-key" value="__api_test__" style="width:150px" placeholder="key">
+      <input id="stor-val" style="width:220px" placeholder="value">
+    </div>
+    <button onclick="runStorageSet()">set(key, val)</button>
+    <div id="stor-set-result"></div>
+    <button onclick="runStorageGet()">get(key)</button>
+    <div id="stor-get-result"></div>
+    <button onclick="runStorageList()">list()</button>
+    <div id="stor-list-result"></div>
+    <button onclick="runStorageDelete()">delete(key)</button>
+    <div id="stor-del-result"></div>
+  </div>
+
+  <!-- G. multi-turn -->
+  <div class="section">
+    <div class="section-title">G. window.claude.complete() &mdash; multi-turn with manual history encoding</div>
+    <p class="note">Send a few messages. Claude should remember context across turns.</p>
+    <div id="chat-history" class="chat-history"><span style="color:#555">No messages yet.</span></div>
+    <input id="turn-input" value="My name is Alex. Remember it." style="width:360px">
+    <button onclick="runTurn()">Send</button>
+    <button onclick="clearHistory()">Clear</button>
+    <div id="turn-result"></div>
+  </div>
+
+  <!-- H. CDN loading -->
+  <div class="section">
+    <div class="section-title">H. CDN script loading (cdnjs.cloudflare.com)</div>
+    <p class="note">
+      Tests that &lt;script src="https://cdnjs.cloudflare.com/..."&gt; loads without CSP violations.<br>
+      Uses <strong>marked.js</strong> (markdown parser). Load result is checked automatically on page load.
+    </p>
+    <div id="cdn-auto"></div>
+    <div style="margin-top:8px">
+      <input id="cdn-input" value="**bold** and _italic_ and \`code\`" style="width:400px" placeholder="markdown input">
+      <button onclick="runCDN()">Parse with marked.js</button>
+    </div>
+    <div id="cdn-result"></div>
+  </div>
+
+  <script>
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function inspect(v) {
+      if (v === undefined) return '(undefined)';
+      try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+    }
+
+    function probeKeys(obj) {
+      try {
+        const keys = new Set([...Object.keys(obj), ...Object.getOwnPropertyNames(obj)]);
+        return [...keys].map(k => { try { return `${k} (${typeof obj[k]})`; } catch { return `${k} (?)`; } }).join(', ') || '(none)';
+      } catch (e) { return 'cannot enumerate: ' + e.message; }
+    }
+
+    function row(label, value, status) {
+      const cls = status === 'ok' ? 'ok' : status === 'fail' ? 'fail' : status === 'warn' ? 'warn' : 'dim';
+      return `<div class="row"><span class="row-label">${esc(label)}</span><span class="${cls}">${esc(value)}</span></div>`;
+    }
+
+    function setResult(id, html) { document.getElementById(id).innerHTML = html; }
+
+    function pre(data) { return `<pre class="output">${esc(inspect(data))}</pre>`; }
+
+    function appendProbe(html) {
+      document.getElementById('auto-probes').insertAdjacentHTML('beforeend', html);
+    }
+
+    // ── A. Auto-probes ───────────────────────────────────────────────────────
+
+    window.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('stor-val').value = 'value_' + Date.now();
+
+      let html = '';
+
+      // window.claude
+      const claudeType = typeof window.claude;
+      html += row('window.claude — typeof', claudeType, claudeType === 'object' ? 'ok' : 'fail');
+      const claudeKeys = window.claude ? probeKeys(window.claude) : null;
+      html += row('window.claude — methods', claudeKeys ?? '(null)', claudeKeys ? 'ok' : 'fail');
+
+      // window.storage
+      const storType = typeof window.storage;
+      html += row('window.storage — typeof', storType, storType === 'object' ? 'ok' : 'fail');
+      const storKeys = window.storage ? probeKeys(window.storage) : null;
+      html += row('window.storage — methods', storKeys ?? '(null)', storKeys ? 'ok' : 'fail');
+      if (storType === 'object' && window.storage) {
+        const chk = (m) => typeof window.storage[m] === 'function';
+        html += row('  .get exists',               String(chk('get')),     chk('get')     ? 'ok' : 'fail');
+        html += row('  .set exists',               String(chk('set')),     chk('set')     ? 'ok' : 'fail');
+        html += row('  .delete exists',            String(chk('delete')),  chk('delete')  ? 'ok' : 'fail');
+        html += row('  .list exists',              String(chk('list')),    chk('list')    ? 'ok' : 'fail');
+        const noGetItem = typeof window.storage.getItem === 'undefined';
+        html += row('  .getItem absent (old API)', String(noGetItem),      noGetItem      ? 'ok' : 'warn');
+      }
+
+      // localStorage
+      try {
+        const v = 'probe_' + Date.now();
+        localStorage.setItem('__api_test__', v);
+        const r = localStorage.getItem('__api_test__');
+        localStorage.removeItem('__api_test__');
+        html += row('localStorage — read/write', r === v ? 'ok' : 'mismatch', r === v ? 'ok' : 'fail');
+        const count = parseInt(localStorage.getItem('__api_test_count__') || '0') + 1;
+        localStorage.setItem('__api_test_count__', String(count));
+        html += row('localStorage — persist count (reload to increment)',
+          `${count} — ${count > 1 ? 'PERSISTED ✓' : 'first load'}`, count > 1 ? 'ok' : 'warn');
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+        if (keys.length > 0) html += row('localStorage — existing keys', keys.join(', '), 'warn');
+      } catch (e) {
+        html += row('localStorage — read/write', 'error: ' + e.message, 'fail');
+      }
+
+      // sessionStorage
+      try {
+        sessionStorage.setItem('__t__', '1');
+        const r = sessionStorage.getItem('__t__');
+        sessionStorage.removeItem('__t__');
+        html += row('sessionStorage — read/write', r === '1' ? 'ok' : 'mismatch', r === '1' ? 'ok' : 'fail');
+      } catch (e) {
+        html += row('sessionStorage — read/write', 'error: ' + e.message, 'fail');
+      }
+
+      // cookies
+      try {
+        document.cookie = '__api_test__=1; path=/';
+        const ok = document.cookie.includes('__api_test__');
+        html += row('document.cookie — write', ok ? 'ok' : 'blocked', ok ? 'ok' : 'warn');
+      } catch (e) {
+        html += row('document.cookie — write', 'threw: ' + e.message, 'warn');
+      }
+
+      // indexedDB (async — appended after main block)
+      html += row('indexedDB — typeof', typeof indexedDB, typeof indexedDB !== 'undefined' ? 'ok' : 'fail');
+
+      // H: CDN auto-check
+      const markedLoaded = typeof marked !== 'undefined';
+      html += row('marked.js (cdnjs) loaded — typeof marked', typeof marked, markedLoaded ? 'ok' : 'fail');
+      if (markedLoaded) {
+        html += row('marked.js — parse() present', String(typeof marked.parse === 'function'), typeof marked.parse === 'function' ? 'ok' : 'warn');
+      }
+
+      document.getElementById('auto-probes').innerHTML = html;
+
+      // async probes appended after initial render
+      if (navigator.storage?.estimate) {
+        navigator.storage.estimate().then(e => {
+          appendProbe(row('navigator.storage — quota', e.quota ? (e.quota/1024/1024).toFixed(0)+' MB' : 'unknown', 'ok'));
+          appendProbe(row('navigator.storage — usage', e.usage ? (e.usage/1024).toFixed(1)+' KB' : '0 KB', 'ok'));
+        }).catch(e => appendProbe(row('navigator.storage — error', e.message, 'fail')));
+      } else {
+        appendProbe(row('navigator.storage', 'not available', 'fail'));
+      }
+
+      if (typeof indexedDB !== 'undefined') {
+        try {
+          const req = indexedDB.open('__api_test_db__', 1);
+          req.onsuccess = () => { req.result.close(); indexedDB.deleteDatabase('__api_test_db__'); appendProbe(row('indexedDB — open()', 'ok', 'ok')); };
+          req.onerror  = e => appendProbe(row('indexedDB — open()', 'error: ' + e.target.error, 'fail'));
+        } catch (e) {
+          appendProbe(row('indexedDB — open()', 'threw: ' + e.message, 'fail'));
+        }
+      }
+    });
+
+    // ── B. complete() ────────────────────────────────────────────────────────
+
+    async function runComplete() {
+      setResult('complete-result', row('result', 'calling...', 'warn'));
+      try {
+        const t0 = Date.now();
+        const r = await window.claude.complete(document.getElementById('complete-prompt').value);
+        const ms = Date.now() - t0;
+        setResult('complete-result', row('result', `${ms}ms — typeof: ${typeof r}`, typeof r === 'string' ? 'ok' : 'warn') + pre(r));
+      } catch (e) { setResult('complete-result', row('result', e.message, 'fail')); }
+    }
+
+    // ── C. sendConversationMessage ───────────────────────────────────────────
+
+    async function runSCM() {
+      setResult('scm-result', row('result', 'calling...', 'warn'));
+      try {
+        const r = await window.claude.sendConversationMessage(document.getElementById('scm-msg').value);
+        setResult('scm-result', row('result', `returned — typeof: ${typeof r}`, 'ok') + (r !== undefined ? pre(r) : ''));
+      } catch (e) { setResult('scm-result', row('result', e.message, 'fail')); }
+    }
+
+    // ── D. openExternal ──────────────────────────────────────────────────────
+
+    async function runOpenExternal() {
+      setResult('ext-result', row('result', 'calling...', 'warn'));
+      try {
+        const r = await window.claude.openExternal(document.getElementById('ext-url').value);
+        setResult('ext-result', row('result', `returned — typeof: ${typeof r}`, 'ok') + (r !== undefined ? pre(r) : ''));
+      } catch (e) { setResult('ext-result', row('result', e.message, 'fail')); }
+    }
+
+    // ── E. downloadFile ──────────────────────────────────────────────────────
+
+    async function runDownload() {
+      setResult('dl-result', row('result', 'calling...', 'warn'));
+      try {
+        const r = await window.claude.downloadFile(
+          document.getElementById('dl-name').value,
+          document.getElementById('dl-content').value
+        );
+        setResult('dl-result', row('result', `returned — typeof: ${typeof r}`, 'ok') + (r !== undefined ? pre(r) : ''));
+      } catch (e) { setResult('dl-result', row('result', e.message, 'fail')); }
+    }
+
+    // ── F. window.storage ────────────────────────────────────────────────────
+
+    async function runStorageSet() {
+      setResult('stor-set-result', row('set result', 'calling...', 'warn'));
+      try {
+        const r = await window.storage.set(
+          document.getElementById('stor-key').value,
+          document.getElementById('stor-val').value
+        );
+        const ok = 'value' in (r || {});
+        setResult('stor-set-result', row('set result', ok ? 'has .value ✓' : 'missing .value — shape changed?', ok ? 'ok' : 'warn') + pre(r));
+      } catch (e) { setResult('stor-set-result', row('set result', e.message, 'fail')); }
+    }
+
+    async function runStorageGet() {
+      setResult('stor-get-result', row('get result', 'calling...', 'warn'));
+      try {
+        const expected = document.getElementById('stor-val').value;
+        const r = await window.storage.get(document.getElementById('stor-key').value);
+        const hasValue = 'value' in (r || {});
+        const match = r?.value === expected;
+        setResult('stor-get-result',
+          row('get result', match ? 'round-trip PASS ✓' : hasValue ? `got: ${r?.value}` : 'missing .value',
+              match ? 'ok' : hasValue ? 'warn' : 'fail') + pre(r));
+      } catch (e) { setResult('stor-get-result', row('get result', e.message, 'fail')); }
+    }
+
+    async function runStorageList() {
+      setResult('stor-list-result', row('list result', 'calling...', 'warn'));
+      try {
+        const r = await window.storage.list();
+        const ok = Array.isArray(r?.keys);
+        setResult('stor-list-result',
+          row('list result', ok ? `${r.keys.length} key(s) — .keys is array ✓` : 'missing .keys — shape changed?', ok ? 'ok' : 'warn') + pre(r));
+      } catch (e) { setResult('stor-list-result', row('list result', e.message, 'fail')); }
+    }
+
+    async function runStorageDelete() {
+      setResult('stor-del-result', row('delete result', 'calling...', 'warn'));
+      try {
+        const r = await window.storage.delete(document.getElementById('stor-key').value);
+        setResult('stor-del-result', row('delete result', `returned — typeof: ${typeof r}`, 'ok') + (r !== undefined ? pre(r) : ''));
+      } catch (e) { setResult('stor-del-result', row('delete result', e.message, 'fail')); }
+    }
+
+    // ── G. multi-turn ────────────────────────────────────────────────────────
+
+    let history = [];
+
+    async function runTurn() {
+      const input = document.getElementById('turn-input').value;
+      history.push({ role: 'user', content: input });
+      setResult('turn-result', row('result', 'calling...', 'warn'));
+      try {
+        const prompt = `Conversation history:\n${history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}\nReply to the last user message only. Be brief.`;
+        const t0 = Date.now();
+        const r = await window.claude.complete(prompt);
+        const ms = Date.now() - t0;
+        history.push({ role: 'assistant', content: r });
+        renderHistory();
+        setResult('turn-result', row('result', `${ms}ms — ${history.length} turns`, 'ok'));
+      } catch (e) {
+        history.pop();
+        setResult('turn-result', row('result', e.message, 'fail'));
+      }
+    }
+
+    function clearHistory() { history = []; renderHistory(); setResult('turn-result', ''); }
+
+    function renderHistory() {
+      const el = document.getElementById('chat-history');
+      if (!history.length) { el.innerHTML = '<span style="color:#555">No messages yet.</span>'; return; }
+      el.innerHTML = history.map(m =>
+        `<div style="margin-bottom:5px"><span class="${m.role === 'user' ? 'chat-user' : 'chat-assistant'}" style="margin-right:8px">${m.role.toUpperCase()}:</span><span>${esc(m.content)}</span></div>`
+      ).join('');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // ── H. CDN test ──────────────────────────────────────────────────────────
+
+    function runCDN() {
+      if (typeof marked === 'undefined') {
+        setResult('cdn-result', row('marked.parse()', 'marked not loaded — CDN blocked by CSP', 'fail'));
+        return;
+      }
+      try {
+        const input = document.getElementById('cdn-input').value;
+        const output = marked.parse(input);
+        setResult('cdn-result',
+          row('marked.parse() return type', typeof output, typeof output === 'string' ? 'ok' : 'warn') +
+          `<pre class="output">${esc(output)}</pre>`);
+      } catch (e) { setResult('cdn-result', row('marked.parse()', e.message, 'fail')); }
+    }
+  </script>
+</body>
+</html>

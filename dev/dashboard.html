@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>10x Factorio Engineer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #09090b;
+      --bg-card:      #18181b;
+      --bg-input:     #27272a;
+      --border:       #3f3f46;
+      --border-sub:   #27272a;
+      --text:         #e4e4e7;
+      --text-muted:   #71717a;
+      --text-dim:     #52525b;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    body { background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+
+    /* ── Layout ── */
+    .header {
+      border-bottom: 1px solid var(--border-sub);
+      padding: 10px 16px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 8px;
+    }
+    .header-left { display: flex; flex-direction: column; gap: 2px; }
+    .header-title-row { display: flex; align-items: center; gap: 8px; }
+    .header-title { font-size: 13px; font-weight: 700; color: #a1a1aa; letter-spacing: -0.01em; }
+    .header-save  { font-size: 11px; color: var(--text-dim); }
+    .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .main { padding: 16px; }
+
+    /* ── Storage pill ── */
+    .storage-pill { font-size: 10px; border: 1px solid; border-radius: 4px; padding: 1px 6px; }
+    .storage-pill.cloud { background: rgba(20,83,45,.4); color: #4ade80; border-color: #166534; }
+    .storage-pill.local { background: transparent; color: var(--text-muted); border-color: var(--border); }
+    .storage-pill.none  { background: rgba(127,29,29,.4); color: #f87171; border-color: #991b1b; }
+
+    /* ── Badges ── */
+    .badges { display: flex; gap: 4px; flex-wrap: wrap; }
+    .badge { font-size: 10px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; color: var(--text-muted); }
+    .badge.purple { border-color: #6b21a8; color: #c084fc; background: rgba(88,28,135,.2); }
+
+    /* ── Buttons ── */
+    button { cursor: pointer; border: none; font-family: inherit; font-size: 12px;
+             display: inline-flex; align-items: center; gap: 4px; transition: background .15s, color .15s; }
+    .btn-group { display: flex; gap: 4px; }
+    .btn       { background: var(--bg-input); border: 1px solid var(--border); color: #a1a1aa;
+                 border-radius: 6px; padding: 3px 8px; height: 28px; }
+    .btn:hover { background: #3f3f46; }
+    .btn-ghost { background: transparent; border: none; color: var(--text-dim);
+                 border-radius: 6px; padding: 3px 8px; height: 28px; }
+    .btn-ghost:hover { background: var(--bg-input); color: #f87171; }
+    .btn-primary { background: #d97706; border: none; color: #1c1917;
+                   border-radius: 6px; padding: 4px 14px; font-weight: 600; }
+    .btn-primary:hover { background: #f59e0b; }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-cancel { background: transparent; border: none; color: var(--text-muted);
+                  border-radius: 6px; padding: 4px 12px; }
+    .btn-cancel:hover { background: var(--bg-input); }
+
+    /* ── Section label ── */
+    .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); margin-bottom: 10px; }
+
+    /* ── Science section ── */
+    .science-section { background: rgba(24,24,27,.7); border: 1px solid var(--border-sub);
+                       border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .science-grid.cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+    .science-bar { margin-bottom: 12px; }
+    .science-bar:last-child { margin-bottom: 0; }
+    .science-bar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .science-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: #d4d4d8; }
+    .science-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .science-meta { display: flex; align-items: center; gap: 12px; }
+    .rate-text    { font-family: monospace; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .pct-text     { font-family: monospace; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
+    .progress-track { height: 10px; background: #27272a; border-radius: 99px; overflow: hidden; }
+    .progress-fill  { height: 100%; border-radius: 99px; transition: width .5s ease; }
+
+    /* ── Bottleneck banner ── */
+    .bottleneck-banner { background: rgba(127,29,29,.2); border: 1px solid rgba(127,29,29,.5);
+                         border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+    .bottleneck-title { font-size: 12px; font-weight: 600; color: #f87171; margin-bottom: 8px; }
+    .bottleneck-item  { font-size: 13px; color: rgba(252,165,165,.7); margin-bottom: 4px; }
+    .bottleneck-item:last-child { margin-bottom: 0; }
+
+    /* ── Tabs ── */
+    .tab-list { display: flex; background: var(--bg-card); border: 1px solid var(--border-sub);
+                border-radius: 8px; padding: 2px; margin-bottom: 16px; gap: 2px; }
+    .tab-btn  { background: transparent; border: none; color: var(--text-muted);
+                border-radius: 6px; padding: 4px 12px; height: 28px; font-size: 12px; }
+    .tab-btn.active       { background: #3f3f46; color: #f4f4f5; }
+    .tab-btn:hover:not(.active) { background: #27272a; }
+    .tab-panel            { display: none; }
+    .tab-panel.active     { display: block; }
+
+    /* ── Overview ── */
+    .overview-line { padding: 10px 12px; border-radius: 8px; border: 1px solid; margin-bottom: 6px; }
+    .overview-line.ok   { background: rgba(20,83,45,.2);   border-color: rgba(22,101,52,.5); }
+    .overview-line.warn { background: rgba(92,45,5,.2);    border-color: rgba(120,53,15,.5); }
+    .overview-line.bad  { background: rgba(127,29,29,.15); border-color: rgba(127,29,29,.4); }
+    .overview-line-header { display: flex; justify-content: space-between; align-items: center; }
+    .overview-line-name   { font-size: 13px; font-weight: 500; color: #e4e4e7; }
+    .overview-stats       { display: flex; align-items: center; gap: 12px; }
+    .pct-lg { font-family: monospace; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; width: 40px; text-align: right; }
+    .mini-bar      { height: 2px; background: #27272a; border-radius: 99px; margin-top: 6px; }
+    .mini-bar-fill { height: 100%; border-radius: 99px; transition: width .5s; }
+
+    /* ── Next steps ── */
+    .next-steps { margin-top: 16px; }
+    .next-step-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px;
+                      border-radius: 8px; background: rgba(20,83,45,.1); border: 1px solid rgba(22,101,52,.35);
+                      font-size: 13px; color: rgba(134,239,172,.75); margin-bottom: 6px; }
+    .next-step-item:last-child { margin-bottom: 0; }
+    .arrow { color: #4ade80; opacity: .6; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── Line cards ── */
+    .line-card { border-radius: 8px; border: 1px solid; background: var(--bg-card); margin-bottom: 8px; overflow: hidden; }
+    .line-card.ok   { border-color: rgba(22,101,52,.5); }
+    .line-card.warn { border-color: rgba(120,53,15,.5); }
+    .line-card.bad  { border-color: rgba(127,29,29,.4); }
+
+    .card-header { display: flex; align-items: center; justify-content: space-between;
+                   padding: 10px 16px; cursor: pointer; user-select: none; transition: filter .15s; }
+    .card-header:hover { filter: brightness(1.15); }
+    .card-header.ok   { background: rgba(20,83,45,.25); }
+    .card-header.warn { background: rgba(92,45,5,.25); }
+    .card-header.bad  { background: rgba(127,29,29,.15); }
+    .card-header-left  { display: flex; align-items: center; gap: 8px; }
+    .card-chevron      { color: var(--text-muted); font-size: 11px; width: 12px; }
+    .card-title        { font-weight: 600; font-size: 13px; color: #f4f4f5; }
+    .card-header-right { display: flex; align-items: center; gap: 12px; }
+    .ext-link { color: #52525b; font-size: 11px; text-decoration: none; line-height: 1; }
+    .ext-link:hover { color: #a1a1aa; }
+
+    .card-progress { height: 2px; background: #27272a; }
+    .card-progress-fill { height: 100%; transition: width .5s; }
+    .card-body { padding: 14px 16px; }
+    .card-section { margin-bottom: 16px; }
+    .card-section:last-child { margin-bottom: 0; }
+
+    table { width: 100%; font-size: 12px; border-collapse: collapse; }
+    thead tr { border-bottom: 1px solid var(--border-sub); }
+    th { text-align: left; padding-bottom: 6px; padding-right: 16px; font-weight: normal; color: var(--text-dim); }
+    th.r, td.r { text-align: right; }
+    th:last-child, td:last-child { padding-right: 0; }
+    tbody tr { border-top: 1px solid rgba(63,63,70,.4); }
+    td { padding: 6px 16px 6px 0; color: var(--text-muted); font-family: monospace; }
+    td.name-col { font-family: inherit; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { font-family: monospace; font-size: 11px; background: rgba(39,39,42,.8);
+            border: 1px solid rgba(63,63,70,.5); border-radius: 4px; padding: 3px 8px; color: var(--text-muted); }
+
+    /* ── Issues ── */
+    .issue-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px;
+                  border-radius: 8px; font-size: 13px; margin-bottom: 8px; }
+    .issue-item:last-child { margin-bottom: 0; }
+    .issue-item.bad  { background: rgba(127,29,29,.2); border: 1px solid rgba(127,29,29,.4); color: rgba(252,165,165,.8); }
+    .issue-item.good { background: rgba(20,83,45,.1);  border: 1px solid rgba(22,101,52,.35); color: rgba(134,239,172,.75); }
+
+    /* ── Chat ── */
+    .chat-warning { background: rgba(92,45,5,.2); border: 1px solid rgba(120,53,15,.5);
+                    border-radius: 6px; padding: 8px 12px; font-size: 11px; color: #fbbf24; margin-bottom: 12px; }
+    .chat-messages { overflow-y: auto; margin-bottom: 12px; max-height: 380px;
+                     display: flex; flex-direction: column; gap: 10px; }
+    .chat-empty { text-align: center; padding: 32px 0; color: var(--text-dim); font-size: 13px; }
+    .chat-msg        { display: flex; }
+    .chat-msg.player { justify-content: flex-end; }
+    .chat-bubble { max-width: 85%; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+    .chat-bubble.player { background: rgba(23,37,84,.8); border: 1px solid #1e3a8a; color: #bfdbfe; }
+    .chat-bubble.claude { background: var(--bg-input); border: 1px solid var(--border); color: #d4d4d8; }
+    .chat-sender { font-size: 10px; margin-bottom: 4px; opacity: .5; }
+    .chat-text   { line-height: 1.55; white-space: pre-wrap; }
+    .chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
+    .chat-textarea { flex: 1; background: var(--bg-input); border: 1px solid var(--border);
+                     border-radius: 6px; color: var(--text); font-family: inherit; font-size: 13px;
+                     padding: 8px 10px; resize: none; min-height: 40px; max-height: 120px; line-height: 1.4; }
+    .chat-textarea::placeholder { color: var(--text-dim); }
+    .chat-textarea:focus { outline: none; border-color: #52525b; }
+    .chat-send { background: #d97706; border: none; color: #1c1917; border-radius: 6px;
+                 width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+                 flex-shrink: 0; font-size: 16px; }
+    .chat-send:hover:not(:disabled) { background: #f59e0b; }
+    .chat-send:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Dialog ── */
+    dialog { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+             color: var(--text); padding: 20px; width: 480px; max-width: 90vw; font-family: inherit; }
+    dialog::backdrop { background: rgba(0,0,0,.6); }
+    dialog h3 { font-size: 15px; margin-bottom: 6px; color: #f4f4f5; }
+    dialog p.desc { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+    .dialog-textarea { width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+                       border-radius: 6px; color: var(--text); font-family: monospace; font-size: 11px;
+                       padding: 8px 10px; resize: vertical; min-height: 180px; }
+    .dialog-textarea:focus { outline: none; border-color: #52525b; }
+    .dialog-error   { font-size: 11px; color: #f87171; margin-top: 6px; min-height: 16px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+    /* ── Empties ── */
+    .empty-state { text-align: center; padding: 48px 0; color: var(--text-dim); font-size: 13px; }
+    .empty-state p + p { margin-top: 4px; font-size: 11px; color: #3f3f46; }
+    .no-issues { text-align: center; padding: 48px 0; font-size: 13px; color: rgba(74,222,128,.5); }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin .8s linear infinite; display: inline-block; }
+  </style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<dialog id="export-dialog">
+  <h3>Export Factory State</h3>
+  <p class="desc">Copy this code to share your factory or import it in another session.</p>
+  <textarea class="dialog-textarea" id="export-text" readonly rows="6"></textarea>
+  <div class="dialog-actions">
+    <button class="btn-cancel" id="export-close">Close</button>
+    <button class="btn-primary" id="export-copy">Copy</button>
+  </div>
+</dialog>
+
+<dialog id="import-dialog">
+  <h3>Import Factory State</h3>
+  <p class="desc">Paste the exported code from another session below.</p>
+  <textarea class="dialog-textarea" id="import-text" placeholder="Paste exported code here…" rows="6"></textarea>
+  <p class="dialog-error" id="import-error"></p>
+  <div class="dialog-actions">
+    <button class="btn-cancel" id="import-cancel">Cancel</button>
+    <button class="btn-primary" id="import-apply">Apply</button>
+  </div>
+</dialog>
+
+<script>
+// ── Encode / Decode ─────────────────────────────────────────────────────────
+
+function encodeState(state) {
+  const json = JSON.stringify(state);
+  const bytes = new TextEncoder().encode(json);
+  const binary = Array.from(bytes, b => String.fromCharCode(b)).join('');
+  return btoa(binary);
+}
+
+function decodeState(value) {
+  try {
+    const binary = atob(value.trim());
+    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return JSON.parse(value); // backward compat: plain JSON
+  }
+}
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const STORAGE_KEY = 'factorio_engineer_state';
+
+const DEFAULT_STATE = {
+  save_name: 'My Factory', dataset: 'vanilla', assembler: 3,
+  furnace: 'electric', prod_module: 0, speed_bonus: 0.0,
+  targets: {}, lines: [], bottlenecks: [], next_steps: [], chat_log: [],
+};
+
+const SCIENCE_ORDER = [
+  'automation-science-pack','logistic-science-pack','military-science-pack',
+  'chemical-science-pack','production-science-pack','utility-science-pack',
+  'space-science-pack','metallurgic-science-pack','agricultural-science-pack',
+  'electromagnetic-science-pack','cryogenic-science-pack','promethium-science-pack',
+];
+
+const SCIENCE_GRADIENTS = {
+  'automation-science-pack':      ['#a86638','#c8964a'],
+  'logistic-science-pack':        ['#4a8a4a','#6ab06a'],
+  'military-science-pack':        ['#8a3a3a','#b05050'],
+  'chemical-science-pack':        ['#4a5a9a','#6878c8'],
+  'production-science-pack':      ['#8a8a3a','#b0b050'],
+  'utility-science-pack':         ['#3a8a8a','#50b0b0'],
+  'space-science-pack':           ['#7a3a9a','#a058c8'],
+  'metallurgic-science-pack':     ['#8a3a1a','#c05830'],
+  'agricultural-science-pack':    ['#3a7a18','#5ab028'],
+  'electromagnetic-science-pack': ['#3a28a0','#5848d8'],
+  'cryogenic-science-pack':       ['#186888','#28a8c8'],
+  'promethium-science-pack':      ['#4a1070','#7820b0'],
+};
+
+const MACHINE_NAMES = {
+  'assembling-machine-1':'Assembler 1','assembling-machine-2':'Assembler 2',
+  'assembling-machine-3':'Assembler 3','stone-furnace':'Stone Furnace',
+  'steel-furnace':'Steel Furnace','electric-furnace':'Electric Furnace',
+  'chemical-plant':'Chemical Plant','oil-refinery':'Oil Refinery',
+  'centrifuge':'Centrifuge','rocket-silo':'Rocket Silo',
+  'electric-mining-drill':'Mining Drill','big-mining-drill':'Big Mining Drill',
+  'pumpjack':'Pumpjack','offshore-pump':'Offshore Pump',
+  'foundry':'Foundry','electromagnetic-plant':'Electromagnetic Plant',
+  'electronics-assembly':'Electronics Assembly','cryogenic-plant':'Cryogenic Plant',
+  'biochamber':'Biochamber','crusher':'Crusher',
+  'agricultural-tower':'Agricultural Tower','captive-spawner':'Captive Spawner',
+};
+
+const BELT_COLORS = { yellow:'#d4a817', red:'#c84040', blue:'#4060c8', turbo:'#40c8b8' };
+
+const SYSTEM_PROMPT = `You are a Factorio factory co-pilot embedded in a dashboard artifact.
+
+IMPORTANT: If the player reports a factory change, output the COMPLETE updated FACTORY_STATE as a JSON block at the END of your response:
+\`\`\`json
+{...complete state...}
+\`\`\`
+Rules: include ALL fields from current state, do NOT include "chat_log".
+If no state change, respond naturally with NO JSON block.
+Keep responses brief and practical.`;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function label(id) {
+  return id.replace(/-science-pack$/, ' Science').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+function machineLabel(id) { return MACHINE_NAMES[id] || label(id); }
+function humanizeText(text) {
+  return String(text).replace(
+    /\bAM[123]\b|assembling-machine-[123]|[a-z]+(?:-[a-z0-9]+)+/g,
+    t => MACHINE_NAMES[t] || label(t),
+  );
+}
+function pct(actual, target) {
+  if (!target) return 100;
+  return Math.min(100, Math.max(0, Math.round((actual / target) * 100)));
+}
+function statusClass(p) { return p >= 100 ? 'ok' : p >= 75 ? 'warn' : 'bad'; }
+function statusColor(p) { return p >= 100 ? '#4eca4e' : p >= 75 ? '#c9a040' : '#c94040'; }
+function sortedScienceKeys(keys) {
+  return [...keys].sort((a, b) => {
+    const ia = SCIENCE_ORDER.indexOf(a), ib = SCIENCE_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1; if (ib === -1) return -1;
+    return ia - ib;
+  });
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+
+let STATE = { ...DEFAULT_STATE };
+let activeTab = 'overview';
+let expandedCards = new Set();
+let storageMode = 'checking';
+let chatSending = false;
+
+// ── Storage ──────────────────────────────────────────────────────────────────
+
+async function saveState() {
+  const encoded = encodeState(STATE);
+  try { await window.storage?.set(STORAGE_KEY, encoded); return; } catch {}
+  try { localStorage.setItem(STORAGE_KEY, encoded); } catch {}
+}
+
+async function loadState() {
+  try { const r = await window.storage?.get(STORAGE_KEY); if (r?.value) return decodeState(r.value); } catch {}
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return decodeState(raw); } catch {}
+  return null;
+}
+
+async function checkStorage() {
+  if (!window.storage) { storageMode = localStorage ? 'local' : 'none'; return; }
+  try {
+    await window.storage.set('__ping__', '1');
+    await window.storage.delete('__ping__');
+    storageMode = 'cloud';
+  } catch { storageMode = localStorage ? 'local' : 'none'; }
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function renderStoragePill() {
+  const map = { checking:['','…'], cloud:['cloud','Cloud sync'], local:['local','Local only'], none:['none','No storage'] };
+  const [cls, txt] = map[storageMode] || map.none;
+  return `<span class="storage-pill ${cls}">${txt}</span>`;
+}
+
+function renderHeader() {
+  const { save_name, dataset, assembler, furnace, prod_module } = STATE;
+  return `
+    <div class="header">
+      <div class="header-left">
+        <div class="header-title-row">
+          <span class="header-title">10x Factorio Engineer</span>
+          ${renderStoragePill()}
+        </div>
+        <div class="header-save">${esc(save_name)}</div>
+      </div>
+      <div class="header-right">
+        <div class="badges">
+          ${dataset === 'space-age' ? '<span class="badge purple">Space Age</span>' : ''}
+          <span class="badge">AM${assembler}</span>
+          <span class="badge">${label(furnace)} Furnace</span>
+          ${prod_module > 0 ? `<span class="badge">Prod ${prod_module}</span>` : ''}
+        </div>
+        <div class="btn-group">
+          <button class="btn" id="btn-export">↓ Export</button>
+          <button class="btn" id="btn-import">↑ Import</button>
+          <button class="btn-ghost" id="btn-reset" title="Reset all factory data">↺</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderScience() {
+  const keys = sortedScienceKeys(Object.keys(STATE.targets));
+  if (!keys.length) return '';
+  const rates = {};
+  for (const line of STATE.lines)
+    if (line.item in STATE.targets) rates[line.item] = line.effective_rate ?? line.target_rate ?? 0;
+
+  const bars = keys.map(name => {
+    const actual = rates[name];
+    const target = STATE.targets[name];
+    const p = pct(actual ?? 0, target);
+    const [dark, light] = SCIENCE_GRADIENTS[name] || ['#555','#888'];
+    const col = statusColor(p);
+    return `
+      <div class="science-bar">
+        <div class="science-bar-header">
+          <div class="science-name">
+            <span class="science-dot" style="background:linear-gradient(135deg,${dark},${light})"></span>
+            ${esc(label(name))}
+          </div>
+          <div class="science-meta">
+            <span class="rate-text">${actual ?? '?'}/${target} /min</span>
+            <span class="pct-text" style="color:${col}">${p}%</span>
+          </div>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" style="width:${p}%;background:linear-gradient(90deg,${dark},${light})"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="science-section">
+      <div class="section-label">Science Targets</div>
+      <div class="science-grid${keys.length >= 4 ? ' cols-2' : ''}">${bars}</div>
+    </div>`;
+}
+
+function renderBottlenecks() {
+  if (!STATE.bottlenecks.length) return '';
+  return `
+    <div class="bottleneck-banner">
+      <div class="bottleneck-title">⚠ ${STATE.bottlenecks.length} bottleneck${STATE.bottlenecks.length !== 1 ? 's' : ''}</div>
+      ${STATE.bottlenecks.map(b => `<div class="bottleneck-item">• ${esc(humanizeText(b))}</div>`).join('')}
+    </div>`;
+}
+
+function renderTabs() {
+  const tabs = [
+    ['overview', 'Overview'],
+    ['lines',    `Lines${STATE.lines.length ? ` (${STATE.lines.length})` : ''}`],
+    ['issues',   `Issues${STATE.bottlenecks.length ? ` (${STATE.bottlenecks.length})` : ''}`],
+    ['chat',     'Chat'],
+  ];
+  return `
+    <div class="tab-list">
+      ${tabs.map(([id, txt]) => `<button class="tab-btn${activeTab===id?' active':''}" data-tab="${id}">${esc(txt)}</button>`).join('')}
+    </div>`;
+}
+
+function renderOverview() {
+  if (!STATE.lines.length) return `
+    <div class="empty-state">
+      <p>No production lines tracked yet.</p>
+      <p>Import a state from a CLI session, or ask Claude in the Chat tab.</p>
+    </div>`;
+
+  const items = STATE.lines.map(line => {
+    const actual = line.effective_rate ?? line.target_rate ?? 0;
+    const p = pct(actual, line.target_rate ?? 0);
+    const col = statusColor(p);
+    return `
+      <div class="overview-line ${statusClass(p)}">
+        <div class="overview-line-header">
+          <span class="overview-line-name">${esc(label(line.item))}</span>
+          <div class="overview-stats">
+            <span class="rate-text">${actual}/${line.target_rate ?? 0} /min</span>
+            <span class="pct-lg" style="color:${col}">${p}%</span>
+          </div>
+        </div>
+        <div class="mini-bar"><div class="mini-bar-fill" style="width:${p}%;background:${col}"></div></div>
+      </div>`;
+  }).join('');
+
+  const steps = STATE.next_steps.length ? `
+    <div class="next-steps">
+      <div class="section-label">Next Steps</div>
+      ${STATE.next_steps.map(s => `
+        <div class="next-step-item">
+          <span class="arrow">→</span>
+          <span>${esc(humanizeText(s))}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  return items + steps;
+}
+
+function renderLineCard(line) {
+  const actual = line.effective_rate ?? line.target_rate ?? 0;
+  const p = pct(actual, line.target_rate ?? 0);
+  const sc  = statusClass(p);
+  const col = statusColor(p);
+  const isOpen = expandedCards.has(line.item);
+  const steps  = line.cli_result?.production_steps ?? [];
+  const belts  = line.cli_result?.belts_for_output ?? {};
+  const raw    = line.cli_result?.raw_resources ?? {};
+  const miners = line.cli_result?.miners_needed ?? {};
+
+  let body = '';
+  if (isOpen) {
+    const machineRows = steps.map(s => {
+      const placed = line.actual_machines?.[s.machine] ?? null;
+      const needed = s.machine_count_ceil;
+      const ok = placed !== null && placed >= needed;
+      const placedHtml = placed !== null
+        ? `<span style="color:${ok?'#4eca4e':'#c94040'};font-weight:700">${placed}</span><span style="color:#52525b"> / ${needed}</span>`
+        : `<span style="color:#52525b">${needed}</span>`;
+      return `<tr>
+        <td>${esc(s.recipe)}</td>
+        <td class="name-col">${esc(machineLabel(s.machine))}</td>
+        <td class="r">${placedHtml}</td>
+        <td class="r">${s.rate_per_min != null ? `${(+s.rate_per_min).toFixed(1)}/m` : ''}</td>
+      </tr>`;
+    }).join('');
+
+    const machineSection = steps.length ? `
+      <div class="card-section">
+        <div class="section-label">Machines</div>
+        <table>
+          <thead><tr><th>Recipe</th><th>Machine</th><th class="r">Placed / Need</th><th class="r">Rate</th></tr></thead>
+          <tbody>${machineRows}</tbody>
+        </table>
+      </div>` : '';
+
+    const rawSection = Object.keys(raw).length ? `
+      <div class="card-section">
+        <div class="section-label">Raw Resources</div>
+        <div class="chips">${Object.entries(raw).map(([r, rate]) =>
+          `<span class="chip">${esc(r)}: <span style="color:#e4e4e7">${(+rate).toFixed(1)}/min</span></span>`
+        ).join('')}</div>
+      </div>` : '';
+
+    const minerSection = Object.keys(miners).length ? `
+      <div class="card-section">
+        <div class="section-label">Miners / Extractors</div>
+        <div class="chips">${Object.entries(miners).map(([r, info]) => {
+          const isYield = info.required_yield_pct != null;
+          const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${info.machine_count_ceil}×`;
+          const countCl = isYield ? '#fbbf24' : '#e4e4e7';
+          return `<span class="chip">${esc(r)}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:#52525b">${esc(machineLabel(info.machine))}</span></span>`;
+        }).join('')}</div>
+      </div>` : '';
+
+    const beltSection = Object.keys(belts).length ? `
+      <div class="card-section">
+        <div class="section-label">Output Belts</div>
+        <div class="chips">${Object.entries(belts).map(([color, info]) =>
+          `<span class="chip"><span style="color:${BELT_COLORS[color]||'#aaa'};font-weight:700">${color}</span>: <span style="color:#71717a">${info.belts_needed?.toFixed(3)} lanes</span></span>`
+        ).join('')}</div>
+      </div>` : '';
+
+    const noteSection = line.player_notes ? `
+      <div style="font-size:12px;color:#52525b;font-style:italic;border-top:1px solid #27272a;padding-top:10px;margin-top:-4px">
+        ${esc(line.player_notes)}
+      </div>` : '';
+
+    body = `<div class="card-body">${machineSection}${rawSection}${minerSection}${beltSection}${noteSection}</div>`;
+  }
+
+  const labUrl = `https://factoriolab.github.io/#/?s=${encodeURIComponent(line.item)}&v=2`;
+  return `
+    <div class="line-card ${sc}">
+      <div class="card-header ${sc}" data-card="${esc(line.item)}">
+        <div class="card-header-left">
+          <span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
+          <span class="card-title">${esc(label(line.item))}</span>
+        </div>
+        <div class="card-header-right">
+          <span class="rate-text">${actual}/${line.target_rate ?? 0} /min</span>
+          <span class="pct-text" style="color:${col}">${p}%</span>
+          <a class="ext-link" href="${esc(labUrl)}" data-ext="${esc(labUrl)}" title="FactorioLab">↗</a>
+        </div>
+      </div>
+      <div class="card-progress"><div class="card-progress-fill" style="width:${p}%;background:${col}"></div></div>
+      ${body}
+    </div>`;
+}
+
+function renderIssues() {
+  if (!STATE.bottlenecks.length && !STATE.next_steps.length)
+    return '<div class="no-issues">✓ No bottlenecks detected.</div>';
+  return [
+    ...STATE.bottlenecks.map(b => `<div class="issue-item bad"><span>⚠</span><span>${esc(humanizeText(b))}</span></div>`),
+    ...STATE.next_steps.map(s => `<div class="issue-item good"><span style="color:#4ade80;opacity:.6">→</span><span>${esc(humanizeText(s))}</span></div>`),
+  ].join('');
+}
+
+function renderChat() {
+  const avail = typeof window.claude?.complete === 'function';
+  const warning = avail ? '' : `<div class="chat-warning">window.claude.complete is not available — sign into Claude.ai for chat to work.</div>`;
+  const msgs = STATE.chat_log.length
+    ? STATE.chat_log.map(e => `
+        <div class="chat-msg ${e.from}">
+          <div class="chat-bubble ${e.from}">
+            <div class="chat-sender">${e.from === 'player' ? 'You' : 'Claude'}</div>
+            <div class="chat-text">${esc(humanizeText(e.text))}</div>
+          </div>
+        </div>`).join('')
+    : '<div class="chat-empty">No messages yet. Ask about your factory — strategy, machine counts, next steps.</div>';
+  return `
+    ${warning}
+    <div class="chat-messages" id="chat-messages">${msgs}</div>
+    <div class="chat-input-row">
+      <textarea class="chat-textarea" id="chat-input" rows="2"
+        placeholder="Ask about your factory… (Enter to send, Shift+Enter for newline)"
+        ${chatSending || !avail ? 'disabled' : ''}></textarea>
+      <button class="chat-send" id="btn-send" ${chatSending || !avail ? 'disabled' : ''}>
+        ${chatSending ? '<span class="spin">⟳</span>' : '↑'}
+      </button>
+    </div>`;
+}
+
+function render() {
+  document.getElementById('app').innerHTML = `
+    ${renderHeader()}
+    <div class="main">
+      ${renderScience()}
+      ${renderBottlenecks()}
+      ${renderTabs()}
+      <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
+      <div class="tab-panel${activeTab==='lines'  ?' active':''}">${STATE.lines.length ? STATE.lines.map(renderLineCard).join('') : '<div class="empty-state"><p>No production lines yet.</p><p>Ask Claude to plan one in the Chat tab.</p></div>'}</div>
+      <div class="tab-panel${activeTab==='issues' ?' active':''}">${renderIssues()}</div>
+      <div class="tab-panel${activeTab==='chat'   ?' active':''}">${renderChat()}</div>
+    </div>`;
+  bindEvents();
+  if (activeTab === 'chat') scrollChat();
+}
+
+function scrollChat() {
+  const el = document.getElementById('chat-messages');
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+// ── Events ───────────────────────────────────────────────────────────────────
+
+function bindEvents() {
+  document.querySelectorAll('.tab-btn').forEach(btn =>
+    btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); }));
+
+  document.querySelectorAll('.card-header[data-card]').forEach(hdr =>
+    hdr.addEventListener('click', e => {
+      if (e.target.closest('[data-ext]')) return;
+      const item = hdr.dataset.card;
+      expandedCards.has(item) ? expandedCards.delete(item) : expandedCards.add(item);
+      render();
+    }));
+
+  document.querySelectorAll('[data-ext]').forEach(el =>
+    el.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      window.claude?.openExternal(el.dataset.ext);
+    }));
+
+  const btnExport = document.getElementById('btn-export');
+  if (btnExport) btnExport.addEventListener('click', () => {
+    document.getElementById('export-text').value = encodeState(STATE);
+    document.getElementById('export-dialog').showModal();
+  });
+
+  const btnImport = document.getElementById('btn-import');
+  if (btnImport) btnImport.addEventListener('click', () => {
+    document.getElementById('import-text').value = '';
+    document.getElementById('import-error').textContent = '';
+    document.getElementById('import-dialog').showModal();
+  });
+
+  const btnReset = document.getElementById('btn-reset');
+  if (btnReset) btnReset.addEventListener('click', () => {
+    if (confirm('Reset all factory data? This cannot be undone.')) {
+      STATE = { ...DEFAULT_STATE }; saveState(); render();
+    }
+  });
+
+  const btnSend  = document.getElementById('btn-send');
+  const chatArea = document.getElementById('chat-input');
+  if (btnSend)  btnSend.addEventListener('click', sendChat);
+  if (chatArea) chatArea.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  });
+}
+
+// ── Chat ─────────────────────────────────────────────────────────────────────
+
+function buildPrompt(userMessage) {
+  const { chat_log: _, ...stateForPrompt } = STATE;
+  const history = STATE.chat_log.slice(-10).map(m => `${m.from === 'player' ? 'PLAYER' : 'CLAUDE'}: ${m.text}`).join('\n');
+  return `${SYSTEM_PROMPT}\n\nCURRENT FACTORY STATE:\n${JSON.stringify(stateForPrompt, null, 2)}\n\nCONVERSATION:\n${history}\nPLAYER: ${userMessage}\n\nCLAUDE:`;
+}
+
+function parseResponse(response) {
+  const match = response.match(/```json\s*([\s\S]*?)\s*```/);
+  if (!match) return { text: response.trim(), newState: null };
+  const text = response.replace(/```json[\s\S]*?```/, '').trim();
+  try { return { text, newState: JSON.parse(match[1]) }; } catch { return { text: response.trim(), newState: null }; }
+}
+
+async function sendChat() {
+  if (chatSending) return;
+  const input = document.getElementById('chat-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  input.value = '';
+  chatSending = true;
+
+  const fullLog = [...STATE.chat_log, { from: 'player', text }];
+  STATE = { ...STATE, chat_log: fullLog };
+  render(); scrollChat();
+
+  try {
+    if (!window.claude?.complete) throw new Error('window.claude.complete not available');
+    const response = await window.claude.complete(buildPrompt(text));
+    const { text: replyText, newState } = parseResponse(response);
+    const replyLog = [...fullLog, { from: 'claude', text: replyText || '(state updated)' }];
+    STATE = newState ? { ...newState, chat_log: replyLog } : { ...STATE, chat_log: replyLog };
+    await saveState();
+  } catch (e) {
+    STATE = { ...STATE, chat_log: [...fullLog, { from: 'claude', text: `Error: ${e.message}` }] };
+  } finally {
+    chatSending = false;
+    render(); scrollChat();
+  }
+}
+
+// ── Export / Import dialogs (outside render cycle) ───────────────────────────
+
+document.getElementById('export-close').addEventListener('click', () =>
+  document.getElementById('export-dialog').close());
+document.getElementById('export-copy').addEventListener('click', () =>
+  navigator.clipboard.writeText(document.getElementById('export-text').value));
+
+document.getElementById('import-cancel').addEventListener('click', () =>
+  document.getElementById('import-dialog').close());
+
+document.getElementById('import-apply').addEventListener('click', () => {
+  const text = document.getElementById('import-text').value.trim();
+  try {
+    STATE = decodeState(text);
+    saveState();
+    document.getElementById('import-dialog').close();
+    render();
+  } catch (e) {
+    document.getElementById('import-error').textContent = 'Invalid data: ' + e.message;
+  }
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+(async () => {
+  await checkStorage();
+  const saved = await loadState();
+  if (saved) STATE = saved;
+  render();
+})();
+</script>
+</body>
+</html>

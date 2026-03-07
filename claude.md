@@ -18,15 +18,15 @@ production math — it never does the recursive recipe tree in its head.
 python 10x-factorio-engineer/assets/cli.py --item <item-id> --rate <N> [options]
 ```
 
-**Component 2 — Claude Skill** (`10x-factorio-engineer/`)
+**Component 2 — Claude Skill + Dashboard** (`10x-factorio-engineer/`)
 A `SKILL.md` that tells Claude how to behave as a planning assistant: when and
 how to call the CLI, how to track the player's factory conversationally, and how
-to render a React artifact dashboard showing science-pack progress, bottlenecks,
-and per-line machine counts. The dashboard component source lives in
-`dev/dashboard.jsx`; the minified build (`npm run build`) is written to
-`10x-factorio-engineer/assets/dashboard.min.js`. A strategy reference file
-(`10x-factorio-engineer/references/strategy-topics.md`) is loaded on demand for layout,
-combat, power, Space Age, and other non-math questions.
+to output a `FACTORY_STATE` for import into the dashboard. The dashboard is a
+published `application/vnd.ant.html` artifact — a single vanilla HTML file with
+no build dependencies. State is encoded as base64 and stored in `window.storage`
+(Anthropic server-side, cross-device) with `localStorage` fallback. An in-artifact
+chat panel is powered by `window.claude.complete()`. A strategy reference
+(`10x-factorio-engineer/references/strategy-topics.md`) is loaded on demand.
 
 ---
 
@@ -36,13 +36,13 @@ combat, power, Space Age, and other non-math questions.
 
 | Trigger | Required follow-up action |
 |---------|--------------------------|
-| `dev/dashboard.jsx` is modified | Run `npm run build` to rebuild `assets/dashboard.min.js`, then run `python dev/generate_preview.py` to update the local preview. |
+| `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `10x-factorio-engineer/SKILL.md` Section 2. |
 | New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `10x-factorio-engineer/SKILL.md` Section 2. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new CLI flags, new features, changed behaviour, etc.). |
 
-The goal is that `claude.md` always accurately describes the codebase. `SKILL.md` Section 6 references `10x-factorio-engineer/assets/dashboard.min.js` — rebuild it from `dev/dashboard.jsx` via `npm run build` whenever the source changes.
+The goal is that `claude.md` always accurately describes the codebase.
 
 ---
 
@@ -53,13 +53,15 @@ The goal is that `claude.md` always accurately describes the codebase. `SKILL.md
 | `10x-factorio-engineer/assets/cli.py` | Calculator — entire implementation, stdlib only |
 | `10x-factorio-engineer/assets/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
 | `10x-factorio-engineer/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
-| `dev/test_cli.py` | `unittest` suite (59 tests, stdlib only) — dev only |
 | `10x-factorio-engineer/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
-| `dev/dashboard.jsx` | React artifact — factory dashboard component (source) |
-| `10x-factorio-engineer/assets/dashboard.min.js` | Minified build of `dev/dashboard.jsx` — loaded by the skill |
 | `10x-factorio-engineer/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
-| `dev/generate_preview.py` | Script that builds `dev/preview.html` for local dev |
-| `package.json` | Node dev toolchain — `npm run build` minifies `dev/dashboard.jsx` → `assets/dashboard.min.js` |
+| `dev/dashboard.html` | Dashboard source — single vanilla HTML file, no build dependencies |
+| `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
+| `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
+| `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
+| `dev/test_cli.py` | `unittest` suite (59 tests, stdlib only) — dev only |
+| `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
+| `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
 Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missing.
 
@@ -430,12 +432,15 @@ player message:
 }
 ```
 
-### dev/dashboard.jsx → assets/dashboard.min.js
+### Dashboard (`dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html`)
 
-A self-contained React component (no external dependencies, dark theme) that
-reads from an injected `FACTORY_STATE` const. Rendered by Claude as a
-`application/vnd.ant.react` artifact. Source lives in `dev/dashboard.jsx`;
-run `npm run build` to rebuild the minified `assets/dashboard.min.js`.
+A single self-contained vanilla HTML file — no React, no build toolchain, no
+external dependencies beyond the browser. State is encoded as base64 (minified
+JSON → UTF-8 bytes → `btoa`) for compact storage and portability.
+
+**Build:** `python dev/build_dashboard.py` — strips HTML comments and blank
+lines, writes `10x-factorio-engineer/assets/dashboard.html`. Use `--no-min` to skip
+minification, `--open` to open the result in a browser immediately.
 
 **Header:** compact one-line brand label (`10x Factorio Engineer`) left +
 config pills right (`[Space Age]` when applicable, `[Assembler 3]`,
@@ -448,26 +453,15 @@ config pills right (`[Space Age]` when applicable, `[Assembler 3]`,
 | Science Packs | Gradient progress bar per target pack — actual vs target rate, colour-coded by pack. Vanilla and all 5 Space Age packs (Metallurgic/Agricultural/Electromagnetic/Cryogenic/Promethium) have distinct colours. Bars sorted in canonical research-tree order. |
 | Bottleneck banner | Red alert strip, shown only when issues exist |
 | Overview tab | Compact line list with % completion + Next Steps |
-| Lines tab | Expandable `LineCard` per production line: machine table (placed/needed), raw resource rates, miners/extractors section (`N× Mining Drill` or `X% yield Pumpjack`), belt lane counts |
+| Lines tab | Expandable card per production line: machine table (placed/needed), raw resource rates, miners/extractors section (`N× Mining Drill` or `X% yield Pumpjack`), belt lane counts |
 | Issues tab | Bottlenecks + next steps with traffic-light colours |
 | Chat Log tab | Player/Claude message bubbles |
 
-**ID humanisation:** `humanizeText()` converts any kebab-case machine or item
-ID to a friendly name everywhere it appears — machine column, miners section,
-bottleneck/next-step free-text strings. Known machines use a handcrafted map
-(`assembling-machine-3` → `Assembler 3`); everything else falls back to
-title-cased label conversion.
+**Import/Export:** Export produces a base64 string (copy button). Import
+accepts base64 or plain JSON (backward-compatible). Storage uses the same
+encoding in both `window.storage` and `localStorage`.
 
-**Local preview:** run `python dev/generate_preview.py` to produce
-`10x-factorio-engineer/assets/preview.html` — a single self-contained file (React + Babel from
-CDN) that opens directly in any browser without a dev server.
-
-**FACTORY_STATE injection pattern** (Claude prepends this before the JSX):
-
-```js
-const FACTORY_STATE = { /* state JSON */ };
-// … full dashboard.min.js follows …
-```
-
-Every dashboard update is a full paste (not a diff) — the artifact is always
-self-contained.
+**ID humanisation:** `humanizeText()` converts kebab-case IDs to friendly
+names everywhere — machine column, miners section, bottleneck/next-step text.
+Known machines use a handcrafted map (`assembling-machine-3` → `Assembler 3`);
+everything else falls back to title-cased label conversion.

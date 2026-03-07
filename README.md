@@ -5,7 +5,7 @@ A Factorio factory co-pilot built on two components:
 | Component | What it does |
 |-----------|-------------|
 | **CLI Calculator** (`assets/cli.py`) | Zero-dependency Python CLI — resolves full production chains and emits clean JSON |
-| **Claude Skill** (`10x-factorio-engineer/`) | System-prompt + React dashboard that turns Claude into an active planning assistant |
+| **Claude Skill** (`10x-factorio-engineer/`) | System-prompt + published web artifact that turns Claude into an active planning assistant |
 
 ---
 
@@ -16,16 +16,22 @@ A Factorio factory co-pilot built on two components:
   SKILL.md                  # Skill definition document
   assets/
     cli.py                  # Calculator — entire implementation
-    dashboard.min.js        # Minified dashboard component (built by npm run build)
     vanilla-2.0.55.json     # KirkMcDonald dataset — base game
     space-age-2.0.55.json   # KirkMcDonald dataset — Space Age DLC
   references/
     strategy-topics.md      # On-demand strategy reference
 dev/
-  dashboard.jsx             # React factory dashboard component (source)
+  dashboard.html            # Dashboard source — single vanilla HTML, no build deps
+  build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html
+  sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
   test_cli.py               # unittest suite (59 tests, stdlib only)
-  generate_preview.py       # Builds dev/preview.html for local dev
-package.json                # npm run build → minifies dashboard.jsx → assets/dashboard.min.js
+  artifact-api-test.html    # claude.ai runtime API test suite (window.claude, window.storage, CDN loading, etc.)
+  artifact-api.md           # Field research doc for claude.ai artifact APIs
+  assets/
+    cli.py
+    dashboard.html            # Built artifact — paste into claude.ai as application/vnd.ant.html
+    vanilla-2.0.55.json
+    space-age-2.0.55.json
 ```
 
 Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run.
@@ -227,56 +233,67 @@ python -m unittest dev.test_cli -v
 
 ## Component 2 — Claude Skill
 
-The skill turns Claude into an active factory co-pilot. It has two parts:
+The skill turns Claude into an active factory co-pilot with two parts that complement each other:
 
-### SKILL.md
+### Usage modes
 
-A system-prompt document defining Claude's behaviour as a planning assistant:
+**CLI mode** — power users, terminal
+- Claude calls `python assets/cli.py` for all production math
+- Tracks factory state conversationally
+- At session end: Claude outputs the full `FACTORY_STATE` JSON for import into the dashboard
 
-- **Always call `python assets/cli.py`** for production math — never compute chains mentally.
-- **Track the factory conversationally** — parse freeform player updates
-  ("just placed 12 electric furnaces on copper"), maintain a structured
-  factory-state JSON in context, detect bottlenecks, suggest next steps.
-- **Launch/update a React artifact** (the dashboard) when the player wants
-  a visual overview.
+**Dashboard mode** — visual, cross-device, mobile-friendly
+- A published `application/vnd.ant.html` artifact at a permanent URL
+- State persists via `window.storage` (Anthropic server-side, cross-device) with `localStorage` fallback
+- In-artifact chat via `window.claude.complete()` for light updates ("I placed 8 assemblers")
+- Import/Export buttons for syncing state with CLI sessions
+- Claude does not need to regenerate the artifact — it lives at a fixed URL
 
-### assets/dashboard.min.js
+### State sync between modes
 
-A self-contained React component (dark theme, no external dependencies),
-minified from `dev/dashboard.jsx` via `npm run build`.
-Claude renders it as a `application/vnd.ant.react` artifact by prepending
-a `FACTORY_STATE` constant:
+```
+CLI session ends   →  Claude outputs FACTORY_STATE JSON
+                   →  User clicks Export in dashboard, copies base64 code
+                   →  User pastes code at start of next CLI session as context
 
-```js
-const FACTORY_STATE = { /* current factory state JSON */ };
-// … full dashboard.min.js follows …
+User clicks Import →  Paste exported base64 (or plain JSON) into the Import dialog
+                   →  Dashboard decodes and saves to window.storage
 ```
 
-**Header:** compact brand label (`10x Factorio Engineer`) + config pills
-(`[Space Age]` when applicable, `[Assembler 3]`, `[Electric Furnace]`,
-`[Productivity N]`). Save name shown as a subtle subtitle.
+### Dashboard features
 
-**Dashboard features:**
+Single vanilla HTML file — no React, no build toolchain, no external dependencies. Source in `dev/dashboard.html`, minified artifact in `10x-factorio-engineer/assets/dashboard.html`.
 
 | Section | Contents |
 |---------|----------|
-| Science Packs | Gradient progress bars — actual vs. target rate. All 7 vanilla packs and 5 Space Age packs (Metallurgic/Agricultural/Electromagnetic/Cryogenic/Promethium) have distinct colours. Sorted in canonical research-tree order. |
+| Header | Brand label + storage mode pill (Cloud sync / Local only) + config badges + Import/Export |
+| Science Packs | Gradient progress bars — actual vs. target rate. All 7 vanilla packs and 5 Space Age packs have distinct colours. Sorted in canonical research-tree order. |
 | Bottleneck banner | Red alert strip, shown only when issues exist |
 | Overview tab | Compact line list with % completion + Next Steps |
-| Lines tab | Expandable card per production line: machine table (placed vs needed), raw resource rates, miners/extractors (`N× Mining Drill` or `X% yield Pumpjack`), belt lane counts |
+| Lines tab | Expandable card per production line: machine table (placed vs needed), raw resources, miners/extractors, belt lane counts, FactorioLab link |
 | Issues tab | Bottlenecks + next steps with traffic-light colours |
-| Chat Log tab | Player/Claude message bubbles |
+| Chat tab | In-artifact conversation with Claude (`window.claude.complete()`). Claude can update factory state directly from chat responses. |
 
-All machine and item IDs are displayed as friendly names (`assembling-machine-3`
-→ `Assembler 3`, `logistic-science-pack` → `Logistic Science`) everywhere in
-the UI, including free-text bottleneck and next-step strings.
+### Storage behaviour
 
-**Local preview:** `python dev/generate_preview.py` builds `dev/preview.html` —
-a single self-contained HTML file that opens in any browser without a server.
+| Storage | Available | Scope |
+|---------|-----------|-------|
+| `window.storage` | Published artifact only | Cross-device (Anthropic server-side, 20 MB) |
+| `localStorage` | Always | Same browser/device only |
+
+The dashboard tries `window.storage` first and falls back to `localStorage` transparently. A storage mode pill in the header shows which is active.
+
+### Building the dashboard
+
+```bash
+python dev/build_dashboard.py           # minify dev/dashboard.html → assets/dashboard.html
+python dev/build_dashboard.py --no-min  # copy as-is (easier to inspect)
+python dev/build_dashboard.py --open    # build and open in browser
+```
 
 ### Factory State Schema
 
-Claude keeps this JSON object in context and updates it after every player message:
+Both the CLI skill and the dashboard share this JSON schema:
 
 ```jsonc
 {
@@ -302,6 +319,15 @@ Claude keeps this JSON object in context and updates it after every player messa
   "chat_log":    [{ "from": "player", "text": "…" }, { "from": "claude", "text": "…" }]
 }
 ```
+
+### SKILL.md
+
+Defines Claude's behaviour as a planning assistant:
+
+- **Always call `python assets/cli.py`** for production math — never compute chains mentally.
+- **Track the factory conversationally** — parse freeform player updates, maintain `FACTORY_STATE` in context, detect bottlenecks, suggest next steps.
+- **Output `FACTORY_STATE` JSON** at session end for import into the dashboard.
+- **Load `references/strategy-topics.md`** on demand for layout, trains, megabases, Space Age, power, and combat questions.
 
 ---
 

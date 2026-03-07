@@ -219,63 +219,64 @@ these IDs to friendly names automatically.
 
 ## 5. Factory Dashboard Artifact
 
-When the player wants to see their factory state visually — or after a
-significant update — launch or update a React artifact using the dashboard
-component defined in `assets/dashboard.min.js`.
+The dashboard is a **published `application/vnd.ant.html` artifact** at a permanent
+URL. Claude does NOT generate or regenerate it during gameplay sessions. The player
+publishes it once from `10x-factorio-engineer/assets/dashboard.html` and it stays live.
 
-### When to launch the artifact
+### Dashboard capabilities
 
-- Player says "show me the dashboard", "update the factory view", "what's my
-  status", or similar.
-- After every factory state update, offer: *"Want me to update the dashboard?"*
-- On session start if the player has an active factory state.
+- Reads/writes `FACTORY_STATE` via `window.storage` (cross-device, Anthropic server-side)
+  with `localStorage` fallback for same-device persistence
+- In-artifact chat powered by `window.claude.complete()` — player can ask light
+  questions and report machine placements directly in the dashboard
+- Import / Export buttons for syncing state with CLI sessions
+- FactorioLab links per production line
 
-### How to pass state
+### State sync: CLI → Dashboard
 
-Render the artifact by injecting the current factory state as a JavaScript
-constant at the top of the artifact code, then embedding the full dashboard
-component below it. The state constant name is `FACTORY_STATE`.
+At the end of a CLI planning session, output the full `FACTORY_STATE` JSON in a
+code block so the player can paste it into the dashboard's Import panel:
 
-```js
-// Inject this at the top of the artifact code:
-const FACTORY_STATE = /* current factory state JSON here */;
+```json
+{
+  "save_name": "My Factory",
+  "dataset": "vanilla",
+  ...
+}
 ```
 
-The complete dashboard component code follows in Section 6. Copy it verbatim
-after the `FACTORY_STATE` constant.
+### State sync: Dashboard → CLI
 
-### Artifact update protocol
+At the start of a CLI session, ask the player to Export from the dashboard and
+paste the JSON. Use it as the initial factory state for the session.
 
-- **First render**: paste the full artifact — `FACTORY_STATE` constant followed
-  by the complete contents of `assets/dashboard.min.js`.
-- **Subsequent updates**: replace only the `FACTORY_STATE` block at the top of
-  the existing artifact. Leave the rest of the artifact code untouched. This
-  keeps updates fast — only the state JSON changes, not the ~600-line component.
+### When to mention the dashboard
+
+- On session start: *"Open your dashboard to follow along."*
+- At session end: *"Here's your updated FACTORY_STATE — paste it into the dashboard Import panel."*
+- If the player asks "show me the dashboard": remind them to open their published URL.
 
 ---
 
-## 6. React Dashboard Component
+## 6. Dashboard Development
 
-The dashboard component lives in `assets/dashboard.min.js`. Read that file
-and paste it verbatim as a React artifact (type `application/vnd.ant.react`),
-preceded by the `FACTORY_STATE` constant.
+The dashboard is a single vanilla HTML file — no React, no build toolchain, no
+external dependencies. The source lives in `dev/dashboard.html`; the built
+(minified) artifact is `10x-factorio-engineer/assets/dashboard.html`.
 
-```jsx
-// Prepend this before the dashboard.min.js contents:
-const FACTORY_STATE = { /* current factory state JSON */ };
-// … paste full contents of assets/dashboard.min.js here …
-```
-
-The component accepts `FACTORY_STATE` from the outer scope (no props). On first
-render paste the full file; on subsequent updates replace only the
-`FACTORY_STATE` block — the component code stays untouched.
-
-To preview the dashboard locally without Claude, run:
+To rebuild after source changes:
 ```bash
-python dev/generate_preview.py
+python dev/build_dashboard.py
 ```
-This writes `dev/preview.html` — a self-contained file that opens
-directly in any browser.
+
+To preview locally:
+```bash
+python dev/build_dashboard.py --open
+```
+
+The artifact uses `window.storage` (requires publishing) with `localStorage` fallback.
+The chat panel calls `window.claude.complete()` — available without publishing as long
+as the user is signed into Claude.ai.
 
 
 ---
@@ -333,13 +334,8 @@ format: lead with machine count for X, then key dependencies, then raw resources
 ### "Show dashboard" / "Update factory view"
 
 ```
-First time:
-1. Assemble FACTORY_STATE from current factory state
-2. Create a React artifact: FACTORY_STATE constant + full assets/dashboard.min.js
-
-Subsequent updates:
-1. Assemble updated FACTORY_STATE
-2. Edit the existing artifact — replace only the FACTORY_STATE block at the top
+1. Tell the player to open their published dashboard URL
+2. At session end, output the full FACTORY_STATE JSON for them to Import
 ```
 
 ---
