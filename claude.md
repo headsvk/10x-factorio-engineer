@@ -36,7 +36,7 @@ chat panel is powered by `window.claude.complete()`. A strategy reference
 
 | Trigger | Required follow-up action |
 |---------|--------------------------|
-| `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. |
+| `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table and any affected sections in this file (`claude.md`) and in `10x-factorio-engineer/SKILL.md` Section 2. |
 | New CLI flag added | Add it to the **CLI Flags** table in `claude.md` and the matching table in `10x-factorio-engineer/SKILL.md` Section 2. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |

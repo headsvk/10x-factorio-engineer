@@ -513,7 +513,6 @@ ${esc(line.player_notes)}
 </div>` : '';
 body = `<div class="card-body">${machineSection}${rawSection}${minerSection}${beltSection}${noteSection}</div>`;
 }
-const labUrl = `https://factoriolab.github.io/#/?s=${encodeURIComponent(line.item)}&v=2`;
 return `
 <div class="line-card ${sc}">
 <div class="card-header ${sc}" data-card="${esc(line.item)}">
@@ -524,7 +523,6 @@ return `
 <div class="card-header-right">
 <span class="rate-text">${actual}/${line.target_rate ?? 0} /min</span>
 <span class="pct-text" style="color:${col}">${p}%</span>
-<a class="ext-link" href="${esc(labUrl)}" data-ext="${esc(labUrl)}" title="FactorioLab">↗</a>
 </div>
 </div>
 <div class="card-progress"><div class="card-progress-fill" style="width:${p}%;background:${col}"></div></div>
@@ -588,15 +586,9 @@ document.querySelectorAll('.tab-btn').forEach(btn =>
 btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); }));
 document.querySelectorAll('.card-header[data-card]').forEach(hdr =>
 hdr.addEventListener('click', e => {
-if (e.target.closest('[data-ext]')) return;
 const item = hdr.dataset.card;
 expandedCards.has(item) ? expandedCards.delete(item) : expandedCards.add(item);
 render();
-}));
-document.querySelectorAll('[data-ext]').forEach(el =>
-el.addEventListener('click', e => {
-e.preventDefault(); e.stopPropagation();
-window.claude?.openExternal(el.dataset.ext);
 }));
 const btnExport = document.getElementById('btn-export');
 if (btnExport) btnExport.addEventListener('click', () => {

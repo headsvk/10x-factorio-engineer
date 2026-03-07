@@ -270,7 +270,7 @@ Single vanilla HTML file — no React, no build toolchain, no external dependenc
 | Science Packs | Gradient progress bars — actual vs. target rate. All 7 vanilla packs and 5 Space Age packs have distinct colours. Sorted in canonical research-tree order. |
 | Bottleneck banner | Red alert strip, shown only when issues exist |
 | Overview tab | Compact line list with % completion + Next Steps |
-| Lines tab | Expandable card per production line: machine table (placed vs needed), raw resources, miners/extractors, belt lane counts, FactorioLab link |
+| Lines tab | Expandable card per production line: machine table (placed vs needed), raw resources, miners/extractors, belt lane counts |
 | Issues tab | Bottlenecks + next steps with traffic-light colours |
 | Chat tab | In-artifact conversation with Claude (`window.claude.complete()`). Claude can update factory state directly from chat responses. |
 
@@ -336,6 +336,36 @@ Defines Claude's behaviour as a planning assistant:
 Dataset JSON files are sourced from
 [KirkMcDonald/kirkmcdonald.github.io](https://github.com/KirkMcDonald/kirkmcdonald.github.io),
 the same data that powers <https://kirkmcdonald.github.io/calc.html>.
+
+---
+
+## Future Work
+
+### CLI / Calculator
+
+- **Beacon support** — model beacon amplification per machine; `--beacon` flag specifying module tier and count
+- **Quality tiers** — Space Age quality; `--quality` flag affecting machine speeds and recipe yields
+- **Power output** — MW per production line (machines × active/idle draw) and total for the factory
+- **Multi-target solve** — one CLI call for a full science block (e.g. red + green + blue simultaneously, shared intermediates deduplicated)
+- **Preferences file** — `--prefs factorio-prefs.json` to load default flags (assembler, furnace, recipe/machine overrides) so they don't need repeating each call
+
+### Dashboard
+
+- **Further minification** — inline CSS/JS whitespace stripping, dead-code removal, shorter variable names to shrink the artifact below 30 kB
+- **Factorio icons** — item and machine icons from [deniszholob/icons-factorio](https://github.com/deniszholob/icons-factorio) throughout the UI
+- **Cleaner design** — visual polish pass: spacing, typography, colour hierarchy
+- **Shopping list view** — total machines, belts, and modules needed to physically build all lines
+- **Multi-save slots** — switch between named factory states without manual import/export
+
+### Skill / Workflow
+
+- **Structured onboarding** — ask dataset → assembler → furnace → prod module tier upfront rather than inferring mid-session
+- **`FACTORY_STATE` diff** — Claude summarises what changed between two exported states
+- **GitHub Actions: skill zip** — CI job that bundles `SKILL.md`, `assets/`, and `references/` into a `.zip` ready to upload to claude.ai as a project knowledge file
+
+### Infra
+
+- **GitHub Actions: test runner** — run `dev/test_cli.py` on every push to `main` and on PRs
 
 ---
 

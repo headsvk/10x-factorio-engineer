@@ -91,7 +91,7 @@ await window.claude.openExternal('https://factoriolab.github.io/...');
 - Returns `undefined`
 - Works on both desktop and Android
 
-**Use in dashboard:** FactorioLab links per production line, wiki links.
+**Use in dashboard:** wiki links, external resources.
 
 ---
 

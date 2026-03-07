@@ -230,7 +230,6 @@ publishes it once from `10x-factorio-engineer/assets/dashboard.html` and it stay
 - In-artifact chat powered by `window.claude.complete()` — player can ask light
   questions and report machine placements directly in the dashboard
 - Import / Export buttons for syncing state with CLI sessions
-- FactorioLab links per production line
 
 ### State sync: CLI → Dashboard
 
