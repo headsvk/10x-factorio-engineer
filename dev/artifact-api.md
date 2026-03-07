@@ -5,6 +5,8 @@ Discovered by empirical testing (March 2026). None of this is officially documen
 **Test suite:** `dev/artifact-api-test.html` — paste into claude.ai as `application/vnd.ant.html` and run
 sections A–H. Compare output against this file to identify what broke.
 
+**Confirmed blocked external image/fetch sources (March 2026):** `raw.githubusercontent.com`, `cdn.jsdelivr.net` — both blocked by CSP for both `img-src` and `connect-src`.
+
 ---
 
 ## Environment Summary
@@ -350,6 +352,7 @@ Priority order:
 | `window.claude.complete()` error types | Need to handle gracefully in chat UI |
 | `window.claude.complete()` token limit | Matters if FACTORY_STATE + history gets large |
 | `window.storage` behaviour after republish | Does existing data survive a republish? |
-| `fetch()` availability | If unblocked, could call external APIs (e.g. factoriolab) |
+| `img-src` / `fetch()` from raw.githubusercontent.com | BLOCKED (confirmed March 2026) |
+| `img-src` / `fetch()` from cdn.jsdelivr.net (jsDelivr GitHub mirror) | BLOCKED (confirmed March 2026 — same as raw.githubusercontent.com) |
 | `sendConversationMessage` actual purpose | Currently a no-op from our perspective |
 | `shared: false` — is `shared: true` possible? | Cross-user shared state for multiplayer factories |
