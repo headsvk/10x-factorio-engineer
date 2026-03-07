@@ -25,7 +25,7 @@ dev/
   dashboard.html            # Dashboard source — single vanilla HTML, no build deps
   build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html
   sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
-  test_cli.py               # unittest suite (59 tests, stdlib only)
+  test_cli.py               # unittest suite (106 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite (window.claude, window.storage, CDN loading, etc.)
   artifact-api.md           # Field research doc for claude.ai artifact APIs
 ```
@@ -47,13 +47,20 @@ Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run
 # Basic usage
 python assets/cli.py --item electronic-circuit --rate 60
 
-# With specific machines and productivity modules
-python assets/cli.py --item processing-unit --rate 10 --assembler 3 --furnace electric --prod-module 3
+# With belt and pump output
+python assets/cli.py --item electronic-circuit --rate 60 --belt blue
+python assets/cli.py --item lubricant --rate 60 --pump legendary
 
-# Override which recipe to use for an item
+# Productivity + beacon modules
+python assets/cli.py --item electronic-circuit --rate 60 \
+    --modules "assembling-machine-3=4:prod:3:normal" \
+    --beacon "assembling-machine-3=8:3:legendary" \
+    --machine-quality legendary
+
+# Override recipe
 python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
 
-# Space Age DLC
+# Space Age DLC with big mining drills
 python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
 
 # Pipe into jq for specific keys
@@ -62,18 +69,27 @@ python assets/cli.py --item processing-unit --rate 10 | jq .raw_resources
 
 ### CLI Flags
 
-| Flag | Default | Values | Description |
-|------|---------|--------|-------------|
-| `--item` | *(required)* | any item-id | Target item key (e.g. `iron-plate`) |
-| `--rate` | *(required)* | float | Desired output in **items / minute** |
-| `--assembler` | `3` | `1`, `2`, `3` | Assembling machine level for crafting recipes |
-| `--furnace` | `electric` | `stone`, `steel`, `electric` | Furnace type for smelting recipes |
-| `--miner` | `electric` | `electric`, `big` | Mining drill for solid ores (`big` = Space Age big mining drill) |
-| `--prod-module` | `0` | `0`, `1`, `2`, `3` | Fill all module slots with productivity modules of this tier. Slot count is per-machine (e.g. assembling-machine-3 = 4 slots, electric-furnace = 2 slots). Machines with 0 slots are unaffected. |
-| `--speed` | `0.0` | float | Speed bonus as a decimal (e.g. `0.5` = +50%). Applied uniformly to all machines. |
-| `--dataset` | `vanilla` | `vanilla`, `space-age` | Game dataset |
-| `--recipe` | *(none)* | `ITEM=RECIPE` | Override the recipe used for a specific item. Repeatable. E.g. `--recipe solid-fuel=solid-fuel-from-light-oil` |
-| `--machine` | *(none)* | `CATEGORY=MACHINE` | Override the machine used for a recipe category. Repeatable. E.g. `--machine organic-or-assembling=assembling-machine-3` |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--item` | *(required)* | Target item key (e.g. `iron-plate`) |
+| `--rate` | *(required)* | Desired output in **items / minute** |
+| `--assembler` | `3` | Assembling machine level `1`/`2`/`3` |
+| `--furnace` | `electric` | Furnace type: `stone` / `steel` / `electric` |
+| `--miner` | `electric` | Mining drill: `electric` / `big` (Space Age big mining drill) |
+| `--dataset` | `vanilla` | Game dataset: `vanilla` / `space-age` |
+| `--machine-quality` | `normal` | Machine housing quality: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
+| `--beacon-quality` | `normal` | Beacon housing quality: same enum |
+| `--belt` | *(none)* | Show belt output for this tier: `yellow`/`red`/`blue`/`turbo` |
+| `--pump` | *(none)* | Show pump output for this quality (fluid items only): quality enum |
+| `--modules` | *(none)* | Module config per machine. Repeatable. Format: `MACHINE=COUNT:TYPE:TIER:QUALITY`. Stack specs for mixed modules. E.g. `--modules "assembling-machine-3=2:prod:3:rare"` |
+| `--beacon` | *(none)* | Beacon config per machine (speed modules assumed). Repeatable. Format: `MACHINE=COUNT:TIER:QUALITY` |
+| `--recipe` | *(none)* | Override recipe for an item. Repeatable. Format: `ITEM=RECIPE` |
+| `--machine` | *(none)* | Override machine for a recipe category. Repeatable. Format: `CATEGORY=MACHINE` |
+| `--recipe-machine` | *(none)* | Override machine for a specific recipe. Repeatable. Format: `RECIPE=MACHINE` |
+| `--recipe-modules` | *(none)* | Override modules for a specific recipe. Repeatable. Same format as `--modules` value |
+| `--recipe-beacon` | *(none)* | Override beacon for a specific recipe. Repeatable. Same format as `--beacon` value |
+
+**Module TYPE:** `prod` / `speed` / `efficiency` (efficiency has no effect on machine counts)
 
 ### Output JSON
 
@@ -85,61 +101,25 @@ python assets/cli.py --item processing-unit --rate 10 | jq .raw_resources
   "assembler": 3,
   "furnace": "electric",
   "miner": "electric",
-  "prod_module": 0,
-  "speed_bonus": 0.0,
+  "machine_quality": "normal",
+  "beacon_quality": "normal",
   "production_steps": [
     {
       "recipe":             "electronic-circuit",
       "machine":            "assembling-machine-3",
-      "machine_count":      2.56,
-      "machine_count_ceil": 3,
-      "rate_per_min":       60.0
-    },
-    {
-      "recipe":             "copper-cable",
-      "machine":            "assembling-machine-3",
-      "machine_count":      1.6,
-      "machine_count_ceil": 2,
-      "rate_per_min":       180.0
-    },
-    {
-      "recipe":             "iron-plate",
-      "machine":            "electric-furnace",
-      "machine_count":      1.6,
-      "machine_count_ceil": 2,
-      "rate_per_min":       60.0
-    },
-    {
-      "recipe":             "copper-plate",
-      "machine":            "electric-furnace",
-      "machine_count":      2.4,
-      "machine_count_ceil": 3,
-      "rate_per_min":       90.0
+      "machine_count":      0.4,
+      "machine_count_ceil": 1,
+      "rate_per_min":       60.0,
+      "beacon_speed_bonus": 0.0
     }
   ],
-  "raw_resources": {
-    "copper-ore": 90.0,
-    "iron-ore":   60.0
-  },
+  "raw_resources": { "copper-ore": 90.0, "iron-ore": 60.0 },
   "miners_needed": {
-    "copper-ore": {
-      "machine":            "electric-mining-drill",
-      "machine_count":      3.0,
-      "machine_count_ceil": 3,
-      "rate_per_min":       90.0
-    },
-    "iron-ore": {
-      "machine":            "electric-mining-drill",
-      "machine_count":      2.0,
-      "machine_count_ceil": 2,
-      "rate_per_min":       60.0
-    }
+    "copper-ore": { "machine": "electric-mining-drill", "machine_count": 3.0, "machine_count_ceil": 3, "rate_per_min": 90.0 },
+    "iron-ore":   { "machine": "electric-mining-drill", "machine_count": 2.0, "machine_count_ceil": 2, "rate_per_min": 60.0 }
   },
-  "belts_for_output": {
-    "yellow": { "belts_needed": 0.0667, "throughput_per_belt": 900 },
-    "red":    { "belts_needed": 0.0333, "throughput_per_belt": 1800 },
-    "blue":   { "belts_needed": 0.0222, "throughput_per_belt": 2700 }
-  }
+  "belt": "blue",
+  "belts_needed": 0.022222
 }
 ```
 
@@ -147,12 +127,14 @@ python assets/cli.py --item processing-unit --rate 10 | jq .raw_resources
 
 | Field | Description |
 |-------|-------------|
-| `production_steps` | Every recipe in the dependency tree. `machine_count` is exact (rational); `machine_count_ceil` rounds up to whole machines. |
-| `raw_resources` | Items with no crafting recipe (ores, crude-oil, water …). Rates are items/minute required from the ground. |
-| `miners_needed` | Per-resource extractor counts. Solid ores → `machine_count`. Crude-oil/fluids → `required_yield_pct` (FactorioLab style: total % yield needed across all pumpjack fields). Water → `offshore-pump` count. |
-| `belts_for_output` | Full belt lanes needed for the *target item* output. Space Age adds a `turbo` tier (3600/min). |
-| `recipe_overrides` | Only present when `--recipe` flags were passed. |
-| `machine_overrides` | Only present when `--machine` flags were passed. |
+| `production_steps` | Every recipe in the dependency tree. `machine_count` is exact (`Fraction`) without beacons; `float` when beacons are active (sqrt is irrational). `machine_count_ceil` rounds up. `beacon_speed_bonus` is 0.0 when no beacon configured. |
+| `raw_resources` | Items with no crafting recipe (ores, crude-oil, water …). Rates are items/minute from the ground. |
+| `miners_needed` | Per-resource extractor counts. Solid ores → `machine_count`. Crude-oil → `required_yield_pct` (FactorioLab style). Water → `offshore-pump` count. |
+| `belt` + `belts_needed` | Only present when `--belt` is set and item is solid. Single number: full belt lanes needed. |
+| `pump` + `pumps_needed` | Only present when `--pump` is set and item is a fluid. |
+| `module_configs` / `beacon_configs` | Echoed when `--modules` / `--beacon` flags were passed. |
+| `recipe_overrides` / `machine_overrides` | Echoed when `--recipe` / `--machine` flags were passed. |
+| `recipe_machine_overrides` / `recipe_module_overrides` / `recipe_beacon_overrides` | Echoed when respective per-recipe flags were passed. |
 
 ### Recipe Selection
 
@@ -169,10 +151,9 @@ When an item has multiple recipes (e.g. `solid-fuel` has three), the tool picks 
 linear system (AOP + heavy-oil cracking + light-oil cracking) to avoid
 double-counting crude-oil when multiple oil products appear in the same chain.
 
-### Productivity Modules
+### Modules and Beacons
 
-`--prod-module 3` fills every eligible machine's slots with productivity-module-3
-(+10% per slot). Machine slot counts:
+`--modules MACHINE=COUNT:TYPE:TIER:QUALITY` configures modules per machine type. Stack the flag for mixed modules (e.g. 1 prod + 3 speed). Module slot counts:
 
 | Machine | Slots |
 |---------|-------|
@@ -190,8 +171,14 @@ double-counting crude-oil when multiple oil products appear in the same chain.
 | Foundry / cryogenic plant | 4 |
 | Crusher | 2 |
 
-Recipes that don't allow productivity (belts, inserters, buildings, weapons …)
-are never boosted regardless of the flag.
+Recipes that don't allow productivity ignore prod modules. Efficiency modules are stored for output but have no effect on machine counts.
+
+`--beacon MACHINE=COUNT:TIER:QUALITY` applies Factorio 2.0 diminishing-returns beacon formula:
+```
+beacon_speed = effectivity × sqrt(count) × 2 × speed_module_bonus_per_slot
+```
+Beacon quality effectivity: 1.5 (normal) / 1.7 (uncommon) / 1.9 (rare) / 2.1 (epic) / 2.5 (legendary).
+When beacons are active, `machine_count` becomes a float (sqrt is irrational).
 
 ### Machine Crafting Speeds
 
@@ -213,8 +200,8 @@ are never boosted regardless of the flag.
 
 - **Coal liquefaction**: cycle-detected ingredients are surfaced as raw inputs.
 - **Steam**: treated as a raw resource (no crafting recipe in the dataset).
-- **Beacons**: `--speed` applies uniformly to all machines; per-machine beacon amplification is not modelled.
-- **Quality**: Space Age quality tiers are not modelled.
+- **Efficiency modules**: stored and echoed in output, but have no effect on machine counts or power draw.
+- **Quality recycling loops**: quality tier progression via recycling is not modelled.
 - **Belt counts** reflect only the *target item* output rate; intermediate ingredient belts are not calculated.
 
 ### Running Tests
@@ -223,7 +210,7 @@ are never boosted regardless of the flag.
 python -m unittest dev.test_cli -v
 ```
 
-59 tests, stdlib only.
+106 tests, stdlib only.
 
 ---
 
@@ -339,11 +326,9 @@ the same data that powers <https://kirkmcdonald.github.io/calc.html>.
 
 ### CLI / Calculator
 
-- **Beacon support** — model beacon amplification per machine; `--beacon` flag specifying module tier and count
-- **Quality tiers** — Space Age quality; `--quality` flag affecting machine speeds and recipe yields
-- **Power output** — MW per production line (machines × active/idle draw) and total for the factory
+- **Power output** — MW per production line (machines × active/idle draw) and total for the factory; efficiency module effect on power draw
+- **Quality recycling loops** — model the throughput cost of quality recycling lines for legendary production
 - **Multi-target solve** — one CLI call for a full science block (e.g. red + green + blue simultaneously, shared intermediates deduplicated)
-- **Preferences file** — `--prefs factorio-prefs.json` to load default flags (assembler, furnace, recipe/machine overrides) so they don't need repeating each call
 
 ### Dashboard
 

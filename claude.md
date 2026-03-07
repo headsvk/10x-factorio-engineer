@@ -59,7 +59,7 @@ The goal is that `claude.md` always accurately describes the codebase.
 | `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
-| `dev/test_cli.py` | `unittest` suite (59 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (106 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -78,11 +78,24 @@ Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missin
 | `--assembler` | `3` | Assembling machine level 1/2/3 |
 | `--furnace` | `electric` | `stone` / `steel` / `electric` |
 | `--miner` | `electric` | `electric` / `big` (big = Space Age big mining drill) |
-| `--prod-module` | `0` | Productivity module tier to fill all slots (0=none, 1/2/3). Slot count is per-machine (e.g. assembling-machine-3=4, electric-furnace=2). |
-| `--speed` | `0.0` | Speed bonus as decimal (e.g. `0.5` = +50%) |
 | `--dataset` | `vanilla` | `vanilla` / `space-age` |
+| `--machine-quality` | `normal` | Quality of machines: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
+| `--beacon-quality` | `normal` | Quality of beacon housings: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
+| `--belt` | _(none)_ | Preferred belt tier for solid output: `yellow`/`red`/`blue`/`turbo` |
+| `--pump` | _(none)_ | Preferred pump quality for fluid output: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
+| `--modules` | _(none)_ | Module config per machine (global default). Repeatable. Format: `MACHINE=COUNT:TYPE:TIER:QUALITY[,COUNT:TYPE:TIER:QUALITY...]` e.g. `--modules assembling-machine-3=2:prod:3:rare,2:speed:3:uncommon` |
+| `--beacon` | _(none)_ | Beacon config per machine (global default, speed modules). Repeatable. Format: `MACHINE=COUNT:TIER:QUALITY` e.g. `--beacon assembling-machine-3=8:3:legendary` |
 | `--recipe` | _(none)_ | Override recipe for a specific item. Repeatable. Format: `ITEM=RECIPE-KEY` (e.g. `--recipe rocket-fuel=ammonia-rocket-fuel`) |
 | `--machine` | _(none)_ | Override machine for a recipe category. Repeatable. Format: `CATEGORY=MACHINE-KEY` (e.g. `--machine organic-or-assembling=assembling-machine-3`) |
+| `--recipe-machine` | _(none)_ | Override machine for a specific recipe. Repeatable. Format: `RECIPE=MACHINE-KEY` e.g. `--recipe-machine iron-gear-wheel=foundry` |
+| `--recipe-modules` | _(none)_ | Override modules for a specific recipe (overrides global `--modules` for that recipe). Repeatable. Format: `RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` |
+| `--recipe-beacon` | _(none)_ | Override beacon for a specific recipe. Repeatable. Format: `RECIPE=COUNT:TIER:QUALITY` |
+| `--recipe-belt` | _(none)_ | Override belt tier for a specific recipe output. Repeatable. Format: `RECIPE=TIER` |
+| `--recipe-pump` | _(none)_ | Override pump quality for a specific recipe fluid output. Repeatable. Format: `RECIPE=QUALITY` |
+
+**Module TYPE values:** `prod` / `speed` / `efficiency` (efficiency stored but not used in machine-count math — no speed/productivity effect)
+
+**Quality enum:** `normal` / `uncommon` / `rare` / `epic` / `legendary` (applies to `--machine-quality`, `--beacon-quality`, pump quality, and the QUALITY field in module specs)
 
 ---
 
@@ -96,15 +109,18 @@ Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missin
   "assembler": 3,
   "furnace": "electric",
   "miner": "electric",
-  "prod_module": 0,
-  "speed_bonus": 0.0,
+  "machine_quality": "normal",
+  "beacon_quality": "normal",
+  "belt": "blue",
+  "belts_needed": 0.0037,
   "production_steps": [
     {
       "recipe": "processing-unit",
       "machine": "assembling-machine-3",
       "machine_count": 7.5,
       "machine_count_ceil": 8,
-      "rate_per_min": 10.0
+      "rate_per_min": 10.0,
+      "beacon_speed_bonus": 10.0
     }
   ],
   "raw_resources": {
@@ -124,22 +140,37 @@ Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missin
       "rate_per_min": 120.0
     }
   },
-  "belts_for_output": {
-    "yellow": { "belts_needed": 0.0111, "throughput_per_belt": 900 },
-    "red":    { "belts_needed": 0.0056, "throughput_per_belt": 1800 },
-    "blue":   { "belts_needed": 0.0037, "throughput_per_belt": 2700 }
+  "module_configs": {
+    "assembling-machine-3": [
+      {"count": 2, "type": "prod", "tier": 3, "quality": "rare"},
+      {"count": 2, "type": "speed", "tier": 3, "quality": "uncommon"}
+    ]
+  },
+  "beacon_configs": {
+    "assembling-machine-3": {"count": 8, "tier": 3, "quality": "legendary"}
   },
   "recipe_overrides": { "heavy-oil": "coal-liquefaction" },
-  "machine_overrides": { "metallurgy": "assembling-machine-3" }
+  "machine_overrides": { "metallurgy": "assembling-machine-3" },
+  "recipe_machine_overrides": { "iron-gear-wheel": "foundry" },
+  "recipe_module_overrides": {
+    "iron-gear-wheel": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]
+  },
+  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "tier": 3, "quality": "normal"} },
+  "recipe_belt_overrides": { "iron-gear-wheel": "red" },
+  "recipe_pump_overrides": { "sulfuric-acid": "legendary" }
 }
 ```
 
 Notes:
-- `pumpjack` emits `required_yield_pct` instead of `machine_count` (FactorioLab style — the total yield % across all pumpjack fields needed)
+- `belt` + `belts_needed` present only when `--belt` is set and item is a solid; `belts_needed` = `rate / belt_throughput`
+- `pump` + `pumps_needed` present instead when `--pump` is set and item is a fluid; `pumps_needed` = `rate / pump_throughput`
+- `beacon_speed_bonus` in each step: total beacon speed contribution for that recipe (float; 0.0 if no beacons). Formula: `effectivity × sqrt(count) × BEACON_SLOTS × module_speed_per_slot`
+- `machine_count` is `float` (not `Fraction`) when beacons are configured for that recipe's machine (due to `sqrt`)
+- `pumpjack` emits `required_yield_pct` instead of `machine_count` (FactorioLab style)
 - `offshore-pump` emits `machine_count` + `machine_count_ceil`
-- `space-age` dataset adds a `turbo` belt tier (3600/min) to `belts_for_output`
-- `recipe_overrides` key is present only when `--recipe` flags were passed
-- `machine_overrides` key is present only when `--machine` flags were passed
+- `module_configs` present only when `--modules` flags were passed
+- `beacon_configs` present only when `--beacon` flags were passed
+- `recipe_overrides`, `machine_overrides`, `recipe_machine_overrides`, `recipe_module_overrides`, `recipe_beacon_overrides`, `recipe_belt_overrides`, `recipe_pump_overrides` each present only when the respective flags were passed
 
 ---
 
@@ -154,6 +185,7 @@ Notes:
 | `build_raw_set(data)` | Items with no recipe (ores, crude-oil, water, etc.) |
 | `build_recipe_index(data)` | `{item_key: [recipe, ...]}`, skips recycling + barrel subgroups |
 | `build_resource_info(data)` | `{item: {mining_time, yield, category}}` using `Fraction` |
+| `build_fluid_set(data)` | `frozenset` of item keys whose type is `"fluid"` in the dataset |
 | `get_machine(cat, assembler_level, furnace_type)` | Maps recipe category → `(machine_key, speed)` |
 | `pick_recipe(item_key, recipe_idx, overrides)` | Picks canonical recipe (see selection logic below) |
 | `_gauss2 / _gauss3` | Exact `Fraction` Gaussian elimination (2×2 and 3×3) |
@@ -165,17 +197,117 @@ Notes:
 
 ### `Solver` class state
 
-- `steps`: `{recipe_key: {recipe, machine, machine_count, rate_per_min}}` — accumulated across all tree paths
+- `steps`: `{recipe_key: {recipe, machine, machine_count, rate_per_min, beacon_speed_bonus}}` — accumulated across all tree paths; `machine_count` is `float` when beacons active, `Fraction` otherwise
 - `raw_resources`: `{item: Fraction}` — total demanded rate
 - `surplus`: `{item: Fraction}` — co-product credits not yet consumed
 - `oil_demands`: `{item: Fraction}` — deferred petroleum-gas/light-oil/heavy-oil demands
-- `machine_overrides`: `{category: machine_key}` — redirects category’s default machine
+- `machine_overrides`: `{category: machine_key}` — category-level machine redirect (`--machine`)
+- `module_configs`: `{machine_key: [ModuleSpec]}` — global module config per machine (`--modules`)
+- `beacon_configs`: `{machine_key: BeaconSpec}` — global beacon config per machine (`--beacon`)
+- `recipe_machine_overrides`: `{recipe_key: machine_key}` — per-recipe machine override (`--recipe-machine`)
+- `recipe_module_overrides`: `{recipe_key: [ModuleSpec]}` — per-recipe module override (`--recipe-modules`)
+- `recipe_beacon_overrides`: `{recipe_key: BeaconSpec}` — per-recipe beacon override (`--recipe-beacon`)
+- `machine_quality`: `str` — quality tier applied to all machines (speed bonus via `MACHINE_QUALITY_SPEED`)
+- `beacon_quality`: `str` — quality tier of beacon housings (effectivity via `BEACON_EFFECTIVITY`)
+
+**`ModuleSpec`** (named tuple or dict): `{count: int, type: str, tier: int, quality: str}`
+**`BeaconSpec`** (named tuple or dict): `{count: int, tier: int, quality: str}`
 
 ---
 
 ## Arithmetic
 
 All numeric values use `fractions.Fraction` internally. Only converted to `float` in `format_output()`. This eliminates floating-point accumulation errors.
+
+**Exception:** beacon speed bonus uses `math.sqrt(count)` which is irrational, so `machine_count` becomes `float` for any recipe whose machine has a beacon config. Runs with no beacons remain fully `Fraction`.
+
+### New constant tables
+
+```python
+# Quality enum (valid values for all quality flags)
+QUALITY_NAMES = frozenset(["normal", "uncommon", "rare", "epic", "legendary"])
+
+# Multiplier applied to positive module stats at each quality tier
+MODULE_QUALITY_MULT: dict[str, Fraction] = {
+    "normal":    Fraction(1),
+    "uncommon":  Fraction(13, 10),   # ×1.3
+    "rare":      Fraction(8,  5),    # ×1.6
+    "epic":      Fraction(19, 10),   # ×1.9
+    "legendary": Fraction(5,  2),    # ×2.5
+}
+
+# Additive crafting-speed bonus from machine quality
+MACHINE_QUALITY_SPEED: dict[str, Fraction] = {
+    "normal":    Fraction(0),
+    "uncommon":  Fraction(3, 10),    # +30%
+    "rare":      Fraction(3, 5),     # +60%
+    "epic":      Fraction(9, 10),    # +90%
+    "legendary": Fraction(3, 2),     # +150%
+}
+
+# Beacon distribution effectivity by beacon housing quality
+# Range 1.5–2.5; verified against FactorioLab
+BEACON_EFFECTIVITY: dict[str, Fraction] = {
+    "normal":    Fraction(3,  2),    # 1.5
+    "uncommon":  Fraction(17, 10),   # 1.7
+    "rare":      Fraction(19, 10),   # 1.9
+    "epic":      Fraction(21, 10),   # 2.1
+    "legendary": Fraction(5,  2),    # 2.5
+}
+
+# Base speed bonus per speed-module tier at normal quality
+SPEED_MODULE_BONUS: dict[int, Fraction] = {
+    1: Fraction(1, 5),    # +20%
+    2: Fraction(3, 10),   # +30%
+    3: Fraction(1, 2),    # +50%
+}
+
+# Base productivity bonus per prod-module tier at normal quality (same as MODULE_PROD_BONUS)
+# combined with MODULE_QUALITY_MULT for effective bonus
+
+BEACON_SLOTS = 2   # standard beacon has 2 module slots; supply range = 3 tiles (quality-invariant)
+
+# Pump throughput by pump quality (fluid/min per pump)
+PUMP_THROUGHPUT: dict[str, int] = {
+    "normal":    72_000,
+    "uncommon":  93_600,
+    "rare":      115_200,
+    "epic":      136_800,
+    "legendary": 180_000,
+}
+```
+
+### Beacon speed formula
+
+```
+beacon_speed(recipe) =
+    BEACON_EFFECTIVITY[beacon_quality]
+    × sqrt(count)
+    × BEACON_SLOTS
+    × SPEED_MODULE_BONUS[tier] × MODULE_QUALITY_MULT[module_quality]
+```
+
+Effective machine speed:
+```
+effective_speed = base_speed
+                × (1 + MACHINE_QUALITY_SPEED[machine_quality])
+                × (1 + beacon_speed(recipe))
+```
+
+Effective prod bonus (from machine modules):
+```
+prod_bonus = sum(
+    count_i × MODULE_PROD_BONUS[tier_i] × MODULE_QUALITY_MULT[quality_i]
+    for each prod module spec in this recipe's module config
+)
+```
+
+Recipe module config lookup order (first match wins):
+1. `recipe_module_overrides[recipe_key]` — per-recipe override (`--recipe-modules`)
+2. `module_configs[machine_key]` — global per-machine default (`--modules`)
+3. No modules (zero bonus)
+
+Same lookup order applies to beacon config (`recipe_beacon_overrides` → `beacon_configs` → no beacons).
 
 ---
 
@@ -282,7 +414,7 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 59 tests covering:
+`dev/test_cli.py` contains 106 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -294,15 +426,18 @@ python -m unittest dev.test_cli -v
 | `TestSpaceAgeMachineRouting` | superconductor routes to electromagnetic-plant + foundry + cryogenic-plant |
 | `TestBigMiningDrill` | 4 big drills for tungsten-ore at 60/min; electric drill for vanilla iron |
 | `TestMachineCategoryVanilla` | assembler-3 default; electric/stone furnace; chemical-plant; oil-refinery |
-| `TestProductivityBonus` | prod-module-3 on assembling-machine-3 reduces count; stone-furnace (0 slots) ignores prod; electric-furnace 2-slot ratio; speed bonus |
-| `TestFractionArithmetic` | All `raw_resources` and `machine_count` values remain `Fraction` throughout |
+| `TestModuleConfig` | `--modules MACHINE=...` reduces machine count (prod); speed modules reduce count; mixed prod+speed; zero-slot machine ignores prod/speed; module quality multiplier scales bonus; per-recipe override via `--recipe-modules` |
+| `TestFractionArithmetic` | All `raw_resources` and `machine_count` values remain `Fraction` in beacon-free runs |
 | `TestCoalLiquefaction` | `coal-liquefaction` via `--recipe heavy-oil=coal-liquefaction`; net heavy-oil math (65/cycle); coal+steam in raw; AOP not used; cracking engaged for petgas demand |
 | `TestSimpleCoalLiquefaction` | `simple-coal-liquefaction` (Space Age); coal+calcite+sulfuric-acid in raw; no crude-oil; cracking for petgas |
 | `TestGlebaMachineRouting` | `organic` → biochamber (no assembler); `pressing` → agricultural-tower (count=1/4 for transport-belt); `captive-spawner-process` → captive-spawner with zero inputs |
 | `TestNutrientsRecipes` | Default picks `nutrients-from-yumako-mash` via `RECIPE_DEFAULTS` (not fish); no circular dependency; fish route still available via `--recipe` override; bioflux override full biochamber chain |
-| `TestSpaceAgeTurboBelt` | Space Age `format_output` includes `turbo` belt tier (3600/min); vanilla does not |
-| `TestMachineOverride` | `--machine CATEGORY=MACHINE` redirects category to a different machine; unknown machine falls through; machine_overrides appears in JSON output |
-| `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields (dataset, assembler, recipe_overrides, machine_overrides, preferred_belt) |
+| `TestBeltOutput` | `--belt` produces single `belt`+`belts_needed` fields; no `belts_for_output` table; `--recipe-belt` overrides per recipe; omitted when flag absent |
+| `TestPumpOutput` | `--pump` produces `pump`+`pumps_needed` for fluid items; quality throughput values (72000/93600/115200/136800/180000); `--recipe-pump` overrides per recipe |
+| `TestBeaconConfig` | `--beacon MACHINE=COUNT:TIER:QUALITY` computes speed via sqrt formula; `beacon_speed_bonus` in step output; `machine_count` becomes float; beacon quality effectivity (1.5/1.7/1.9/2.1/2.5); per-recipe override via `--recipe-beacon` |
+| `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |
+| `TestMachineOverride` | `--machine CATEGORY=MACHINE` redirects category; `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; both surface in JSON output |
+| `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
 
 ---
 
@@ -336,9 +471,10 @@ Top-level keys: `items[]`, `recipes[]`, `resources[]`, `planets[]`
 
 ## Known Limitations / Pending Work
 
-1. **No quality support**: Space Age quality tiers not modelled.
+1. **No power consumption tracking**: Efficiency modules are stored and echoed in output but have no effect on machine-count math. Power draw per step is not calculated.
 
-2. **No beacon support**: Speed bonus (`--speed`) and productivity (`--prod-module`) are applied uniformly across all machines. Beacon amplification is not modelled.
+2. **No quality recycling loops**: Quality tier progression (e.g. recycling normal→legendary) is not modelled. Machine/module/beacon quality multipliers are applied directly but the throughput cost of quality recycling lines is out of scope.
+
 
 ---
 

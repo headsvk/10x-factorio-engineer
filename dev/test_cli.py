@@ -11,7 +11,7 @@ import math
 import unittest
 from fractions import Fraction
 import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'skill', 'assets')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '10x-factorio-engineer', 'assets')))
 
 import cli
 
@@ -35,17 +35,22 @@ def setUpModule() -> None:
 
 
 def _solver(dataset: str = "vanilla", **kwargs) -> cli.Solver:
-    """Convenience factory; kwargs override Solver defaults."""
+    """Convenience factory using the new Solver API; kwargs override defaults."""
     d = _DATA[dataset]
     return cli.Solver(
-        recipe_idx       = kwargs.get("recipe_idx",       d["recipe_idx"]),
-        raw_set          = kwargs.get("raw_set",          d["raw_set"]),
-        assembler_level  = kwargs.get("assembler_level",  3),
-        furnace_type     = kwargs.get("furnace_type",     "electric"),
-        prod_module_tier = kwargs.get("prod_module_tier", 0),
-        speed_bonus      = kwargs.get("speed_bonus",      Fraction(0)),
-        recipe_overrides = kwargs.get("recipe_overrides", None),
-        machine_overrides = kwargs.get("machine_overrides", None),
+        recipe_idx               = kwargs.get("recipe_idx",               d["recipe_idx"]),
+        raw_set                  = kwargs.get("raw_set",                  d["raw_set"]),
+        assembler_level          = kwargs.get("assembler_level",          3),
+        furnace_type             = kwargs.get("furnace_type",             "electric"),
+        module_configs           = kwargs.get("module_configs",           None),
+        beacon_configs           = kwargs.get("beacon_configs",           None),
+        machine_quality          = kwargs.get("machine_quality",          "normal"),
+        beacon_quality           = kwargs.get("beacon_quality",           "normal"),
+        recipe_overrides         = kwargs.get("recipe_overrides",         None),
+        machine_overrides        = kwargs.get("machine_overrides",        None),
+        recipe_machine_overrides = kwargs.get("recipe_machine_overrides", None),
+        recipe_module_overrides  = kwargs.get("recipe_module_overrides",  None),
+        recipe_beacon_overrides  = kwargs.get("recipe_beacon_overrides",  None),
     )
 
 
@@ -206,13 +211,20 @@ class TestRecipeOverride(unittest.TestCase):
         s = _solver(recipe_overrides=overrides)
         s.solve("solid-fuel", Fraction(10))
         s.resolve_oil(_DATA["vanilla"]["data"])
+        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
 
         args = argparse.Namespace(
             item="solid-fuel", rate=10, dataset="vanilla",
             assembler=3, furnace="electric", miner="electric",
-            prod_module=0, speed=0.0,
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None, recipe_belt_overrides=None,
+            recipe_pump_overrides=None,
         )
-        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"], overrides)
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
+                                fluid_set=fluid_set)
         self.assertEqual(out["recipe_overrides"], overrides)
 
 
@@ -303,12 +315,11 @@ class TestMachineCategoryVanilla(unittest.TestCase):
 class TestProductivityBonus(unittest.TestCase):
 
     def test_prod_reduces_machine_count(self):
-        # Prod-module-3 fills 4 slots on assembling-machine-3 → +40% output,
-        # so fewer machines are needed to hit the same rate.
-        base = _solver(prod_module_tier=0)
+        # 4× prod-3-normal on assembling-machine-3 → +40% output → fewer machines.
+        base = _solver()
         base.solve("electronic-circuit", Fraction(60))
 
-        prod = _solver(prod_module_tier=3)   # +40% on assembling-machine-3
+        prod = _solver(module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]})
         prod.solve("electronic-circuit", Fraction(60))
 
         self.assertGreater(
@@ -318,10 +329,13 @@ class TestProductivityBonus(unittest.TestCase):
 
     def test_zero_slot_machine_ignores_prod(self):
         # stone-furnace has 0 slots → prod module makes no difference.
-        base  = _solver(furnace_type="stone", prod_module_tier=0)
+        base = _solver(furnace_type="stone")
         base.solve("iron-plate", Fraction(60))
 
-        prod  = _solver(furnace_type="stone", prod_module_tier=3)
+        prod = _solver(
+            furnace_type="stone",
+            module_configs={"stone-furnace": [_mspec(4, "prod", 3)]},
+        )
         prod.solve("iron-plate", Fraction(60))
 
         self.assertEqual(
@@ -330,21 +344,28 @@ class TestProductivityBonus(unittest.TestCase):
         )
 
     def test_electric_furnace_two_slots(self):
-        # electric-furnace has 2 slots → prod-3 gives +20%, not +40%.
-        prod = _solver(furnace_type="electric", prod_module_tier=3)
+        # electric-furnace has 2 slots → 4 prod-3 specs capped to 2 → +20%, not +40%.
+        prod = _solver(
+            furnace_type="electric",
+            module_configs={"electric-furnace": [_mspec(4, "prod", 3)]},
+        )
         prod.solve("iron-plate", Fraction(60))
 
-        base = _solver(furnace_type="electric", prod_module_tier=0)
+        base = _solver(furnace_type="electric")
         base.solve("iron-plate", Fraction(60))
 
         ratio = base.steps["iron-plate"]["machine_count"] / prod.steps["iron-plate"]["machine_count"]
-        self.assertAlmostEqual(float(ratio), 1.20, places=6)  # (1+0.20) = 1.20x more base machines
+        self.assertAlmostEqual(float(ratio), 1.20, places=6)
 
     def test_speed_reduces_machine_count(self):
-        base  = _solver(speed_bonus=Fraction(0))
+        # 1× speed-3-normal in electric-furnace → +50% speed → fewer machines.
+        base = _solver(furnace_type="electric")
         base.solve("iron-plate", Fraction(120))
 
-        fast  = _solver(speed_bonus=Fraction(1, 2))  # +50%
+        fast = _solver(
+            furnace_type="electric",
+            module_configs={"electric-furnace": [_mspec(1, "speed", 3)]},
+        )
         fast.solve("iron-plate", Fraction(120))
 
         self.assertGreater(
@@ -664,39 +685,17 @@ class TestNutrientsRecipes(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSpaceAgeTurboBelt(unittest.TestCase):
-    """Space Age adds a 'turbo' belt tier (3600/min) to belts_for_output."""
+    """Space Age includes a 'turbo' belt tier (3600/min); vanilla does not."""
 
-    def _output(self, dataset, item="iron-plate", rate=60):
-        import argparse
-        d = _DATA[dataset]
-        s = cli.Solver(
-            recipe_idx       = d["recipe_idx"],
-            raw_set          = d["raw_set"],
-            assembler_level  = 3,
-            furnace_type     = "electric",
-            prod_module_tier = 0,
-            speed_bonus      = Fraction(0),
-            recipe_overrides = None,
-        )
-        s.solve(item, Fraction(rate))
-        s.resolve_oil(d["data"])
-        args = argparse.Namespace(
-            item=item, rate=rate, dataset=dataset,
-            assembler=3, furnace="electric", miner="electric",
-            prod_module=0, speed=0.0,
-        )
-        return cli.format_output(args, s, d["resource_info"], None)
+    def test_turbo_belt_in_space_age(self):
+        out = _fmt_new("space-age", "iron-plate", 60, belt="turbo")
+        self.assertEqual(out["belt"], "turbo")
+        self.assertAlmostEqual(out["belts_needed"], 60 / 3600, places=6)
 
-    def test_turbo_belt_present_in_space_age(self):
-        out = self._output("space-age")
-        self.assertIn("turbo", out["belts_for_output"])
-        self.assertEqual(out["belts_for_output"]["turbo"]["throughput_per_belt"], 3600)
-
-    def test_no_turbo_belt_in_vanilla(self):
-        out = self._output("vanilla")
-        self.assertNotIn("turbo", out["belts_for_output"])
-        # Vanilla should still have the three standard tiers
-        self.assertEqual(set(out["belts_for_output"].keys()), {"yellow", "red", "blue"})
+    def test_blue_belt_in_vanilla(self):
+        out = _fmt_new("vanilla", "iron-plate", 60, belt="blue")
+        self.assertEqual(out["belt"], "blue")
+        self.assertAlmostEqual(out["belts_needed"], 60 / 2700, places=6)
 
 
 # ---------------------------------------------------------------------------
@@ -749,14 +748,20 @@ class TestMachineOverride(unittest.TestCase):
                     machine_overrides=overrides_m)
         s.solve("iron-plate", Fraction(60))
         s.resolve_oil(_DATA["space-age"]["data"])
+        fluid_set = cli.build_fluid_set(_DATA["space-age"]["data"])
 
         args = argparse.Namespace(
             item="iron-plate", rate=60, dataset="space-age",
             assembler=3, furnace="electric", miner="electric",
-            prod_module=0, speed=0.0,
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None, recipe_belt_overrides=None,
+            recipe_pump_overrides=None,
         )
         out = cli.format_output(args, s, _DATA["space-age"]["resource_info"],
-                                {"iron-plate": "casting-iron"}, overrides_m)
+                                fluid_set=fluid_set)
         self.assertEqual(out["machine_overrides"], overrides_m)
 
     def test_unknown_machine_falls_through(self):
@@ -806,6 +811,741 @@ class TestPrefsFile(unittest.TestCase):
             self.assertEqual(loaded["preferred_belt"], "blue")
         finally:
             os.unlink(fname)
+
+
+# ===========================================================================
+# NEW API HELPERS
+# Solver constructor will change: prod_module_tier/speed_bonus are removed.
+# These helpers use the new parameter names. Old _solver() stays for existing
+# tests; _solver_new() drives all new test classes below.
+# ===========================================================================
+
+def _mspec(count: int, mtype: str, tier: int, quality: str = "normal") -> dict:
+    """Build a ModuleSpec dict."""
+    return {"count": count, "type": mtype, "tier": tier, "quality": quality}
+
+
+def _bspec(count: int, tier: int, quality: str = "normal") -> dict:
+    """Build a BeaconSpec dict (speed modules assumed)."""
+    return {"count": count, "tier": tier, "quality": quality}
+
+
+def _solver_new(dataset: str = "vanilla", **kwargs) -> cli.Solver:
+    """Convenience factory using the new Solver API."""
+    d = _DATA[dataset]
+    return cli.Solver(
+        recipe_idx             = kwargs.get("recipe_idx",             d["recipe_idx"]),
+        raw_set                = kwargs.get("raw_set",                d["raw_set"]),
+        assembler_level        = kwargs.get("assembler_level",        3),
+        furnace_type           = kwargs.get("furnace_type",           "electric"),
+        module_configs         = kwargs.get("module_configs",         None),
+        beacon_configs         = kwargs.get("beacon_configs",         None),
+        machine_quality        = kwargs.get("machine_quality",        "normal"),
+        beacon_quality         = kwargs.get("beacon_quality",         "normal"),
+        recipe_overrides       = kwargs.get("recipe_overrides",       None),
+        machine_overrides      = kwargs.get("machine_overrides",      None),
+        recipe_machine_overrides = kwargs.get("recipe_machine_overrides", None),
+        recipe_module_overrides  = kwargs.get("recipe_module_overrides",  None),
+        recipe_beacon_overrides  = kwargs.get("recipe_beacon_overrides",  None),
+    )
+
+
+def _fmt_new(
+    dataset: str,
+    item: str,
+    rate: float,
+    *,
+    belt: str | None = None,
+    pump: str | None = None,
+    solver: "cli.Solver | None" = None,
+) -> dict:
+    """
+    Run solver + format_output with new-style args.
+    Builds a solver internally unless one is passed in.
+    """
+    import argparse
+    d = _DATA[dataset]
+    if solver is None:
+        s = _solver_new(dataset)
+        s.solve(item, Fraction(rate))
+        s.resolve_oil(d["data"])
+    else:
+        s = solver
+    fluid_set = cli.build_fluid_set(d["data"])
+    args = argparse.Namespace(
+        item=item, rate=rate, dataset=dataset,
+        assembler=3, furnace="electric", miner="electric",
+        machine_quality="normal", beacon_quality="normal",
+        belt=belt, pump=pump,
+        module_configs=None, beacon_configs=None,
+        recipe_machine_overrides=None, recipe_module_overrides=None,
+        recipe_beacon_overrides=None,
+        recipe_belt_overrides=None, recipe_pump_overrides=None,
+    )
+    return cli.format_output(args, s, d["resource_info"], fluid_set=fluid_set)
+
+
+# ---------------------------------------------------------------------------
+# Module config (replaces TestProductivityBonus for new API)
+# ---------------------------------------------------------------------------
+#
+# Key constants used in expected values:
+#   assembling-machine-3: speed=5/4, slots=4
+#   electric-furnace:     speed=2,   slots=2
+#   stone-furnace:        speed=1,   slots=0
+#   prod-3 normal bonus per slot  : 10/100
+#   prod-3 legendary bonus per slot: 10/100 × 5/2 = 25/100
+#   speed-3 normal bonus per slot : 50/100
+# ---------------------------------------------------------------------------
+
+class TestModuleConfig(unittest.TestCase):
+
+    def test_prod_reduces_machine_count(self):
+        # 4× prod-3-normal in assembler-3:  prod_bonus = 4×10% = 40%
+        # effective_result = 7/5  →  machine_count = 2/7  (vs 2/5 without)
+        no_mod = _solver_new()
+        no_mod.solve("electronic-circuit", Fraction(60))
+
+        prod = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "prod", 3)]
+        })
+        prod.solve("electronic-circuit", Fraction(60))
+
+        self.assertGreater(
+            no_mod.steps["electronic-circuit"]["machine_count"],
+            prod.steps["electronic-circuit"]["machine_count"],
+        )
+
+    def test_prod_exact_machine_count(self):
+        # assembler-3 (speed=5/4), electronic-circuit (time=0.5s, yield=1)
+        # prod_bonus = 4 × 10/100 = 2/5
+        # effective_result = 1 × (1 + 2/5) = 7/5
+        # cycles/min = 60 / (7/5) = 300/7
+        # machines = (300/7 × 1/2) / (60 × 5/4) = (150/7) / 75 = 2/7
+        s = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "prod", 3)]
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertEqual(
+            s.steps["electronic-circuit"]["machine_count"],
+            Fraction(2, 7),
+        )
+
+    def test_speed_reduces_machine_count(self):
+        # 4× speed-3-normal: speed_bonus = 4×50% = 200%
+        # effective_speed = 5/4 × 3 = 15/4  →  fewer machines
+        no_mod = _solver_new()
+        no_mod.solve("electronic-circuit", Fraction(60))
+
+        speed = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "speed", 3)]
+        })
+        speed.solve("electronic-circuit", Fraction(60))
+
+        self.assertGreater(
+            no_mod.steps["electronic-circuit"]["machine_count"],
+            speed.steps["electronic-circuit"]["machine_count"],
+        )
+
+    def test_zero_slot_machine_ignores_modules(self):
+        # stone-furnace has 0 slots — module config must have zero effect.
+        base = _solver_new(furnace_type="stone")
+        base.solve("iron-plate", Fraction(60))
+
+        with_mod = _solver_new(
+            furnace_type="stone",
+            module_configs={"stone-furnace": [_mspec(4, "prod", 3)]},
+        )
+        with_mod.solve("iron-plate", Fraction(60))
+
+        self.assertEqual(
+            base.steps["iron-plate"]["machine_count"],
+            with_mod.steps["iron-plate"]["machine_count"],
+        )
+
+    def test_two_slot_machine_caps_at_slots(self):
+        # electric-furnace has 2 slots; specifying 4 prod-3-normal must only
+        # apply 2 slots worth of bonus (+20%), not 4 (+40%).
+        base = _solver_new(furnace_type="electric")
+        base.solve("iron-plate", Fraction(60))
+
+        prod = _solver_new(
+            furnace_type="electric",
+            module_configs={"electric-furnace": [_mspec(4, "prod", 3)]},
+        )
+        prod.solve("iron-plate", Fraction(60))
+
+        ratio = (
+            base.steps["iron-plate"]["machine_count"]
+            / prod.steps["iron-plate"]["machine_count"]
+        )
+        self.assertAlmostEqual(float(ratio), 1.20, places=6)
+
+    def test_module_quality_scales_prod_bonus(self):
+        # prod-3-legendary: 4 × 10% × 2.5 = 100%  →  machine_count = 1/5
+        # prod-3-normal:    4 × 10% × 1.0 =  40%  →  machine_count = 2/7
+        # ratio normal/legendary = (1+1.0)/(1+0.4) = 2.0/1.4 = 10/7
+        leg = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "prod", 3, "legendary")]
+        })
+        leg.solve("electronic-circuit", Fraction(60))
+
+        norm = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "prod", 3, "normal")]
+        })
+        norm.solve("electronic-circuit", Fraction(60))
+
+        self.assertGreater(
+            norm.steps["electronic-circuit"]["machine_count"],
+            leg.steps["electronic-circuit"]["machine_count"],
+        )
+        ratio = (
+            norm.steps["electronic-circuit"]["machine_count"]
+            / leg.steps["electronic-circuit"]["machine_count"]
+        )
+        self.assertEqual(ratio, Fraction(10, 7))
+
+    def test_mixed_prod_and_speed_modules(self):
+        # 1× prod-3-rare + 3× speed-3-uncommon (4 slots total, assembler-3)
+        # Both prod and speed contributions apply — count must be less than
+        # no-modules baseline.
+        no_mod = _solver_new()
+        no_mod.solve("electronic-circuit", Fraction(60))
+
+        mixed = _solver_new(module_configs={
+            "assembling-machine-3": [
+                _mspec(1, "prod",  3, "rare"),
+                _mspec(3, "speed", 3, "uncommon"),
+            ]
+        })
+        mixed.solve("electronic-circuit", Fraction(60))
+
+        self.assertGreater(
+            no_mod.steps["electronic-circuit"]["machine_count"],
+            mixed.steps["electronic-circuit"]["machine_count"],
+        )
+
+    def test_mixed_exact_machine_count(self):
+        # 1× prod-3-rare + 3× speed-3-uncommon in assembler-3
+        # prod_bonus  = 1 × 10/100 × 8/5  = 4/25
+        # speed_bonus = 3 × 50/100 × 13/10 = 39/20
+        # effective_result = 29/25
+        # effective_speed  = 5/4 × (1 + 39/20) = 5/4 × 59/20 = 59/16
+        # cycles/min = 60 / (29/25) = 1500/29
+        # machines = (1500/29 × 1/2) / (60 × 59/16)
+        #          = (750/29) / (3540/16)
+        #          = (750 × 16) / (29 × 3540)
+        #          = 12000 / 102660 = 200 / 1711
+        s = _solver_new(module_configs={
+            "assembling-machine-3": [
+                _mspec(1, "prod",  3, "rare"),
+                _mspec(3, "speed", 3, "uncommon"),
+            ]
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertEqual(
+            s.steps["electronic-circuit"]["machine_count"],
+            Fraction(200, 1711),
+        )
+
+    def test_efficiency_modules_do_not_affect_count(self):
+        # Efficiency modules have no speed or productivity effect.
+        # Machine count with efficiency modules == count without any modules.
+        base = _solver_new()
+        base.solve("electronic-circuit", Fraction(60))
+
+        eff = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "efficiency", 3)]
+        })
+        eff.solve("electronic-circuit", Fraction(60))
+
+        self.assertEqual(
+            base.steps["electronic-circuit"]["machine_count"],
+            eff.steps["electronic-circuit"]["machine_count"],
+        )
+
+    def test_recipe_module_override(self):
+        # Global: no modules. Per-recipe override for electronic-circuit.
+        # electronic-circuit should get prod bonus; other steps should not.
+        s = _solver_new(recipe_module_overrides={
+            "electronic-circuit": [_mspec(4, "prod", 3, "normal")]
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        # electronic-circuit step gets the 40% prod bonus → 2/7 machines
+        self.assertEqual(
+            s.steps["electronic-circuit"]["machine_count"],
+            Fraction(2, 7),
+        )
+        # copper-cable (a dependency, no override) uses no prod bonus.
+        # However, the prod bonus on electronic-circuit reduces its cycle rate:
+        #   e-circuit cycles/min = 60 / (7/5) = 300/7
+        #   copper-cable demand = 300/7 × 3 = 900/7 /min
+        # copper-cable: time=0.5s, yield=2, assembler-3 speed=5/4
+        #   cycles/min = (900/7) / 2 = 450/7
+        #   machines = (450/7 × 0.5) / (60 × 5/4) = (225/7) / 75 = 3/7
+        self.assertEqual(
+            s.steps["copper-cable"]["machine_count"],
+            Fraction(3, 7),
+        )
+
+    def test_recipe_module_override_in_json_output(self):
+        import argparse
+        overrides = {"electronic-circuit": [_mspec(4, "prod", 3)]}
+        s = _solver_new(recipe_module_overrides=overrides)
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
+
+        args = argparse.Namespace(
+            item="electronic-circuit", rate=60, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None,
+            recipe_module_overrides=overrides,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
+                                fluid_set=fluid_set)
+        self.assertEqual(out["recipe_module_overrides"], overrides)
+
+
+# ---------------------------------------------------------------------------
+# Beacon config  (--beacon MACHINE=COUNT:TIER:QUALITY)
+# ---------------------------------------------------------------------------
+#
+# Beacon speed formula (Factorio 2.0 diminishing returns):
+#   beacon_speed = effectivity × sqrt(count) × BEACON_SLOTS × speed_per_slot
+#
+# BEACON_EFFECTIVITY: normal=1.5, uncommon=1.7, rare=1.9, epic=2.1, legendary=2.5
+# BEACON_SLOTS = 2
+# SPEED_MODULE_BONUS: tier-3 normal = 0.5 per slot
+#
+# Example: 1 beacon, speed-3-normal, normal beacon quality:
+#   1.5 × sqrt(1) × 2 × 0.5 = 1.5
+# Example: 4 beacons (same):
+#   1.5 × sqrt(4) × 2 × 0.5 = 1.5 × 2 × 1 = 3.0
+# ---------------------------------------------------------------------------
+
+class TestBeaconConfig(unittest.TestCase):
+
+    def test_beacon_speed_bonus_value_single(self):
+        # 1 beacon, speed-3-normal, normal beacon quality → bonus = 1.5
+        s = _solver_new(beacon_configs={
+            "assembling-machine-3": _bspec(1, 3, "normal")
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            1.5, places=6,
+        )
+
+    def test_beacon_speed_bonus_value_four(self):
+        # 4 beacons: 1.5 × sqrt(4) × 2 × 0.5 = 3.0
+        s = _solver_new(beacon_configs={
+            "assembling-machine-3": _bspec(4, 3, "normal")
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            3.0, places=6,
+        )
+
+    def test_diminishing_returns_not_linear(self):
+        # Doubling beacon count does NOT double the bonus (sqrt scaling).
+        # 4 beacons / 1 beacon = sqrt(4)/sqrt(1) = 2, not 4.
+        s1 = _solver_new(beacon_configs={"assembling-machine-3": _bspec(1, 3)})
+        s1.solve("electronic-circuit", Fraction(60))
+
+        s4 = _solver_new(beacon_configs={"assembling-machine-3": _bspec(4, 3)})
+        s4.solve("electronic-circuit", Fraction(60))
+
+        b1 = s1.steps["electronic-circuit"]["beacon_speed_bonus"]
+        b4 = s4.steps["electronic-circuit"]["beacon_speed_bonus"]
+        self.assertAlmostEqual(b4 / b1, 2.0, places=6)   # sqrt(4)/sqrt(1)
+
+    def test_beacon_reduces_machine_count(self):
+        no_beacon = _solver_new()
+        no_beacon.solve("electronic-circuit", Fraction(60))
+
+        with_beacon = _solver_new(beacon_configs={
+            "assembling-machine-3": _bspec(1, 3)
+        })
+        with_beacon.solve("electronic-circuit", Fraction(60))
+
+        self.assertGreater(
+            float(no_beacon.steps["electronic-circuit"]["machine_count"]),
+            with_beacon.steps["electronic-circuit"]["machine_count"],
+        )
+
+    def test_machine_count_is_float_with_beacon(self):
+        # sqrt(count) is irrational → machine_count must be float
+        s = _solver_new(beacon_configs={
+            "assembling-machine-3": _bspec(1, 3)
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertIsInstance(
+            s.steps["electronic-circuit"]["machine_count"], float
+        )
+
+    def test_machine_count_is_fraction_without_beacon(self):
+        # Without beacons all arithmetic stays exact Fraction
+        s = _solver_new()
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertIsInstance(
+            s.steps["electronic-circuit"]["machine_count"], Fraction
+        )
+
+    def test_beacon_speed_bonus_zero_without_config(self):
+        # Steps with no beacon config must report beacon_speed_bonus = 0.0
+        s = _solver_new()
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            0.0, places=6,
+        )
+
+    def test_beacon_quality_effectivity_normal(self):
+        # beacon_quality="normal"  → effectivity=1.5
+        # 1 beacon, speed-3-normal: 1.5 × 1 × 2 × 0.5 = 1.5
+        s = _solver_new(
+            beacon_quality="normal",
+            beacon_configs={"assembling-machine-3": _bspec(1, 3)},
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            1.5, places=6,
+        )
+
+    def test_beacon_quality_effectivity_rare(self):
+        # beacon_quality="rare"  → effectivity=1.9
+        # 1 beacon, speed-3-normal: 1.9 × 1 × 2 × 0.5 = 1.9
+        s = _solver_new(
+            beacon_quality="rare",
+            beacon_configs={"assembling-machine-3": _bspec(1, 3)},
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            1.9, places=6,
+        )
+
+    def test_beacon_quality_effectivity_legendary(self):
+        # beacon_quality="legendary" → effectivity=2.5
+        # 1 beacon, speed-3-normal: 2.5 × 1 × 2 × 0.5 = 2.5
+        s = _solver_new(
+            beacon_quality="legendary",
+            beacon_configs={"assembling-machine-3": _bspec(1, 3)},
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            2.5, places=6,
+        )
+
+    def test_beacon_module_quality_scales_speed(self):
+        # speed-3-legendary in beacon: per-slot bonus = 0.5 × 2.5 = 1.25
+        # 1 normal beacon: 1.5 × 1 × 2 × 1.25 = 3.75
+        s = _solver_new(
+            beacon_quality="normal",
+            beacon_configs={"assembling-machine-3": _bspec(1, 3, "legendary")},
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            3.75, places=6,
+        )
+
+    def test_recipe_beacon_override_disables_beacon(self):
+        # Global: assembler-3 gets 4 beacons.
+        # Per-recipe override for electronic-circuit: 0 beacons.
+        # electronic-circuit must have no beacon bonus and Fraction machine_count.
+        s = _solver_new(
+            beacon_configs={"assembling-machine-3": _bspec(4, 3)},
+            recipe_beacon_overrides={"electronic-circuit": _bspec(0, 3)},
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        step = s.steps["electronic-circuit"]
+        self.assertAlmostEqual(step["beacon_speed_bonus"], 0.0, places=6)
+        self.assertIsInstance(step["machine_count"], Fraction)
+
+    def test_recipe_beacon_override_different_count(self):
+        # Global: 4 beacons. Override for electronic-circuit: 1 beacon.
+        global_s = _solver_new(
+            beacon_configs={"assembling-machine-3": _bspec(4, 3)},
+        )
+        global_s.solve("electronic-circuit", Fraction(60))
+
+        override_s = _solver_new(
+            beacon_configs={"assembling-machine-3": _bspec(4, 3)},
+            recipe_beacon_overrides={"electronic-circuit": _bspec(1, 3)},
+        )
+        override_s.solve("electronic-circuit", Fraction(60))
+
+        # 1-beacon bonus = 1.5; 4-beacon bonus = 3.0 → more machines with 1 beacon
+        self.assertGreater(
+            override_s.steps["electronic-circuit"]["machine_count"],
+            global_s.steps["electronic-circuit"]["machine_count"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Machine quality  (--machine-quality QUALITY)
+# ---------------------------------------------------------------------------
+#
+# MACHINE_QUALITY_SPEED bonus (additive to base crafting speed):
+#   normal=0, uncommon=+30%, rare=+60%, epic=+90%, legendary=+150%
+#
+# assembler-3 base speed = 5/4
+# legendary effective speed = 5/4 × (1 + 3/2) = 5/4 × 5/2 = 25/8
+# ratio legendary/normal = (25/8) / (5/4) = 5/2  →  2.5× fewer machines
+# ---------------------------------------------------------------------------
+
+class TestMachineQuality(unittest.TestCase):
+
+    def test_legendary_faster_than_normal(self):
+        normal = _solver_new(machine_quality="normal")
+        normal.solve("electronic-circuit", Fraction(60))
+
+        legendary = _solver_new(machine_quality="legendary")
+        legendary.solve("electronic-circuit", Fraction(60))
+
+        self.assertGreater(
+            normal.steps["electronic-circuit"]["machine_count"],
+            legendary.steps["electronic-circuit"]["machine_count"],
+        )
+
+    def test_legendary_speed_ratio_exact(self):
+        # normal speed = 5/4; legendary = 5/4 × 5/2 = 25/8
+        # machine_count ∝ 1/speed → ratio = 5/2
+        normal = _solver_new(machine_quality="normal")
+        normal.solve("electronic-circuit", Fraction(60))
+
+        legendary = _solver_new(machine_quality="legendary")
+        legendary.solve("electronic-circuit", Fraction(60))
+
+        ratio = (
+            normal.steps["electronic-circuit"]["machine_count"]
+            / legendary.steps["electronic-circuit"]["machine_count"]
+        )
+        self.assertEqual(ratio, Fraction(5, 2))
+
+    def test_all_quality_tiers_strictly_ordered(self):
+        # Each successive tier must produce strictly fewer machines.
+        counts = {}
+        for q in ("normal", "uncommon", "rare", "epic", "legendary"):
+            s = _solver_new(machine_quality=q)
+            s.solve("iron-plate", Fraction(60))
+            counts[q] = s.steps["iron-plate"]["machine_count"]
+
+        self.assertGreater(counts["normal"],    counts["uncommon"])
+        self.assertGreater(counts["uncommon"],  counts["rare"])
+        self.assertGreater(counts["rare"],      counts["epic"])
+        self.assertGreater(counts["epic"],      counts["legendary"])
+
+    def test_machine_quality_exact_uncommon(self):
+        # uncommon: speed bonus = +30%  →  quality_mult = 13/10
+        # electric-furnace base speed=2, uncommon: 2 × 13/10 = 13/5
+        # iron-plate: energy_required=3.2s (= 16/5), yield=1
+        # cycles/min = 60; machines = (60 × 16/5) / (60 × 13/5) = (16/5) / (13/5) = 16/13
+        s = _solver_new(machine_quality="uncommon", furnace_type="electric")
+        s.solve("iron-plate", Fraction(60))
+        self.assertEqual(
+            s.steps["iron-plate"]["machine_count"],
+            Fraction(16, 13),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Belt output  (--belt TIER)
+# ---------------------------------------------------------------------------
+
+class TestBeltOutput(unittest.TestCase):
+
+    def test_belt_produces_single_fields(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="blue")
+        self.assertIn("belt", out)
+        self.assertIn("belts_needed", out)
+        self.assertNotIn("belts_for_output", out)
+
+    def test_belt_echoes_tier(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="blue")
+        self.assertEqual(out["belt"], "blue")
+
+    def test_belt_blue_correct_value(self):
+        # blue belt: 2700/min  →  60/2700 = 1/45
+        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="blue")
+        self.assertAlmostEqual(out["belts_needed"], 60 / 2700, places=6)
+
+    def test_belt_yellow_correct_value(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="yellow")
+        self.assertAlmostEqual(out["belts_needed"], 60 / 900, places=6)
+
+    def test_belt_red_correct_value(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="red")
+        self.assertAlmostEqual(out["belts_needed"], 60 / 1800, places=6)
+
+    def test_belt_turbo_space_age(self):
+        out = _fmt_new("space-age", "electronic-circuit", 60, belt="turbo")
+        self.assertAlmostEqual(out["belts_needed"], 60 / 3600, places=6)
+
+    def test_no_belt_flag_omits_fields(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60, belt=None)
+        self.assertNotIn("belt", out)
+        self.assertNotIn("belts_needed", out)
+
+    def test_fluid_item_gets_no_belt_field(self):
+        # lubricant is a fluid — even with --belt set, no belts_needed
+        out = _fmt_new("vanilla", "lubricant", 60, belt="blue")
+        self.assertNotIn("belts_needed", out)
+        self.assertNotIn("belt", out)
+
+
+# ---------------------------------------------------------------------------
+# Pump output  (--pump QUALITY)
+# ---------------------------------------------------------------------------
+#
+# PUMP_THROUGHPUT: normal=72000, uncommon=93600, rare=115200,
+#                  epic=136800, legendary=180000  (fluid/min)
+# ---------------------------------------------------------------------------
+
+class TestPumpOutput(unittest.TestCase):
+
+    def test_pump_produces_single_fields(self):
+        out = _fmt_new("vanilla", "lubricant", 60, pump="normal")
+        self.assertIn("pump", out)
+        self.assertIn("pumps_needed", out)
+        self.assertNotIn("belts_needed", out)
+        self.assertNotIn("belt", out)
+
+    def test_pump_echoes_quality(self):
+        out = _fmt_new("vanilla", "lubricant", 60, pump="legendary")
+        self.assertEqual(out["pump"], "legendary")
+
+    def test_pump_all_quality_throughputs(self):
+        throughputs = {
+            "normal":    72_000,
+            "uncommon":  93_600,
+            "rare":      115_200,
+            "epic":      136_800,
+            "legendary": 180_000,
+        }
+        for quality, tput in throughputs.items():
+            out = _fmt_new("vanilla", "lubricant", 60, pump=quality)
+            self.assertAlmostEqual(
+                out["pumps_needed"], 60 / tput, places=8,
+                msg=f"pump quality={quality}",
+            )
+
+    def test_pump_quality_strictly_fewer(self):
+        # Higher pump quality → higher throughput → fewer pumps needed
+        pumps = {}
+        for q in ("normal", "uncommon", "rare", "epic", "legendary"):
+            out = _fmt_new("vanilla", "lubricant", 60, pump=q)
+            pumps[q] = out["pumps_needed"]
+
+        self.assertGreater(pumps["normal"],    pumps["uncommon"])
+        self.assertGreater(pumps["uncommon"],  pumps["rare"])
+        self.assertGreater(pumps["rare"],      pumps["epic"])
+        self.assertGreater(pumps["epic"],      pumps["legendary"])
+
+    def test_no_pump_flag_omits_fields(self):
+        out = _fmt_new("vanilla", "lubricant", 60, pump=None)
+        self.assertNotIn("pump", out)
+        self.assertNotIn("pumps_needed", out)
+
+    def test_solid_item_gets_no_pump_field(self):
+        # Solid item with --pump set → no pump fields (pump ignored for solids)
+        out = _fmt_new("vanilla", "electronic-circuit", 60, pump="normal")
+        self.assertNotIn("pump", out)
+        self.assertNotIn("pumps_needed", out)
+
+
+# ---------------------------------------------------------------------------
+# Recipe-level overrides  (--recipe-machine, appended to TestMachineOverride)
+# ---------------------------------------------------------------------------
+
+class TestRecipeMachineOverride(unittest.TestCase):
+    """
+    --recipe-machine RECIPE=MACHINE overrides the machine for a specific recipe
+    key, independent of category routing.
+    """
+
+    def test_recipe_machine_overrides_category_default(self):
+        # iron-gear-wheel normally routes to assembling-machine-3 (crafting cat).
+        # Override to foundry → foundry appears in step.
+        s = _solver_new(
+            recipe_machine_overrides={"iron-gear-wheel": "foundry"}
+        )
+        s.solve("iron-gear-wheel", Fraction(60))
+        self.assertEqual(s.steps["iron-gear-wheel"]["machine"], "foundry")
+
+    def test_recipe_machine_override_changes_count(self):
+        # foundry speed=4 >> assembler-3 speed=5/4 → fewer machines
+        default_s = _solver_new()
+        default_s.solve("iron-gear-wheel", Fraction(60))
+
+        foundry_s = _solver_new(
+            recipe_machine_overrides={"iron-gear-wheel": "foundry"}
+        )
+        foundry_s.solve("iron-gear-wheel", Fraction(60))
+
+        self.assertGreater(
+            default_s.steps["iron-gear-wheel"]["machine_count"],
+            foundry_s.steps["iron-gear-wheel"]["machine_count"],
+        )
+
+    def test_recipe_machine_override_only_affects_target(self):
+        # Only iron-gear-wheel changes; automation-science-pack (also crafting)
+        # stays on assembler-3 because it has no recipe override.
+        # Note: in Factorio 2.0.55 ASP uses copper-plate + iron-gear-wheel.
+        s = _solver_new(
+            recipe_machine_overrides={"iron-gear-wheel": "foundry"}
+        )
+        s.solve("automation-science-pack", Fraction(60))
+        self.assertEqual(s.steps["iron-gear-wheel"]["machine"], "foundry")
+        self.assertEqual(s.steps["automation-science-pack"]["machine"], "assembling-machine-3")
+
+    def test_recipe_machine_override_in_json_output(self):
+        import argparse
+        rm_overrides = {"iron-gear-wheel": "foundry"}
+        s = _solver_new(recipe_machine_overrides=rm_overrides)
+        s.solve("iron-gear-wheel", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
+
+        args = argparse.Namespace(
+            item="iron-gear-wheel", rate=60, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=rm_overrides,
+            recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
+                                fluid_set=fluid_set)
+        self.assertEqual(out["recipe_machine_overrides"], rm_overrides)
+
+    def test_recipe_machine_and_category_machine_independent(self):
+        # --machine CATEGORY=X (category default) and --recipe-machine RECIPE=Y
+        # must not interfere with each other.
+        # Note: in Factorio 2.0.55 ASP uses copper-plate + iron-gear-wheel.
+        s = _solver_new(
+            machine_overrides={"crafting": "assembling-machine-1"},
+            recipe_machine_overrides={"iron-gear-wheel": "foundry"},
+        )
+        s.solve("automation-science-pack", Fraction(60))
+        # iron-gear-wheel specifically → foundry (recipe override wins over category)
+        self.assertEqual(s.steps["iron-gear-wheel"]["machine"], "foundry")
+        # automation-science-pack (crafting category, no recipe override)
+        # → assembling-machine-1 (category override applies)
+        self.assertEqual(s.steps["automation-science-pack"]["machine"], "assembling-machine-1")
 
 
 if __name__ == "__main__":

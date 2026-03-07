@@ -74,18 +74,15 @@ DATA_URLS = {
 }
 
 # Belt throughput: items / minute per full belt (both lanes combined)
-BELT_THROUGHPUT_VANILLA: dict[str, Fraction] = {
-    "yellow": Fraction(900),    # transport-belt         15/s
-    "red":    Fraction(1800),   # fast-transport-belt    30/s
-    "blue":   Fraction(2700),   # express-transport-belt 45/s
+# turbo is Space Age only — validated in parse_args / main.
+BELT_THROUGHPUT: dict[str, int] = {
+    "yellow": 900,     # transport-belt          15/s
+    "red":    1800,    # fast-transport-belt      30/s
+    "blue":   2700,    # express-transport-belt   45/s
+    "turbo":  3600,    # turbo-transport-belt     60/s
 }
-BELT_THROUGHPUT_SPACE_AGE: dict[str, Fraction] = {
-    **BELT_THROUGHPUT_VANILLA,
-    "turbo": Fraction(3600),    # turbo-transport-belt   60/s
-}
-
-def get_belt_throughput(dataset: str) -> dict[str, Fraction]:
-    return BELT_THROUGHPUT_SPACE_AGE if dataset == "space-age" else BELT_THROUGHPUT_VANILLA
+BELT_TIERS_VANILLA    = frozenset(["yellow", "red", "blue"])
+BELT_TIERS_SPACE_AGE  = frozenset(["yellow", "red", "blue", "turbo"])
 
 # Miner / extractor speeds (game constants -- not stored in data files)
 MINER_SPEED: dict[str, Fraction] = {
@@ -201,6 +198,55 @@ MODULE_PROD_BONUS: dict[int, Fraction] = {
     1: Fraction(4,  100),   # productivity-module:   +4 % each
     2: Fraction(6,  100),   # productivity-module-2: +6 % each
     3: Fraction(10, 100),   # productivity-module-3: +10 % each
+}
+
+# Valid quality names (enum)
+QUALITY_NAMES: frozenset = frozenset(["normal", "uncommon", "rare", "epic", "legendary"])
+
+# Quality multiplier applied to module bonuses (normal=×1.0 … legendary=×2.5)
+MODULE_QUALITY_MULT: dict[str, Fraction] = {
+    "normal":    Fraction(1),
+    "uncommon":  Fraction(13, 10),   # ×1.3
+    "rare":      Fraction(8,  5),    # ×1.6
+    "epic":      Fraction(19, 10),   # ×1.9
+    "legendary": Fraction(5,  2),    # ×2.5
+}
+
+# Additive crafting-speed bonus from machine quality (applied to base speed)
+MACHINE_QUALITY_SPEED: dict[str, Fraction] = {
+    "normal":    Fraction(0),
+    "uncommon":  Fraction(3,  10),   # +30%
+    "rare":      Fraction(3,  5),    # +60%
+    "epic":      Fraction(9,  10),   # +90%
+    "legendary": Fraction(3,  2),    # +150%
+}
+
+# Beacon distribution effectivity by quality (affects how strongly modules apply)
+BEACON_EFFECTIVITY: dict[str, Fraction] = {
+    "normal":    Fraction(3,  2),    # 1.5
+    "uncommon":  Fraction(17, 10),   # 1.7
+    "rare":      Fraction(19, 10),   # 1.9
+    "epic":      Fraction(21, 10),   # 2.1
+    "legendary": Fraction(5,  2),    # 2.5
+}
+
+# Speed module base bonus per tier per slot (at normal quality)
+SPEED_MODULE_BONUS: dict[int, Fraction] = {
+    1: Fraction(1, 5),    # +20%
+    2: Fraction(3, 10),   # +30%
+    3: Fraction(1, 2),    # +50%
+}
+
+# Number of module slots in a standard beacon (quality-invariant)
+BEACON_SLOTS: int = 2
+
+# Fluid pump throughput by pump quality (fluid / minute)
+PUMP_THROUGHPUT: dict[str, int] = {
+    "normal":    72_000,
+    "uncommon":  93_600,
+    "rare":      115_200,
+    "epic":      136_800,
+    "legendary": 180_000,
 }
 
 # Module slots per machine (not stored in dataset -- hardcoded from game data).
@@ -328,6 +374,17 @@ def build_resource_info(data: dict) -> dict:
                 "category":    "offshore",
             })
     return info
+
+
+def build_fluid_set(data: dict) -> frozenset:
+    """Return set of item keys whose type is 'fluid' in the dataset."""
+    fluids: set[str] = set()
+    for item in data.get("items", []):
+        if item.get("type") == "fluid":
+            key = item.get("key") or item.get("name", "")
+            if key:
+                fluids.add(key)
+    return frozenset(fluids)
 
 
 # ---------------------------------------------------------------------------
@@ -540,14 +597,18 @@ class Solver:
 
     Design decisions
     ----------------
-    * All numeric state is Fraction.
+    * All numeric state is Fraction unless beacons are active (sqrt introduces
+      irrational numbers, forcing machine_count to float for affected recipes).
     * Oil products are deferred: their demands accumulate in oil_demands and
       are resolved in a single linear-system pass via resolve_oil().
     * Co-products of multi-output recipes are credited to surplus[], consumed
       before starting additional machines.  This eliminates double-counting of
       crude-oil (and any other shared byproducts).
-    * Productivity bonus multiplies output (and co-output) of eligible recipes;
-      speed bonus scales crafting_speed, reducing machine count.
+    * Module configs ({machine_key: [mspec, ...]}) and beacon configs
+      ({machine_key: bspec}) are per-machine defaults, overridable per-recipe.
+    * Machine quality adds an additive speed bonus to base crafting speed.
+    * Beacon speed uses Factorio 2.0 diminishing-returns formula:
+        effectivity × sqrt(count) × BEACON_SLOTS × module_bonus_per_slot
     """
 
     def __init__(
@@ -556,24 +617,123 @@ class Solver:
         raw_set: frozenset,
         assembler_level: int,
         furnace_type: str,
-        prod_module_tier: int,
-        speed_bonus: Fraction,
+        module_configs: dict | None = None,
+        beacon_configs: dict | None = None,
+        machine_quality: str = "normal",
+        beacon_quality: str = "normal",
         recipe_overrides: dict | None = None,
         machine_overrides: dict | None = None,
+        recipe_machine_overrides: dict | None = None,
+        recipe_module_overrides: dict | None = None,
+        recipe_beacon_overrides: dict | None = None,
     ):
         self.recipe_idx      = recipe_idx
         self.raw_set         = raw_set
-        self.assembler_level   = assembler_level
-        self.furnace_type      = furnace_type
-        self.prod_module_tier  = prod_module_tier
-        self.speed_bonus       = speed_bonus
-        self.recipe_overrides:  dict = recipe_overrides or {}
-        self.machine_overrides: dict = machine_overrides or {}
+        self.assembler_level = assembler_level
+        self.furnace_type    = furnace_type
+        self.module_configs:  dict = module_configs  or {}
+        self.beacon_configs:  dict = beacon_configs  or {}
+        self.machine_quality: str  = machine_quality
+        self.beacon_quality:  str  = beacon_quality
+        self.recipe_overrides:         dict = recipe_overrides         or {}
+        self.machine_overrides:        dict = machine_overrides        or {}
+        self.recipe_machine_overrides: dict = recipe_machine_overrides or {}
+        self.recipe_module_overrides:  dict = recipe_module_overrides  or {}
+        self.recipe_beacon_overrides:  dict = recipe_beacon_overrides  or {}
 
-        self.steps: dict[str, dict]          = {}
+        self.steps: dict[str, dict]             = {}
         self.raw_resources: dict[str, Fraction] = defaultdict(Fraction)
-        self.surplus: dict[str, Fraction]    = defaultdict(Fraction)
-        self.oil_demands: dict[str, Fraction]= defaultdict(Fraction)
+        self.surplus: dict[str, Fraction]       = defaultdict(Fraction)
+        self.oil_demands: dict[str, Fraction]   = defaultdict(Fraction)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_modules(self, recipe_key: str, machine_key: str) -> list:
+        """Return module specs list (recipe override > machine global > [])."""
+        if recipe_key in self.recipe_module_overrides:
+            return self.recipe_module_overrides[recipe_key]
+        if machine_key in self.module_configs:
+            return self.module_configs[machine_key]
+        return []
+
+    def _get_beacon(self, recipe_key: str, machine_key: str) -> dict | None:
+        """Return beacon spec (recipe override > machine global > None)."""
+        if recipe_key in self.recipe_beacon_overrides:
+            return self.recipe_beacon_overrides[recipe_key]
+        if machine_key in self.beacon_configs:
+            return self.beacon_configs[machine_key]
+        return None
+
+    def _compute_module_effects(
+        self, specs: list, machine_key: str, allow_prod: bool
+    ) -> tuple:
+        """
+        Compute (prod_bonus: Fraction, speed_bonus: Fraction) from module specs.
+        Total slot count is capped to the machine's available slots.
+        Efficiency modules are tracked for output purposes but have no speed/prod effect.
+        """
+        if not specs:
+            return Fraction(0), Fraction(0)
+        slots = MACHINE_MODULE_SLOTS.get(machine_key, 0)
+        if slots == 0:
+            return Fraction(0), Fraction(0)
+        total_requested = sum(s["count"] for s in specs)
+        if total_requested == 0:
+            return Fraction(0), Fraction(0)
+        scale = Fraction(min(slots, total_requested), total_requested)
+        prod_bonus  = Fraction(0)
+        speed_bonus = Fraction(0)
+        for spec in specs:
+            eff_count = Fraction(spec["count"]) * scale
+            qual_mult = MODULE_QUALITY_MULT[spec["quality"]]
+            if spec["type"] == "prod" and allow_prod:
+                prod_bonus  += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
+            elif spec["type"] == "speed":
+                speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
+            # efficiency: no effect on production count
+        return prod_bonus, speed_bonus
+
+    def _compute_beacon_speed(self, beacon_spec: dict | None) -> float:
+        """
+        Compute beacon speed bonus using Factorio 2.0 diminishing-returns formula:
+          effectivity × sqrt(count) × BEACON_SLOTS × module_bonus_per_slot
+        Returns 0.0 when no beacon or count == 0.
+        """
+        if not beacon_spec or beacon_spec.get("count", 0) == 0:
+            return 0.0
+        effectivity  = BEACON_EFFECTIVITY[self.beacon_quality]
+        module_bonus = (
+            SPEED_MODULE_BONUS[beacon_spec["tier"]]
+            * MODULE_QUALITY_MULT[beacon_spec["quality"]]
+        )
+        return (
+            float(effectivity)
+            * math.sqrt(beacon_spec["count"])
+            * BEACON_SLOTS
+            * float(module_bonus)
+        )
+
+    def _resolve_machine(self, recipe_key: str, cat: str) -> tuple:
+        """
+        Return (machine_key, base_speed) respecting recipe-level and category-level
+        machine overrides.  Priority: recipe_machine_overrides > machine_overrides >
+        category default.
+        """
+        if recipe_key in self.recipe_machine_overrides:
+            ovr = self.recipe_machine_overrides[recipe_key]
+            if ovr in MACHINE_CRAFTING_SPEED:
+                return ovr, MACHINE_CRAFTING_SPEED[ovr]
+        if cat in self.machine_overrides:
+            ovr = self.machine_overrides[cat]
+            if ovr in MACHINE_CRAFTING_SPEED:
+                return ovr, MACHINE_CRAFTING_SPEED[ovr]
+        return get_machine(cat, self.assembler_level, self.furnace_type)
+
+    # ------------------------------------------------------------------
+    # Core solver
+    # ------------------------------------------------------------------
 
     def solve(self, item_key: str, rate: Fraction, _chain: frozenset = frozenset()) -> None:
         """Recursively satisfy *rate* items/min of *item_key*."""
@@ -597,7 +757,7 @@ class Solver:
 
         recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides)
 
-        # No recipe -> treat as raw
+        # No recipe → treat as raw
         if recipe is None:
             self.raw_resources[item_key] += rate
             return
@@ -618,30 +778,34 @@ class Solver:
                 result_amount = Fraction(str(res.get("amount", 1)))
                 break
 
-        energy_req   = Fraction(str(recipe.get("energy_required", "0.5")))
-        cat          = recipe.get("category", "crafting")
-        machine_key, base_speed = get_machine(cat, self.assembler_level, self.furnace_type)
+        energy_req = Fraction(str(recipe.get("energy_required", "0.5")))
+        cat        = recipe.get("category", "crafting")
 
-        # Apply per-category machine override (e.g. biochamber → assembling-machine-3)
-        if cat in self.machine_overrides:
-            ovr = self.machine_overrides[cat]
-            if ovr in MACHINE_CRAFTING_SPEED:
-                machine_key = ovr
-                base_speed  = MACHINE_CRAFTING_SPEED[ovr]
+        machine_key, base_speed = self._resolve_machine(recipe_key, cat)
+
+        # Machine quality: additive speed bonus applied to base speed
+        quality_mult    = Fraction(1) + MACHINE_QUALITY_SPEED[self.machine_quality]
+        effective_speed = base_speed * quality_mult
 
         # Module effects
-        effective_speed = base_speed * (1 + self.speed_bonus)
         allow_prod = recipe.get("allow_productivity", False)
-        if allow_prod and self.prod_module_tier > 0:
-            slots      = MACHINE_MODULE_SLOTS.get(machine_key, 0)
-            prod_bonus = MODULE_PROD_BONUS[self.prod_module_tier] * slots
-            effective_result = result_amount * (1 + prod_bonus)
-        else:
-            prod_bonus       = Fraction(0)
-            effective_result = result_amount
+        specs      = self._get_modules(recipe_key, machine_key)
+        prod_bonus, speed_mod_bonus = self._compute_module_effects(specs, machine_key, allow_prod)
+        effective_speed = effective_speed * (Fraction(1) + speed_mod_bonus)
 
-        cycles_per_min  = rate / effective_result
-        machines_needed = (cycles_per_min * energy_req) / (60 * effective_speed)
+        # Effective output per cycle (productivity bonus)
+        effective_result = result_amount * (Fraction(1) + prod_bonus)
+        cycles_per_min   = rate / effective_result
+
+        # Beacon speed bonus (may introduce float — sqrt is irrational)
+        beacon_spec        = self._get_beacon(recipe_key, machine_key)
+        beacon_speed_bonus = self._compute_beacon_speed(beacon_spec)
+
+        if beacon_speed_bonus:
+            eff_speed_total = float(effective_speed) * (1.0 + beacon_speed_bonus)
+            machines_needed = float(cycles_per_min * energy_req) / (60.0 * eff_speed_total)
+        else:
+            machines_needed = (cycles_per_min * energy_req) / (60 * effective_speed)
 
         # Accumulate step (same recipe may arrive from multiple tree paths)
         if recipe_key in self.steps:
@@ -649,10 +813,11 @@ class Solver:
             self.steps[recipe_key]["machine_count"] += machines_needed
         else:
             self.steps[recipe_key] = {
-                "recipe":        recipe_key,
-                "machine":       machine_key,
-                "machine_count": machines_needed,
-                "rate_per_min":  rate,
+                "recipe":             recipe_key,
+                "machine":            machine_key,
+                "machine_count":      machines_needed,
+                "rate_per_min":       rate,
+                "beacon_speed_bonus": beacon_speed_bonus,
             }
 
         # Credit co-products as surplus (productivity applies to them too)
@@ -661,8 +826,8 @@ class Solver:
             if co == item_key:
                 continue
             co_amt = Fraction(str(res.get("amount", 1)))
-            if allow_prod and prod_bonus > 0:
-                co_amt = co_amt * (1 + prod_bonus)
+            if prod_bonus > 0:
+                co_amt = co_amt * (Fraction(1) + prod_bonus)
             self.surplus[co] += cycles_per_min * co_amt
 
         # Recurse into ingredients
@@ -722,15 +887,11 @@ class Solver:
             rcp    = info["recipe"]
             cycles = info["cycles_per_min"]
             cat    = rcp.get("category", "oil-processing")
-            machine_key, base_speed = get_machine(cat, self.assembler_level, self.furnace_type)
-            if cat in self.machine_overrides:
-                ovr = self.machine_overrides[cat]
-                if ovr in MACHINE_CRAFTING_SPEED:
-                    machine_key = ovr
-                    base_speed  = MACHINE_CRAFTING_SPEED[ovr]
-            eff_speed  = base_speed * (1 + self.speed_bonus)
-            energy_req = Fraction(str(rcp.get("energy_required", 5)))
-            machines   = (cycles * energy_req) / (60 * eff_speed)
+            machine_key, base_speed = self._resolve_machine(rkey, cat)
+            quality_mult = Fraction(1) + MACHINE_QUALITY_SPEED[self.machine_quality]
+            eff_speed    = base_speed * quality_mult
+            energy_req   = Fraction(str(rcp.get("energy_required", 5)))
+            machines     = (cycles * energy_req) / (60 * eff_speed)
 
             # Representative display rate: largest oil-product output for AOP,
             # primary output for cracking recipes
@@ -746,10 +907,11 @@ class Solver:
                 self.steps[rkey]["rate_per_min"]  += disp_rate
             else:
                 self.steps[rkey] = {
-                    "recipe":        rkey,
-                    "machine":       machine_key,
-                    "machine_count": machines,
-                    "rate_per_min":  disp_rate,
+                    "recipe":             rkey,
+                    "machine":            machine_key,
+                    "machine_count":      machines,
+                    "rate_per_min":       disp_rate,
+                    "beacon_speed_bonus": 0.0,
                 }
 
             # Push oil-recipe ingredients into raw resources
@@ -826,12 +988,16 @@ def _f(x: Fraction, places: int = 4) -> float:
 
 def format_output(
     args: argparse.Namespace,
-    solver: Solver,
+    solver: "Solver",
     resource_info: dict,
-    recipe_overrides: dict | None = None,
-    machine_overrides: dict | None = None,
+    fluid_set: frozenset | None = None,
 ) -> dict:
+    """
+    Assemble the final JSON output dict from solver results and CLI args.
 
+    Belt output is included only when args.belt is set and the item is solid.
+    Pump output is included only when args.pump is set and the item is a fluid.
+    """
     steps_list = sorted(
         [
             {
@@ -840,6 +1006,7 @@ def format_output(
                 "machine_count":      _f(s["machine_count"]),
                 "machine_count_ceil": math.ceil(s["machine_count"]),
                 "rate_per_min":       _f(s["rate_per_min"]),
+                "beacon_speed_bonus": round(s["beacon_speed_bonus"], 6),
             }
             for s in solver.steps.values()
         ],
@@ -853,32 +1020,54 @@ def format_output(
 
     miners = compute_miners(solver.raw_resources, resource_info, args.miner)
 
-    belts = {
-        name: {
-            "belts_needed":        _f(Fraction(str(args.rate)) / tput),
-            "throughput_per_belt": int(tput),
-        }
-        for name, tput in get_belt_throughput(args.dataset).items()
+    out: dict = {
+        "item":            args.item,
+        "rate_per_min":    args.rate,
+        "dataset":         args.dataset,
+        "assembler":       args.assembler,
+        "furnace":         args.furnace,
+        "miner":           args.miner,
+        "machine_quality": args.machine_quality,
+        "beacon_quality":  args.beacon_quality,
     }
 
-    out: dict = {
-        "item":             args.item,
-        "rate_per_min":     args.rate,
-        "dataset":          args.dataset,
-        "assembler":        args.assembler,
-        "furnace":          args.furnace,
-        "miner":            args.miner,
-        "prod_module":      args.prod_module,
-        "speed_bonus":      float(args.speed),
-    }
-    if recipe_overrides:
-        out["recipe_overrides"] = recipe_overrides
-    if machine_overrides:
-        out["machine_overrides"] = machine_overrides
+    # Echo non-empty configs
+    if getattr(args, "module_configs", None):
+        out["module_configs"] = args.module_configs
+    if getattr(args, "beacon_configs", None):
+        out["beacon_configs"] = args.beacon_configs
+
+    # Old-style overrides from solver state
+    if solver.recipe_overrides:
+        out["recipe_overrides"] = solver.recipe_overrides
+    if solver.machine_overrides:
+        out["machine_overrides"] = solver.machine_overrides
+
+    # Per-recipe overrides from args
+    if getattr(args, "recipe_machine_overrides", None):
+        out["recipe_machine_overrides"] = args.recipe_machine_overrides
+    if getattr(args, "recipe_module_overrides", None):
+        out["recipe_module_overrides"] = args.recipe_module_overrides
+    if getattr(args, "recipe_beacon_overrides", None):
+        out["recipe_beacon_overrides"] = args.recipe_beacon_overrides
+
     out["production_steps"] = steps_list
     out["raw_resources"]    = raw_sorted
     out["miners_needed"]    = miners
-    out["belts_for_output"] = belts
+
+    # Belt / pump output (solid vs fluid item distinction)
+    is_fluid = fluid_set is not None and args.item in fluid_set
+    belt = getattr(args, "belt", None)
+    pump = getattr(args, "pump", None)
+
+    if belt and not is_fluid:
+        out["belt"]         = belt
+        out["belts_needed"] = round(float(Fraction(str(args.rate)) / BELT_THROUGHPUT[belt]), 6)
+
+    if pump and is_fluid:
+        out["pump"]         = pump
+        out["pumps_needed"] = round(args.rate / PUMP_THROUGHPUT[pump], 8)
+
     return out
 
 
@@ -886,20 +1075,59 @@ def format_output(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+def _parse_kv(raw: str, flag: str) -> tuple[str, str]:
+    """Parse 'KEY=VALUE' and exit with an error message on bad format."""
+    if "=" not in raw:
+        sys.exit(f"{flag} requires KEY=VALUE format, got: {raw!r}")
+    k, v = raw.split("=", 1)
+    return k.strip(), v.strip()
+
+
+def _parse_module_spec(raw_value: str, flag: str) -> dict:
+    """Parse 'COUNT:TYPE:TIER:QUALITY' into a module spec dict."""
+    parts = raw_value.split(":")
+    if len(parts) < 4:
+        sys.exit(f"{flag} value must be COUNT:TYPE:TIER:QUALITY, got: {raw_value!r}")
+    try:
+        count = int(parts[0])
+        tier  = int(parts[2])
+    except ValueError:
+        sys.exit(f"{flag} COUNT and TIER must be integers, got: {raw_value!r}")
+    return {"count": count, "type": parts[1], "tier": tier, "quality": parts[3]}
+
+
+def _parse_beacon_spec(raw_value: str, flag: str) -> dict:
+    """Parse 'COUNT:TIER:QUALITY' into a beacon spec dict."""
+    parts = raw_value.split(":")
+    if len(parts) < 3:
+        sys.exit(f"{flag} value must be COUNT:TIER:QUALITY, got: {raw_value!r}")
+    try:
+        count = int(parts[0])
+        tier  = int(parts[1])
+    except ValueError:
+        sys.exit(f"{flag} COUNT and TIER must be integers, got: {raw_value!r}")
+    return {"count": count, "tier": tier, "quality": parts[2]}
+
+
 def parse_args(prefs: dict | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "Factorio production calculator -- outputs JSON with machine counts, "
-            "raw resource rates, miner counts, and belt counts."
+            "raw resource rates, miner counts, and belt/pump counts."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python cli.py --item electronic-circuit --rate 60
   python cli.py --item processing-unit --rate 10 --assembler 3 --furnace electric
-  python cli.py --item express-splitter --rate 1 --prod 0.4
   python cli.py --item rocket-fuel --rate 5 --assembler 3 --dataset space-age
   python cli.py --item tungsten-carbide --rate 60 --dataset space-age --miner big
+  python cli.py --item electronic-circuit --rate 60 --belt blue
+  python cli.py --item lubricant --rate 60 --pump legendary
+  python cli.py --item electronic-circuit --rate 60 \\
+      --modules "assembling-machine-3=4:prod:3:normal" \\
+      --beacon "assembling-machine-3=4:3:normal" \\
+      --machine-quality legendary
 """,
     )
     p.add_argument("--item",     required=True,
@@ -913,47 +1141,97 @@ Examples:
                    help="Furnace type (default: electric).")
     p.add_argument("--miner",    default="electric", choices=["electric", "big"],
                    help="Mining drill for solid ores (default: electric).")
-    p.add_argument("--prod-module", default=0, type=int, choices=[0, 1, 2, 3],
-                   dest="prod_module", metavar="TIER",
-                   help=(
-                       "Fill all module slots with productivity modules of "
-                       "this tier (0=none, 1/2/3). Slot count is per-machine "
-                       "(e.g. assembling-machine-3=4, electric-furnace=2). "
-                       "(default: 0)"
-                   ))
-    p.add_argument("--speed",    default=0.0, type=float, metavar="BONUS",
-                   help=(
-                       "Speed module bonus as a decimal "
-                       "(e.g. 0.5 = 50%%). Applied to all recipes. (default: 0)"
-                   ))
     p.add_argument("--dataset",  default="vanilla", choices=["vanilla", "space-age"],
                    help="Game dataset (default: vanilla).")
+    p.add_argument("--machine-quality", default="normal",
+                   choices=list(QUALITY_NAMES), dest="machine_quality",
+                   help="Quality tier of all machines (default: normal).")
+    p.add_argument("--beacon-quality", default="normal",
+                   choices=list(QUALITY_NAMES), dest="beacon_quality",
+                   help="Quality tier of beacons (default: normal).")
+    p.add_argument("--belt", default=None,
+                   choices=list(BELT_THROUGHPUT.keys()),
+                   help="Show belt output for this tier (e.g. blue).")
+    p.add_argument("--pump", default=None,
+                   choices=list(QUALITY_NAMES),
+                   help="Show pump output for this quality (e.g. legendary).")
+    p.add_argument(
+        "--modules",
+        action="append", default=[],
+        metavar="MACHINE=COUNT:TYPE:TIER:QUALITY",
+        help=(
+            "Fill machine slots with modules. Repeatable; multiple specs for "
+            "the same machine are stacked (mixed modules). "
+            "E.g. --modules 'assembling-machine-3=4:prod:3:normal'"
+        ),
+    )
+    p.add_argument(
+        "--beacon",
+        action="append", default=[],
+        metavar="MACHINE=COUNT:TIER:QUALITY",
+        help=(
+            "Beacon count and module quality per machine. Repeatable. "
+            "E.g. --beacon 'assembling-machine-3=4:3:normal'"
+        ),
+    )
     p.add_argument(
         "--recipe",
-        action="append",
-        default=[],
+        action="append", default=[],
         metavar="ITEM=RECIPE",
         help=(
-            "Override the recipe used for ITEM. Repeatable. "
-            "E.g. --recipe rocket-fuel=ammonia-rocket-fuel "
-            "--recipe solid-fuel=solid-fuel-from-light-oil"
+            "Override recipe for ITEM. Repeatable. "
+            "E.g. --recipe solid-fuel=solid-fuel-from-light-oil"
         ),
     )
     p.add_argument(
         "--machine",
-        action="append",
-        default=[],
+        action="append", default=[],
         metavar="CATEGORY=MACHINE",
         help=(
-            "Override the machine used for a recipe category. Repeatable. "
-            "E.g. --machine organic-or-assembling=assembling-machine-3 "
-            "--machine metallurgy-or-assembling=assembling-machine-3"
+            "Override machine for a recipe category. Repeatable. "
+            "E.g. --machine organic-or-assembling=assembling-machine-3"
         ),
+    )
+    p.add_argument(
+        "--recipe-machine",
+        action="append", default=[],
+        metavar="RECIPE=MACHINE",
+        dest="recipe_machine",
+        help="Override machine for a specific recipe key. Repeatable.",
+    )
+    p.add_argument(
+        "--recipe-modules",
+        action="append", default=[],
+        metavar="RECIPE=COUNT:TYPE:TIER:QUALITY",
+        dest="recipe_modules",
+        help="Per-recipe module override. Repeatable; stack for mixed modules.",
+    )
+    p.add_argument(
+        "--recipe-beacon",
+        action="append", default=[],
+        metavar="RECIPE=COUNT:TIER:QUALITY",
+        dest="recipe_beacon",
+        help="Per-recipe beacon override. Repeatable.",
+    )
+    p.add_argument(
+        "--recipe-belt",
+        action="append", default=[],
+        metavar="RECIPE=BELT",
+        dest="recipe_belt",
+        help="Per-recipe belt tier override (for display only). Repeatable.",
+    )
+    p.add_argument(
+        "--recipe-pump",
+        action="append", default=[],
+        metavar="RECIPE=QUALITY",
+        dest="recipe_pump",
+        help="Per-recipe pump quality override (for display only). Repeatable.",
     )
     if prefs:
         p.set_defaults(**{
             k: v for k, v in prefs.items()
-            if k in {"dataset", "assembler", "furnace", "miner", "prod_module", "speed"}
+            if k in {"dataset", "assembler", "furnace", "miner",
+                     "machine_quality", "beacon_quality", "belt", "pump"}
         })
     return p.parse_args()
 
@@ -965,40 +1243,87 @@ def main() -> None:
     # Parse --recipe ITEM=RECIPE (prefs baseline; CLI flags win)
     recipe_overrides: dict[str, str] = dict(prefs.get("recipe_overrides", {}))
     for raw in args.recipe:
-        if "=" not in raw:
-            sys.exit(f"--recipe requires ITEM=RECIPE format, got: {raw!r}")
-        item_part, recipe_part = raw.split("=", 1)
-        recipe_overrides[item_part.strip()] = recipe_part.strip()
+        k, v = _parse_kv(raw, "--recipe")
+        recipe_overrides[k] = v
 
     # Parse --machine CATEGORY=MACHINE (prefs baseline; CLI flags win)
     machine_overrides: dict[str, str] = dict(prefs.get("machine_overrides", {}))
     for raw in args.machine:
-        if "=" not in raw:
-            sys.exit(f"--machine requires CATEGORY=MACHINE format, got: {raw!r}")
-        cat_part, mach_part = raw.split("=", 1)
-        machine_overrides[cat_part.strip()] = mach_part.strip()
+        k, v = _parse_kv(raw, "--machine")
+        machine_overrides[k] = v
+
+    # Parse --modules MACHINE=COUNT:TYPE:TIER:QUALITY
+    module_configs: dict[str, list] = {}
+    for raw in args.modules:
+        k, v = _parse_kv(raw, "--modules")
+        module_configs.setdefault(k, []).append(_parse_module_spec(v, "--modules"))
+
+    # Parse --beacon MACHINE=COUNT:TIER:QUALITY
+    beacon_configs: dict[str, dict] = {}
+    for raw in args.beacon:
+        k, v = _parse_kv(raw, "--beacon")
+        beacon_configs[k] = _parse_beacon_spec(v, "--beacon")
+
+    # Parse per-recipe overrides
+    recipe_machine_overrides: dict[str, str] = {}
+    for raw in args.recipe_machine:
+        k, v = _parse_kv(raw, "--recipe-machine")
+        recipe_machine_overrides[k] = v
+
+    recipe_module_overrides: dict[str, list] = {}
+    for raw in args.recipe_modules:
+        k, v = _parse_kv(raw, "--recipe-modules")
+        recipe_module_overrides.setdefault(k, []).append(_parse_module_spec(v, "--recipe-modules"))
+
+    recipe_beacon_overrides: dict[str, dict] = {}
+    for raw in args.recipe_beacon:
+        k, v = _parse_kv(raw, "--recipe-beacon")
+        recipe_beacon_overrides[k] = _parse_beacon_spec(v, "--recipe-beacon")
+
+    recipe_belt_overrides: dict[str, str] = {}
+    for raw in args.recipe_belt:
+        k, v = _parse_kv(raw, "--recipe-belt")
+        recipe_belt_overrides[k] = v
+
+    recipe_pump_overrides: dict[str, str] = {}
+    for raw in args.recipe_pump:
+        k, v = _parse_kv(raw, "--recipe-pump")
+        recipe_pump_overrides[k] = v
 
     data          = load_data(args.dataset)
     raw_set       = build_raw_set(data)
     recipe_idx    = build_recipe_index(data)
     resource_info = build_resource_info(data)
+    fluid_set     = build_fluid_set(data)
 
     solver = Solver(
         recipe_idx, raw_set,
         args.assembler, args.furnace,
-        args.prod_module,
-        Fraction(str(args.speed)),
-        recipe_overrides or None,
-        machine_overrides or None,
+        module_configs=module_configs or None,
+        beacon_configs=beacon_configs or None,
+        machine_quality=args.machine_quality,
+        beacon_quality=args.beacon_quality,
+        recipe_overrides=recipe_overrides or None,
+        machine_overrides=machine_overrides or None,
+        recipe_machine_overrides=recipe_machine_overrides or None,
+        recipe_module_overrides=recipe_module_overrides or None,
+        recipe_beacon_overrides=recipe_beacon_overrides or None,
     )
 
     solver.solve(args.item, Fraction(str(args.rate)))
     solver.resolve_oil(data)
 
+    # Attach parsed configs to args so format_output can echo them
+    args.module_configs           = module_configs or None
+    args.beacon_configs           = beacon_configs or None
+    args.recipe_machine_overrides = recipe_machine_overrides or None
+    args.recipe_module_overrides  = recipe_module_overrides  or None
+    args.recipe_beacon_overrides  = recipe_beacon_overrides  or None
+    args.recipe_belt_overrides    = recipe_belt_overrides    or None
+    args.recipe_pump_overrides    = recipe_pump_overrides    or None
+
     print(json.dumps(format_output(
-        args, solver, resource_info,
-        recipe_overrides or None,
-        machine_overrides or None,
+        args, solver, resource_info, fluid_set=fluid_set,
     ), indent=2))
 
 
