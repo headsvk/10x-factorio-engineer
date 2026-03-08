@@ -37,11 +37,11 @@ chat panel is powered by `window.claude.complete()`. A strategy reference
 | Trigger | Required follow-up action |
 |---------|--------------------------|
 | `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. |
-| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the **JSON Output Shape** table in this file **and** `10x-factorio-engineer/SKILL.md` §2 (output keys table). Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. |
-| New CLI flag added | Add it to the **CLI Flags** table in this file **and** the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
+| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. |
+| CLI flag added, removed, or changed | 1. Update the module-level docstring at the top of `cli.py` (Usage block). 2. Update the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
 | Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample-state.json` to match the new schema. 4. Run `python dev/gen_sample_state.py` to regenerate `dev/sample-state.b64`. 5. Run `python dev/build_dashboard.py` to rebuild the artifact. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
-| Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new CLI flags, new features, changed behaviour, etc.). |
+| Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
 
 The goal is that `claude.md` always accurately describes the codebase.
 
@@ -70,114 +70,9 @@ Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missin
 
 ---
 
-## Component 1: CLI Calculator
-
-### CLI Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--item` | required | Item ID (e.g. `electronic-circuit`) |
-| `--rate` | required | Target items/minute |
-| `--assembler` | `3` | Assembling machine level 1/2/3 |
-| `--furnace` | `electric` | `stone` / `steel` / `electric` |
-| `--miner` | `electric` | `electric` / `big` (big = Space Age big mining drill) |
-| `--dataset` | `vanilla` | `vanilla` / `space-age` |
-| `--machine-quality` | `normal` | Quality of machines: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
-| `--beacon-quality` | `normal` | Quality of beacon housings: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
-| `--belt` | _(none)_ | Preferred belt tier for solid output: `yellow`/`red`/`blue`/`turbo` |
-| `--pump` | _(none)_ | Preferred pump quality for fluid output: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
-| `--modules` | _(none)_ | Module config per machine (global default). Repeatable. Format: `MACHINE=COUNT:TYPE:TIER:QUALITY[,COUNT:TYPE:TIER:QUALITY...]` e.g. `--modules assembling-machine-3=2:prod:3:rare,2:speed:3:uncommon` |
-| `--beacon` | _(none)_ | Beacon config per machine (global default, speed modules). Repeatable. Format: `MACHINE=COUNT:TIER:QUALITY` e.g. `--beacon assembling-machine-3=8:3:legendary` |
-| `--recipe` | _(none)_ | Override recipe for a specific item. Repeatable. Format: `ITEM=RECIPE-KEY` (e.g. `--recipe rocket-fuel=ammonia-rocket-fuel`) |
-| `--machine` | _(none)_ | Override machine for a recipe category. Repeatable. Format: `CATEGORY=MACHINE-KEY` (e.g. `--machine organic-or-assembling=assembling-machine-3`) |
-| `--recipe-machine` | _(none)_ | Override machine for a specific recipe. Repeatable. Format: `RECIPE=MACHINE-KEY` e.g. `--recipe-machine iron-gear-wheel=foundry` |
-| `--recipe-modules` | _(none)_ | Override modules for a specific recipe (overrides global `--modules` for that recipe). Repeatable. Format: `RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` |
-| `--recipe-beacon` | _(none)_ | Override beacon for a specific recipe. Repeatable. Format: `RECIPE=COUNT:TIER:QUALITY` |
-| `--recipe-belt` | _(none)_ | Override belt tier for a specific recipe output. Repeatable. Format: `RECIPE=TIER` |
-| `--recipe-pump` | _(none)_ | Override pump quality for a specific recipe fluid output. Repeatable. Format: `RECIPE=QUALITY` |
-
-**Module TYPE values:** `prod` / `speed` / `efficiency` (efficiency stored but not used in machine-count math — no speed/productivity effect)
-
-**Quality enum:** `normal` / `uncommon` / `rare` / `epic` / `legendary` (applies to `--machine-quality`, `--beacon-quality`, pump quality, and the QUALITY field in module specs)
-
----
-
-## JSON Output Shape
-
-```json
-{
-  "item": "processing-unit",
-  "rate_per_min": 10,
-  "dataset": "vanilla",
-  "assembler": 3,
-  "furnace": "electric",
-  "miner": "electric",
-  "machine_quality": "normal",
-  "beacon_quality": "normal",
-  "belt": "blue",
-  "belts_needed": 0.0037,
-  "production_steps": [
-    {
-      "recipe": "processing-unit",
-      "machine": "assembling-machine-3",
-      "machine_count": 7.5,
-      "machine_count_ceil": 8,
-      "rate_per_min": 10.0,
-      "beacon_speed_bonus": 10.0
-    }
-  ],
-  "raw_resources": {
-    "crude-oil": 487.18,
-    "iron-ore": 120.0
-  },
-  "miners_needed": {
-    "crude-oil": {
-      "machine": "pumpjack",
-      "required_yield_pct": 81.2,
-      "rate_per_min": 487.18
-    },
-    "iron-ore": {
-      "machine": "electric-mining-drill",
-      "machine_count": 4.0,
-      "machine_count_ceil": 4,
-      "rate_per_min": 120.0
-    }
-  },
-  "module_configs": {
-    "assembling-machine-3": [
-      {"count": 2, "type": "prod", "tier": 3, "quality": "rare"},
-      {"count": 2, "type": "speed", "tier": 3, "quality": "uncommon"}
-    ]
-  },
-  "beacon_configs": {
-    "assembling-machine-3": {"count": 8, "tier": 3, "quality": "legendary"}
-  },
-  "recipe_overrides": { "heavy-oil": "coal-liquefaction" },
-  "machine_overrides": { "metallurgy": "assembling-machine-3" },
-  "recipe_machine_overrides": { "iron-gear-wheel": "foundry" },
-  "recipe_module_overrides": {
-    "iron-gear-wheel": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]
-  },
-  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "tier": 3, "quality": "normal"} },
-  "recipe_belt_overrides": { "iron-gear-wheel": "red" },
-  "recipe_pump_overrides": { "sulfuric-acid": "legendary" }
-}
-```
-
-Notes:
-- `belt` + `belts_needed` present only when `--belt` is set and item is a solid; `belts_needed` = `rate / belt_throughput`
-- `pump` + `pumps_needed` present instead when `--pump` is set and item is a fluid; `pumps_needed` = `rate / pump_throughput`
-- `beacon_speed_bonus` in each step: total beacon speed contribution for that recipe (float; 0.0 if no beacons). Formula: `effectivity × sqrt(count) × BEACON_SLOTS × module_speed_per_slot`
-- `machine_count` is `float` (not `Fraction`) when beacons are configured for that recipe's machine (due to `sqrt`)
-- `pumpjack` emits `required_yield_pct` instead of `machine_count` (FactorioLab style)
-- `offshore-pump` emits `machine_count` + `machine_count_ceil`
-- `module_configs` present only when `--modules` flags were passed
-- `beacon_configs` present only when `--beacon` flags were passed
-- `recipe_overrides`, `machine_overrides`, `recipe_machine_overrides`, `recipe_module_overrides`, `recipe_beacon_overrides`, `recipe_belt_overrides`, `recipe_pump_overrides` each present only when the respective flags were passed
-
----
-
 ## Architecture
+
+CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 
 ### Key functions
 
@@ -204,7 +99,6 @@ Notes:
 - `raw_resources`: `{item: Fraction}` — total demanded rate
 - `surplus`: `{item: Fraction}` — co-product credits not yet consumed
 - `oil_demands`: `{item: Fraction}` — deferred petroleum-gas/light-oil/heavy-oil demands
-- `machine_overrides`: `{category: machine_key}` — category-level machine redirect (`--machine`)
 - `module_configs`: `{machine_key: [ModuleSpec]}` — global module config per machine (`--modules`)
 - `beacon_configs`: `{machine_key: BeaconSpec}` — global beacon config per machine (`--beacon`)
 - `recipe_machine_overrides`: `{recipe_key: machine_key}` — per-recipe machine override (`--recipe-machine`)
@@ -439,7 +333,7 @@ python -m unittest dev.test_cli -v
 | `TestPumpOutput` | `--pump` produces `pump`+`pumps_needed` for fluid items; quality throughput values (72000/93600/115200/136800/180000); `--recipe-pump` overrides per recipe |
 | `TestBeaconConfig` | `--beacon MACHINE=COUNT:TIER:QUALITY` computes speed via sqrt formula; `beacon_speed_bonus` in step output; `machine_count` becomes float; beacon quality effectivity (1.5/1.7/1.9/2.1/2.5); per-recipe override via `--recipe-beacon` |
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |
-| `TestMachineOverride` | `--machine CATEGORY=MACHINE` redirects category; `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; both surface in JSON output |
+| `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output |
 | `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
 
 ---
@@ -521,16 +415,7 @@ minification, `--open` to open the result in a browser immediately.
 config pills right (`[Space Age]` when applicable, `[Assembler 3]`,
 `[Electric Furnace]`, `[Productivity N]`). Save name is a subtle subtitle.
 
-**Features:**
-
-| Section | Contents |
-|---------|----------|
-| Science Packs | Gradient progress bar per target pack — actual vs target rate, colour-coded by pack. Vanilla and all 5 Space Age packs (Metallurgic/Agricultural/Electromagnetic/Cryogenic/Promethium) have distinct colours. Bars sorted in canonical research-tree order. |
-| Bottleneck banner | Red alert strip, shown only when issues exist |
-| Overview tab | Compact line list with % completion + Next Steps |
-| Lines tab | Expandable card per production line: machine table (placed/needed), raw resource rates, miners/extractors section (`N× Mining Drill` or `X% yield Pumpjack`), belt lane counts |
-| Issues tab | Bottlenecks + next steps with traffic-light colours |
-| Chat Log tab | Player/Claude message bubbles |
+**Features:** see `10x-factorio-engineer/SKILL.md` §5 for section-by-section description.
 
 **Import/Export:** Export produces a base64 string (copy button). Import
 accepts base64 or plain JSON (backward-compatible). Storage uses the same

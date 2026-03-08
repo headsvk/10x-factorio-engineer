@@ -7,11 +7,19 @@ Usage:
                   [--assembler 1|2|3]
                   [--furnace stone|steel|electric]
                   [--miner electric|big]
-                  [--prod-module 0|1|2|3]
-                  [--speed <bonus>]        # e.g. 0.5 = +50 %
                   [--dataset vanilla|space-age]
-                  [--recipe ITEM=RECIPE]   # repeatable
-                  [--machine CATEGORY=MACHINE]  # repeatable
+                  [--machine-quality QUALITY]
+                  [--beacon-quality QUALITY]
+                  [--belt yellow|red|blue|turbo]
+                  [--pump QUALITY]
+                  [--modules MACHINE=COUNT:TYPE:TIER:QUALITY]   # repeatable
+                  [--beacon MACHINE=COUNT:TIER:QUALITY]         # repeatable
+                  [--recipe ITEM=RECIPE]                        # repeatable
+                  [--recipe-machine RECIPE=MACHINE]             # repeatable
+                  [--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY]  # repeatable
+                  [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
+                  [--recipe-belt RECIPE=BELT]                   # repeatable
+                  [--recipe-pump RECIPE=QUALITY]                # repeatable
 
 Auto-loads factorio-prefs.json from the current directory if present.
 CLI flags always override prefs.
@@ -297,12 +305,10 @@ def load_prefs(path: str | None = None) -> dict:
     if given).  Returns an empty dict if the file doesn't exist.
 
     Supported keys (all optional):
-      dataset, assembler, furnace, miner, prod_module, speed
+      dataset, assembler, furnace, miner, machine_quality, beacon_quality, belt, pump
         — become CLI flag defaults; explicit flags still win.
       recipe_overrides  {item-id: recipe-key}
         — merged with --recipe flags; explicit --recipe flags win.
-      machine_overrides {category: machine-key}
-        — merged with --machine flags; explicit --machine flags win.
       preferred_belt    "yellow"|"red"|"blue"|"turbo"
         — consumed by Claude (SKILL.md) only; not used by the solver.
     """
@@ -622,7 +628,6 @@ class Solver:
         machine_quality: str = "normal",
         beacon_quality: str = "normal",
         recipe_overrides: dict | None = None,
-        machine_overrides: dict | None = None,
         recipe_machine_overrides: dict | None = None,
         recipe_module_overrides: dict | None = None,
         recipe_beacon_overrides: dict | None = None,
@@ -636,7 +641,6 @@ class Solver:
         self.machine_quality: str  = machine_quality
         self.beacon_quality:  str  = beacon_quality
         self.recipe_overrides:         dict = recipe_overrides         or {}
-        self.machine_overrides:        dict = machine_overrides        or {}
         self.recipe_machine_overrides: dict = recipe_machine_overrides or {}
         self.recipe_module_overrides:  dict = recipe_module_overrides  or {}
         self.recipe_beacon_overrides:  dict = recipe_beacon_overrides  or {}
@@ -717,16 +721,11 @@ class Solver:
 
     def _resolve_machine(self, recipe_key: str, cat: str) -> tuple:
         """
-        Return (machine_key, base_speed) respecting recipe-level and category-level
-        machine overrides.  Priority: recipe_machine_overrides > machine_overrides >
-        category default.
+        Return (machine_key, base_speed) respecting recipe-level machine overrides.
+        Priority: recipe_machine_overrides > category default.
         """
         if recipe_key in self.recipe_machine_overrides:
             ovr = self.recipe_machine_overrides[recipe_key]
-            if ovr in MACHINE_CRAFTING_SPEED:
-                return ovr, MACHINE_CRAFTING_SPEED[ovr]
-        if cat in self.machine_overrides:
-            ovr = self.machine_overrides[cat]
             if ovr in MACHINE_CRAFTING_SPEED:
                 return ovr, MACHINE_CRAFTING_SPEED[ovr]
         return get_machine(cat, self.assembler_level, self.furnace_type)
@@ -1037,11 +1036,8 @@ def format_output(
     if getattr(args, "beacon_configs", None):
         out["beacon_configs"] = args.beacon_configs
 
-    # Old-style overrides from solver state
     if solver.recipe_overrides:
         out["recipe_overrides"] = solver.recipe_overrides
-    if solver.machine_overrides:
-        out["machine_overrides"] = solver.machine_overrides
 
     # Per-recipe overrides from args
     if getattr(args, "recipe_machine_overrides", None):
@@ -1184,15 +1180,6 @@ Examples:
         ),
     )
     p.add_argument(
-        "--machine",
-        action="append", default=[],
-        metavar="CATEGORY=MACHINE",
-        help=(
-            "Override machine for a recipe category. Repeatable. "
-            "E.g. --machine organic-or-assembling=assembling-machine-3"
-        ),
-    )
-    p.add_argument(
         "--recipe-machine",
         action="append", default=[],
         metavar="RECIPE=MACHINE",
@@ -1246,12 +1233,6 @@ def main() -> None:
         k, v = _parse_kv(raw, "--recipe")
         recipe_overrides[k] = v
 
-    # Parse --machine CATEGORY=MACHINE (prefs baseline; CLI flags win)
-    machine_overrides: dict[str, str] = dict(prefs.get("machine_overrides", {}))
-    for raw in args.machine:
-        k, v = _parse_kv(raw, "--machine")
-        machine_overrides[k] = v
-
     # Parse --modules MACHINE=COUNT:TYPE:TIER:QUALITY
     module_configs: dict[str, list] = {}
     for raw in args.modules:
@@ -1304,7 +1285,6 @@ def main() -> None:
         machine_quality=args.machine_quality,
         beacon_quality=args.beacon_quality,
         recipe_overrides=recipe_overrides or None,
-        machine_overrides=machine_overrides or None,
         recipe_machine_overrides=recipe_machine_overrides or None,
         recipe_module_overrides=recipe_module_overrides or None,
         recipe_beacon_overrides=recipe_beacon_overrides or None,

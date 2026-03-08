@@ -39,10 +39,12 @@ python assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 
 | Option | Default | Notes |
 |--------|---------|-------|
-| `--assembler 1\|2\|3` | `3` | Assembling machine tier |
-| `--furnace stone\|steel\|electric` | `electric` | Furnace type |
-| `--miner electric\|big` | `electric` | `big` = Space Age big mining drill |
-| `--dataset vanilla\|space-age` | `vanilla` | |
+| `--item ITEM-ID` | required | Item ID (e.g. `electronic-circuit`) |
+| `--rate N` | required | Target items/minute |
+| `--assembler 1/2/3` | `3` | Assembling machine tier |
+| `--furnace stone/steel/electric` | `electric` | Furnace type |
+| `--miner electric/big` | `electric` | `big` = Space Age big mining drill |
+| `--dataset vanilla/space-age` | `vanilla` | |
 | `--machine-quality QUALITY` | `normal` | Machine quality: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
 | `--beacon-quality QUALITY` | `normal` | Beacon housing quality (same enum) |
 | `--belt TIER` | _(none)_ | Solid output belt tier: `yellow`/`red`/`blue`/`turbo` |
@@ -50,12 +52,15 @@ python assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 | `--modules MACHINE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Module config per machine; repeatable |
 | `--beacon MACHINE=COUNT:TIER:QUALITY` | _(none)_ | Beacon config (speed modules) per machine; repeatable |
 | `--recipe ITEM=RECIPE` | _(none)_ | Override recipe; repeatable |
-| `--machine CATEGORY=MACHINE` | _(none)_ | Override machine for a recipe category; repeatable |
 | `--recipe-machine RECIPE=MACHINE` | _(none)_ | Override machine for a specific recipe; repeatable |
 | `--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Per-recipe module override; repeatable |
 | `--recipe-beacon RECIPE=COUNT:TIER:QUALITY` | _(none)_ | Per-recipe beacon override; repeatable |
 | `--recipe-belt RECIPE=TIER` | _(none)_ | Per-recipe belt tier override; repeatable |
 | `--recipe-pump RECIPE=QUALITY` | _(none)_ | Per-recipe pump quality override; repeatable |
+
+**Module TYPE values:** `prod` / `speed` / `efficiency` (efficiency stored but not used in machine-count math — no speed/productivity effect)
+
+**Quality enum:** `normal` / `uncommon` / `rare` / `epic` / `legendary` (applies to `--machine-quality`, `--beacon-quality`, pump quality, and the QUALITY field in module specs)
 
 ### Examples
 
@@ -78,17 +83,66 @@ python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-
 
 ### Reading the output
 
-The JSON stdout has these top-level keys:
+The CLI emits JSON to stdout. Example:
+
+```json
+{
+  "item": "processing-unit",
+  "rate_per_min": 10,
+  "dataset": "vanilla",
+  "assembler": 3,
+  "furnace": "electric",
+  "miner": "electric",
+  "machine_quality": "normal",
+  "beacon_quality": "normal",
+  "belt": "blue",
+  "belts_needed": 0.0037,
+  "production_steps": [
+    {
+      "recipe": "processing-unit",
+      "machine": "assembling-machine-3",
+      "machine_count": 7.5,
+      "machine_count_ceil": 8,
+      "rate_per_min": 10.0,
+      "beacon_speed_bonus": 10.0
+    }
+  ],
+  "raw_resources": { "crude-oil": 487.18, "iron-ore": 120.0 },
+  "miners_needed": {
+    "crude-oil": { "machine": "pumpjack", "required_yield_pct": 81.2, "rate_per_min": 487.18 },
+    "iron-ore": { "machine": "electric-mining-drill", "machine_count": 4.0, "machine_count_ceil": 4, "rate_per_min": 120.0 }
+  },
+  "module_configs": { "assembling-machine-3": [{"count": 2, "type": "prod", "tier": 3, "quality": "rare"}] },
+  "beacon_configs": { "assembling-machine-3": {"count": 8, "tier": 3, "quality": "legendary"} },
+  "recipe_overrides": { "heavy-oil": "coal-liquefaction" },
+  "recipe_machine_overrides": { "iron-gear-wheel": "foundry" },
+  "recipe_module_overrides": { "iron-gear-wheel": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}] },
+  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "tier": 3, "quality": "normal"} },
+  "recipe_belt_overrides": { "iron-gear-wheel": "red" },
+  "recipe_pump_overrides": { "sulfuric-acid": "legendary" }
+}
+```
 
 | Key | What it tells you |
 |-----|------------------|
-| `production_steps` | Every recipe in the chain — machine type, exact count, ceil count, rate/min, `beacon_speed_bonus` |
-| `raw_resources` | Ore / crude-oil / water rates you need from the ground |
+| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `beacon_speed_bonus` |
+| `raw_resources` | Ore / crude-oil / water rates needed from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields) |
-| `belt` + `belts_needed` | Present when `--belt` is set: tier name + lanes for the solid output |
-| `pump` + `pumps_needed` | Present when `--pump` is set: quality name + pumps for fluid output |
-| `module_configs` | Present when `--modules` was passed: module specs per machine |
-| `beacon_configs` | Present when `--beacon` was passed: beacon spec per machine |
+| `belt` + `belts_needed` | Present when `--belt` is set and item is solid; `belts_needed` = `rate / belt_throughput` |
+| `pump` + `pumps_needed` | Present when `--pump` is set and item is a fluid |
+| `module_configs` | Present when `--modules` was passed; module specs per machine |
+| `beacon_configs` | Present when `--beacon` was passed; beacon spec per machine |
+| `recipe_overrides` | Present when `--recipe` was passed |
+| `recipe_machine_overrides` | Present when `--recipe-machine` was passed |
+| `recipe_module_overrides` | Present when `--recipe-modules` was passed |
+| `recipe_beacon_overrides` | Present when `--recipe-beacon` was passed |
+| `recipe_belt_overrides` | Present when `--recipe-belt` was passed |
+| `recipe_pump_overrides` | Present when `--recipe-pump` was passed |
+
+Notes:
+- `pumpjack` emits `required_yield_pct` (not `machine_count`) — player divides this across pumpjack fields
+- `offshore-pump` emits `machine_count` + `machine_count_ceil`
+- `beacon_speed_bonus` is 0.0 when no beacons configured; `machine_count` becomes `float` (not `Fraction`) when beacons active
 
 **Critical rule**: Never report a machine count or resource rate to the player
 without first running the CLI and citing the exact value from its JSON output.
@@ -141,10 +195,6 @@ working context and update it after every player message.
     // item-id → recipe-key; each entry becomes --recipe ITEM=RECIPE
     // e.g. "heavy-oil": "coal-liquefaction"
   },
-  "machine_overrides": {
-    // recipe-category → machine-key; each entry becomes --machine CATEGORY=MACHINE
-    // e.g. "organic-or-assembling": "assembling-machine-3"
-  },
   "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — lead with this tier in answers
 
   // Science pack targets — items per minute the player wants to reach
@@ -195,8 +245,6 @@ When a player says something like:
 - *"switch to Space Age"* → set `dataset: space-age`, re-run CLI for all lines.
 - *"I'm using coal liquefaction"* → add `"heavy-oil": "coal-liquefaction"` to
   `recipe_overrides`, re-run CLI for all affected lines.
-- *"I use the foundry for iron"* → add `"metallurgy": "foundry"` to
-  `machine_overrides`, re-run CLI for affected lines.
 - *"I use blue belts"* → set `preferred_belt: "blue"`.
 - *"I use 4 prod-3 modules in all assemblers"* → set `module_configs["assembling-machine-3"] = [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines.
 - *"I have 8 legendary beacons on each assembler-3"* → set `beacon_configs["assembling-machine-3"] = {"count": 8, "tier": 3, "quality": "normal"}`, re-run CLI for all affected lines.
@@ -222,8 +270,7 @@ these IDs to friendly names automatically.
    `--assembler`, `--furnace`, `--dataset`, `--machine-quality`, `--beacon-quality`,
    `--modules MACHINE=...` for every entry in `module_configs`,
    `--beacon MACHINE=...` for every entry in `beacon_configs`,
-   `--recipe ITEM=RECIPE` for every entry in `recipe_overrides`, and
-   `--machine CATEGORY=MACHINE` for every entry in `machine_overrides`.
+   `--recipe ITEM=RECIPE` for every entry in `recipe_overrides`.
 3. Parse the JSON output.
 4. Format a human-readable answer:
    - Lead with the **machine count** for the target step.
