@@ -199,6 +199,18 @@ working context and update it after every player message.
   },
   "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — lead with this tier in answers
 
+  // Items on the main bus — player-declared supply rates (items/min).
+  // Claude applies --bus-item ITEM to new CLI calls for lines that draw ITEM from the bus.
+  // This is NOT applied automatically to all lines — only when the player says a line
+  // sources a bus item from the bus. Lines with their own supply (own miners/producers)
+  // do NOT use --bus-item; the difference shows in cli_result:
+  //   bus-fed → bus_inputs: { "item": rate }
+  //   own supply → raw_resources: { "item-ore": rate }
+  "bus_items": [
+    // e.g. { "item": "iron-plate", "rate": 7200, "label": "Iron Bus — 4 red belts" }
+    // label is optional display text
+  ],
+
   // Science pack targets — items per minute the player wants to reach
   "targets": {
     "automation-science-pack": 45,
@@ -253,6 +265,9 @@ When a player says something like:
 - *"I have 2 blocks of iron smelters, 2 red belts each"* → create two `iron-plate` lines, each with `target_rate: 3600` (2 × 1800/min) and labels like `"Iron Smelting Block 1"` / `"Iron Smelting Block 2"`. Multiple lines with the same `item` are valid — one per physical block.
 - *"I use 4 prod-3 modules in all assemblers"* → set `module_configs["assembling-machine-3"] = [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines.
 - *"I have 8 legendary beacons on each assembler-3"* → set `beacon_configs["assembling-machine-3"] = {"count": 8, "tier": 3, "quality": "normal"}`, re-run CLI for all affected lines.
+- *"I have N red belts of iron plate on the bus"* → add/update `bus_items` entry: `{ "item": "iron-plate", "rate": N × 1800 }`. Belt throughputs: yellow=900, red=1800, blue=2700, turbo=4500 items/min. For new lines that draw iron-plate from the bus, add `--bus-item iron-plate` to the CLI call so `bus_inputs` is populated in the cli_result. If the player says a block has its own supply for an item that's also on the bus, run WITHOUT `--bus-item` for that item — the item appears in `raw_resources` instead and Bus Balance is unaffected.
+- When adding any new line where bus_items exist: apply `--bus-item ITEM` for ingredients the player says come from the bus. Mention the assumption once: *"I'll assume X, Y come from the bus since they're declared as bus items — let me know if any have their own miners/supply."*
+- When a new **production line** is added for a manufactured intermediate (plates, circuits, plastic, etc.), automatically add it to `bus_items` with the line's `effective_rate` as the rate. Exception: science packs and other end-product lines are not added to the bus.
 
 Always re-derive `bottlenecks` after any state change:
 - A line is a bottleneck if `effective_rate < target_rate * 0.95`.
@@ -386,6 +401,21 @@ format: lead with machine count for X, then key dependencies, then raw resources
 5. Offer to launch/update the dashboard
 ```
 
+### "I have N assemblers making X, Y, Z" (consumable blocks)
+
+Small production lines (belts, splitters, underground belts, etc.) that aren't dedicated bus producers:
+
+```
+For each item in the list:
+  1. Determine production rate from the recipe and machine count
+     (e.g. 1 assembler-3 making transport-belt at 60/min with crafting time 0.5s → 60/0.5×60 = ... or run CLI at 1 unit/min and scale)
+  2. Run: python assets/cli.py --item X --rate <computed_rate>
+     Add --bus-item for each ingredient in bus_items that the player sources from the bus
+  3. Add as a line with actual_machines set, target_rate = effective_rate (no separate target)
+```
+
+These appear in Lines and Overview (grouped under "Other"). Bus Balance reflects their consumption only if their ingredients are bus-fed (`bus_inputs` in cli_result).
+
 ### "Show dashboard" / "Update factory view"
 
 ```
@@ -415,7 +445,18 @@ The CLI uses Factorio's internal item IDs. Map common player shorthand:
 | plastic | `plastic-bar` |
 | batteries | `battery` |
 | flying robot frame | `flying-robot-frame` |
-| express belt | `express-transport-belt` |
+| yellow belt / basic belt | `transport-belt` |
+| red belt / fast belt | `fast-transport-belt` |
+| blue belt / express belt | `express-transport-belt` |
+| green belt / turbo belt | `turbo-transport-belt` |
+| yellow underground / basic underground | `underground-belt` |
+| red underground / fast underground | `fast-underground-belt` |
+| blue underground / express underground | `express-underground-belt` |
+| green underground / turbo underground | `turbo-underground-belt` |
+| yellow splitter / basic splitter | `splitter` |
+| red splitter / fast splitter | `fast-splitter` |
+| blue splitter / express splitter | `express-splitter` |
+| green splitter / turbo splitter | `turbo-splitter` |
 | stone bricks | `stone-brick` |
 | low density structure / LDS | `low-density-structure` |
 | RCU | `rocket-control-unit` |

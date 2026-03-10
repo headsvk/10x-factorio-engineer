@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Preview the dashboard in the browser with sample state pre-loaded.
+Generate dev/preview.tmp.html with sample state pre-loaded in localStorage.
 
-Reads dev/sample-state.b64 and injects it into localStorage before the
-dashboard initialises, so the sample factory appears immediately on open.
-A temporary HTML file is written to dev/preview.tmp.html and opened.
+Reads dev/sample-state.b64 and injects it so the sample factory appears
+immediately when the file is opened. Use the Claude Preview MCP tool
+(server: dashboard-preview, port 7474) to view the result.
 
 Usage:
     python dev/preview.py
@@ -14,8 +14,6 @@ Usage:
 import argparse
 import os
 import re
-import tempfile
-import webbrowser
 
 DEV_DIR   = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(DEV_DIR)
@@ -54,4 +52,3 @@ with open(out_path, "w", encoding="utf-8") as f:
     f.write(html)
 
 print(f"Preview written: {out_path}")
-webbrowser.open("file:///" + out_path.replace("\\", "/"))

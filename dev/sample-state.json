@@ -1,5 +1,5 @@
 {
-  "save_name": "Green Science Run",
+  "save_name": "Sample Factory",
   "dataset": "vanilla",
   "assembler": 2,
   "furnace": "electric",
@@ -10,7 +10,17 @@
   "recipe_overrides": {},
   "machine_overrides": {},
   "preferred_belt": "red",
-  "targets": {},
+  "bus_items": [
+    { "item": "iron-plate",          "rate": 7200, "label": "Iron Bus — 4 red belts" },
+    { "item": "copper-plate",        "rate": 3600, "label": "Copper Bus — 2 red belts" },
+    { "item": "electronic-circuit",  "rate": 1800, "label": "Green Circuit Bus — 1 red belt" },
+    { "item": "plastic-bar",         "rate": 2400, "label": "Plastic Bus — ~1.3 red belts" },
+    { "item": "advanced-circuit",    "rate": 300,  "label": "Red Circuit Bus — ~0.17 red belts" }
+  ],
+  "targets": {
+    "automation-science-pack": 90,
+    "logistic-science-pack": 90
+  },
   "lines": [
     {
       "item": "iron-plate",
@@ -118,6 +128,121 @@
         "bus_inputs": { "copper-plate": 2700.0, "iron-plate": 1800.0 },
         "belt": "red",
         "belts_needed": 1.0
+      }
+    },
+    {
+      "item": "automation-science-pack",
+      "label": "Red Science Line",
+      "target_rate": 90,
+      "effective_rate": 90,
+      "actual_machines": { "assembling-machine-2": 10 },
+      "player_notes": "10 AM2s, pulling iron and copper from bus",
+      "cli_result": {
+        "item": "automation-science-pack",
+        "rate_per_min": 90.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "automation-science-pack", "machine": "assembling-machine-2", "machine_count": 10.0, "machine_count_ceil": 10, "rate_per_min": 90.0, "beacon_speed_bonus": 0.0 },
+          { "recipe": "iron-gear-wheel",         "machine": "assembling-machine-2", "machine_count": 1.0,  "machine_count_ceil": 1,  "rate_per_min": 90.0, "beacon_speed_bonus": 0.0 }
+        ],
+        "raw_resources": {},
+        "miners_needed": {},
+        "bus_inputs": { "iron-plate": 180.0, "copper-plate": 90.0 },
+        "belt": "red",
+        "belts_needed": 0.05
+      }
+    },
+    {
+      "item": "logistic-science-pack",
+      "label": "Green Science Line",
+      "target_rate": 90,
+      "effective_rate": 90,
+      "actual_machines": { "assembling-machine-2": 16 },
+      "player_notes": "12 packs + 2 gear + 1 inserter + 1 belt AM2s, pulling iron and green circuits from bus",
+      "cli_result": {
+        "item": "logistic-science-pack",
+        "rate_per_min": 90.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "iron-gear-wheel",       "machine": "assembling-machine-2", "machine_count": 1.5,  "machine_count_ceil": 2,  "rate_per_min": 135.0, "beacon_speed_bonus": 0.0 },
+          { "recipe": "logistic-science-pack", "machine": "assembling-machine-2", "machine_count": 12.0, "machine_count_ceil": 12, "rate_per_min": 90.0,  "beacon_speed_bonus": 0.0 },
+          { "recipe": "inserter",              "machine": "assembling-machine-2", "machine_count": 1.0,  "machine_count_ceil": 1,  "rate_per_min": 90.0,  "beacon_speed_bonus": 0.0 },
+          { "recipe": "transport-belt",        "machine": "assembling-machine-2", "machine_count": 0.5,  "machine_count_ceil": 1,  "rate_per_min": 90.0,  "beacon_speed_bonus": 0.0 }
+        ],
+        "raw_resources": {},
+        "miners_needed": {},
+        "bus_inputs": { "iron-plate": 405.0, "electronic-circuit": 90.0 },
+        "belt": "red",
+        "belts_needed": 0.05
+      }
+    },
+    {
+      "item": "plastic-bar",
+      "label": "Plastic Line",
+      "target_rate": 2400,
+      "effective_rate": 2400,
+      "actual_machines": { "chemical-plant": 20, "oil-refinery": 21, "chemical-plant (cracking)": 24 },
+      "player_notes": "own oil supply — 21 refineries + cracking",
+      "cli_result": {
+        "item": "plastic-bar",
+        "rate_per_min": 2400.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "advanced-oil-processing", "machine": "oil-refinery",     "machine_count": 20.5128, "machine_count_ceil": 21, "rate_per_min": 13538.4615, "beacon_speed_bonus": 0.0 },
+          { "recipe": "light-oil-cracking",      "machine": "chemical-plant",   "machine_count": 17.4359, "machine_count_ceil": 18, "rate_per_min": 10461.5385, "beacon_speed_bonus": 0.0 },
+          { "recipe": "heavy-oil-cracking",      "machine": "chemical-plant",   "machine_count": 5.1282,  "machine_count_ceil": 6,  "rate_per_min": 4615.3846,  "beacon_speed_bonus": 0.0 },
+          { "recipe": "plastic-bar",             "machine": "chemical-plant",   "machine_count": 20.0,    "machine_count_ceil": 20, "rate_per_min": 2400.0,     "beacon_speed_bonus": 0.0 }
+        ],
+        "raw_resources": {
+          "water":     32615.3846,
+          "crude-oil": 24615.3846,
+          "coal":       1200.0
+        },
+        "miners_needed": {
+          "coal":      { "machine": "electric-mining-drill", "machine_count": 40.0,     "machine_count_ceil": 40, "rate_per_min": 1200.0 },
+          "water":     { "machine": "offshore-pump",         "machine_count": 27.1795,  "machine_count_ceil": 28, "rate_per_min": 32615.3846 },
+          "crude-oil": { "machine": "pumpjack",              "required_yield_pct": 4102.56,                        "rate_per_min": 24615.3846 }
+        }
+      }
+    },
+    {
+      "item": "advanced-circuit",
+      "label": "Red Circuit Line",
+      "target_rate": 300,
+      "effective_rate": 300,
+      "actual_machines": { "assembling-machine-2": 47 },
+      "player_notes": "40 AM2s + 7 cable, pulling circuits, plastic, copper from bus",
+      "cli_result": {
+        "item": "advanced-circuit",
+        "rate_per_min": 300.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "copper-cable",     "machine": "assembling-machine-2", "machine_count": 6.6667, "machine_count_ceil": 7,  "rate_per_min": 1200.0, "beacon_speed_bonus": 0.0 },
+          { "recipe": "advanced-circuit", "machine": "assembling-machine-2", "machine_count": 40.0,   "machine_count_ceil": 40, "rate_per_min": 300.0,  "beacon_speed_bonus": 0.0 }
+        ],
+        "raw_resources": {},
+        "miners_needed": {},
+        "bus_inputs": { "electronic-circuit": 600.0, "plastic-bar": 600.0, "copper-plate": 600.0 }
       }
     }
   ],

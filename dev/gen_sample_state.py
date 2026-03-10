@@ -2,8 +2,7 @@
 """
 Regenerate dev/sample-state.b64 from dev/sample-state.json.
 
-The dashboard's Import panel accepts either plain JSON or a base64-encoded
-string produced by this script.  The encoding is:
+The encoding is:
     minified JSON (no extra whitespace) → UTF-8 bytes → standard base64
 
 Usage:

@@ -146,7 +146,7 @@
     .science-bar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .science-name { display: flex; align-items: center; gap: 8px; font-family: 'Barlow Condensed', sans-serif;
                     font-size: 14px; font-weight: 700; letter-spacing: .02em; color: var(--text); }
-    .science-dot  { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .science-dot  { flex-shrink: 0; display: block; }
     .science-meta { display: flex; align-items: center; gap: 12px; }
     .rate-text    { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
     .pct-text     { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
@@ -173,6 +173,13 @@
     .tab-btn:hover:not(.active) { background: var(--bg-input); }
     .tab-panel                  { display: none; }
     .tab-panel.active           { display: block; }
+
+    /* ── SPM headline ── */
+    .spm-headline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px; }
+    .spm-number   { font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 700;
+                    font-variant-numeric: tabular-nums; line-height: 1; }
+    .spm-label    { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900;
+                    letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
 
     /* ── Overview ── */
     .overview-line { padding: 10px 12px; border-radius: 4px; border: 1px solid; margin-bottom: 6px; }
@@ -373,6 +380,7 @@ const DEFAULT_STATE = {
   furnace: 'electric', machine_quality: 'normal', beacon_quality: 'normal',
   module_configs: {}, beacon_configs: {}, recipe_overrides: {}, machine_overrides: {},
   preferred_belt: 'blue',
+  bus_items: [],
   targets: {}, lines: [], bottlenecks: [], next_steps: [], chat_log: [],
 };
 
@@ -383,20 +391,39 @@ const SCIENCE_ORDER = [
   'electromagnetic-science-pack','cryogenic-science-pack','promethium-science-pack',
 ];
 
-const SCIENCE_GRADIENTS = {
-  'automation-science-pack':      ['#a86638','#c8964a'],
-  'logistic-science-pack':        ['#4a8a4a','#6ab06a'],
-  'military-science-pack':        ['#8a3a3a','#b05050'],
-  'chemical-science-pack':        ['#4a5a9a','#6878c8'],
-  'production-science-pack':      ['#8a8a3a','#b0b050'],
-  'utility-science-pack':         ['#3a8a8a','#50b0b0'],
-  'space-science-pack':           ['#7a3a9a','#a058c8'],
-  'metallurgic-science-pack':     ['#8a3a1a','#c05830'],
-  'agricultural-science-pack':    ['#3a7a18','#5ab028'],
-  'electromagnetic-science-pack': ['#3a28a0','#5848d8'],
-  'cryogenic-science-pack':       ['#186888','#28a8c8'],
-  'promethium-science-pack':      ['#4a1070','#7820b0'],
+// Official Factorio science pack colors (rgb). Edge cases adjusted:
+//   space (255,253,253→near-white), cryogenic (0,20,255→too-dark blue),
+//   promethium (30,26,78→near-black) — all shifted to visible mid-range values.
+const SCIENCE_COLORS = {
+  'automation-science-pack':      [255,  0,  0],
+  'logistic-science-pack':        [  0,255, 11],
+  'military-science-pack':        [146,166,230],
+  'chemical-science-pack':        [  0,230,255],
+  'production-science-pack':      [168,  0,255],
+  'utility-science-pack':         [255,226,  0],
+  'space-science-pack':           [175,195,255],  // adjusted from near-white
+  'metallurgic-science-pack':     [255,143,  0],
+  'electromagnetic-science-pack': [255,  0,145],
+  'agricultural-science-pack':    [210,255,  0],
+  'cryogenic-science-pack':       [ 50,105,255],  // adjusted from near-black blue
+  'promethium-science-pack':      [115, 95,215],  // adjusted from near-black
 };
+
+function sciStyle(name) {
+  const [r,g,b] = SCIENCE_COLORS[name] || [128,128,128];
+  const dr = Math.round(r*0.35), dg = Math.round(g*0.35), db = Math.round(b*0.35);
+  return { solid: `rgb(${r},${g},${b})`, dark: `rgb(${dr},${dg},${db})` };
+}
+
+// Flask icon from svgrepo.com (viewBox 36×36).
+// Layer 1: filled interior in science color.
+// Layer 2: original outline path in --text-muted (softer than full text color).
+function sciIcon(color) {
+  return `<svg class="science-dot" viewBox="0 0 36 36" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12,2.5 L24,2.5 L24,4 L21,4 L21,15.5 L29.5,28.5 Q31,34 18,34 Q5,34 6.5,28.5 L15,15.5 L15,4 L12,4 Z" fill="${color}"/>
+    <path d="M31.43,27.28,23,14.84V4h1a1,1,0,0,0,0-2H12a1,1,0,0,0,0,2h1V14.84L4.51,27.36A4.29,4.29,0,0,0,5,32.8,4.38,4.38,0,0,0,8.15,34H28a4.24,4.24,0,0,0,3.42-6.72ZM29.85,31a2.62,2.62,0,0,1-2,1H8a2.2,2.2,0,0,1-2.06-1.41,2.68,2.68,0,0,1,.29-2.17l3-4.44,14,0-1.31-2H10.57L15,15.46V4h6V15.46l8.84,13.05A2.23,2.23,0,0,1,29.85,31Z" style="fill:var(--text-muted)"/>
+  </svg>`;
+}
 
 const MACHINE_NAMES = {
   'assembling-machine-1':'Assembler 1','assembling-machine-2':'Assembler 2',
@@ -519,6 +546,13 @@ function renderHeader() {
           ${(machine_quality && machine_quality !== 'normal') ? `<span class="badge">${label(machine_quality)} Machines</span>` : ''}
           ${preferred_belt ? `<span class="badge">${label(preferred_belt)} Belt</span>` : ''}
           ${Object.keys(module_configs ?? {}).length ? '<span class="badge">Modules</span>' : ''}
+          ${(() => {
+            const sciKeys = Object.keys(STATE.targets ?? {});
+            if (!sciKeys.length) return '';
+            const rates = sciRates();
+            const eff = Math.min(...sciKeys.map(k => rates[k] ?? 0));
+            return `<span class="badge">${Math.round(eff)} SPM</span>`;
+          })()}
         </div>
         <div class="btn-group">
           <button class="btn" id="btn-export">↓ Export</button>
@@ -530,33 +564,49 @@ function renderHeader() {
     </div>`;
 }
 
+function sciRates() {
+  const r = {};
+  for (const line of STATE.lines)
+    if (line.item in (STATE.targets ?? {}))
+      r[line.item] = (r[line.item] ?? 0) + (line.effective_rate ?? line.target_rate ?? 0);
+  return r;
+}
+
 function renderScience() {
   const keys = sortedScienceKeys(Object.keys(STATE.targets));
   if (!keys.length) return '';
-  const rates = {};
-  for (const line of STATE.lines)
-    if (line.item in STATE.targets) rates[line.item] = (rates[line.item] ?? 0) + (line.effective_rate ?? line.target_rate ?? 0);
+  const rates = sciRates();
+
+  const effectiveSPM = Math.min(...keys.map(k => rates[k] ?? 0));
+  const targetSPM    = Math.min(...keys.map(k => STATE.targets[k]));
+  const spmPct = pct(effectiveSPM, targetSPM);
+  const spmCol = statusColor(spmPct);
+  const spmHeadline = `
+    <div class="spm-headline">
+      <span class="spm-number" style="color:${spmCol}">${Math.round(effectiveSPM)} / ${targetSPM}</span>
+      <span class="spm-label">SPM</span>
+    </div>`;
 
   const bars = keys.map(name => {
     const actual = rates[name];
     const target = STATE.targets[name];
     const p = pct(actual ?? 0, target);
-    const [dark, light] = SCIENCE_GRADIENTS[name] || ['#555','#888'];
+    const {solid, dark} = sciStyle(name);
     const col = statusColor(p);
     return `
       <div class="science-bar">
         <div class="science-bar-header">
           <div class="science-name">
-            <span class="science-dot" style="background:linear-gradient(135deg,${dark},${light})"></span>
+            ${sciIcon(solid)}
             ${esc(label(name))}
           </div>
           <div class="science-meta">
-            <span class="rate-text">${actual ?? '?'}/${target} /min</span>
+            <span class="rate-text">${actual ?? 0}/${target} /min</span>
             <span class="pct-text" style="color:${col}">${p}%</span>
           </div>
         </div>
         <div class="progress-track">
-          <div class="progress-fill" style="width:${p}%;background:linear-gradient(90deg,${dark},${light})"></div>
+          <div class="progress-fill" style="width:${p}%;background:linear-gradient(90deg,${dark},${solid})"></div>
         </div>
       </div>`;
   }).join('');
@@ -564,6 +614,7 @@ function renderScience() {
   return `
     <div class="science-section">
       <div class="section-label">Science Targets</div>
+      ${spmHeadline}
       <div class="science-grid${keys.length >= 4 ? ' cols-2' : ''}">${bars}</div>
     </div>`;
 }
@@ -578,10 +629,13 @@ function renderBottlenecks() {
 }
 
 function renderBusBalance() {
-  // Supply: sum effective_rate for producer lines
+  // Supply: explicitly declared bus_items (player-declared rates)
   const supply = {};
-  for (const line of STATE.lines)
-    supply[line.item] = (supply[line.item] ?? 0) + (line.effective_rate ?? line.target_rate ?? 0);
+  const busItemMap = {};
+  for (const src of STATE.bus_items ?? []) {
+    supply[src.item] = (supply[src.item] ?? 0) + src.rate;
+    busItemMap[src.item] = src;
+  }
 
   // Demand: read bus_inputs from cli_result (set when --bus-item was used for this line)
   const demand = {};
@@ -589,7 +643,8 @@ function renderBusBalance() {
     for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {}))
       demand[item] = (demand[item] ?? 0) + rate;
 
-  const busItems = Object.keys(supply);
+  // Show all items with supply OR demand
+  const busItems = [...new Set([...Object.keys(supply), ...Object.keys(demand)])];
   if (!busItems.length) return '';
 
   const belt = STATE.preferred_belt;
@@ -598,14 +653,15 @@ function renderBusBalance() {
     const s = supply[item] ?? 0;
     const d = demand[item] ?? 0;
     const net = s - d;
-    const usedPct = s > 0 ? Math.min(100, (d / s) * 100) : 0;
+    const usedPct = s > 0 ? Math.min(100, (d / s) * 100) : 100;
     const netBelts = (net / beltTp).toFixed(2);
     const netCol = net >= 0 ? 'var(--ok)' : 'var(--bad)';
     const sign = net >= 0 ? '+' : '';
+    const rowLabel = busItemMap[item]?.label ?? label(item);
     return `
       <div class="bus-row">
         <div class="bus-row-header">
-          <span class="bus-name">${esc(label(item))}</span>
+          <span class="bus-name">${esc(rowLabel)}</span>
           <div class="bus-net-group">
             <span class="bus-net" style="color:${netCol}">${sign}${netBelts}</span>
             <span class="bus-belt-tag">${belt} belt</span>
@@ -642,27 +698,18 @@ function renderTabs() {
     </div>`;
 }
 
-function renderOverview() {
-  if (!STATE.lines.length) return `
-    <div class="empty-state">
-      <p>No production lines tracked yet.</p>
-      <p>Import a state from a CLI session, or ask Claude in the Chat tab.</p>
-    </div>`;
+const SMELTING_MACHINES = new Set(['electric-furnace','stone-furnace','steel-furnace','foundry']);
+const CIRCUIT_ITEMS     = new Set(['electronic-circuit','advanced-circuit','processing-unit']);
+const SCIENCE_ITEM_SET  = new Set(SCIENCE_ORDER);
 
-  const items = STATE.lines.map(line => {
-    const actual = line.effective_rate ?? line.target_rate ?? 0;
-    const p = pct(actual, line.target_rate ?? 0);
-    const col = statusColor(p);
-    return `
-      <div class="overview-line ${statusClass(p)}">
-        <div class="overview-line-header">
-          <span class="overview-line-name">${esc(line.label ?? label(line.item))}</span>
-          <div class="overview-stats">
-            <span class="rate-text">${fmtRB(actual, line.cli_result?.belt ?? STATE.preferred_belt)}</span>
-          </div>
-        </div>
-      </div>`;
-  }).join('');
+function renderOverview() {
+  const sciSection = renderScience();
+
+  if (!sciSection) return `
+    <div class="empty-state">
+      <p>No science targets set yet.</p>
+      <p>Ask Claude to set targets in the Chat tab.</p>
+    </div>`;
 
   const steps = STATE.next_steps.length ? `
     <div class="next-steps">
@@ -674,7 +721,35 @@ function renderOverview() {
         </div>`).join('')}
     </div>` : '';
 
-  return items + steps;
+  return sciSection + steps;
+}
+
+function renderLinesTab() {
+  if (!STATE.lines.length) return `
+    <div class="empty-state">
+      <p>No production lines yet.</p>
+      <p>Ask Claude to plan one in the Chat tab.</p>
+    </div>`;
+
+  const idxMap = new Map(STATE.lines.map((l, i) => [l, i]));
+  const sciLines    = STATE.lines.filter(l =>  SCIENCE_ITEM_SET.has(l.item));
+  const nonSciLines = STATE.lines.filter(l => !SCIENCE_ITEM_SET.has(l.item));
+
+  const groups = [['Science', sciLines], ['Smelting', []], ['Circuits', []], ['Other', []]];
+  for (const line of nonSciLines) {
+    const machine = line.cli_result?.production_steps?.[0]?.machine;
+    if (machine && SMELTING_MACHINES.has(machine)) groups[1][1].push(line);
+    else if (CIRCUIT_ITEMS.has(line.item))          groups[2][1].push(line);
+    else                                             groups[3][1].push(line);
+  }
+
+  let html = '';
+  for (const [name, lines] of groups) {
+    if (!lines.length) continue;
+    html += `<div class="section-label" style="margin:12px 0 8px">${name}</div>`;
+    html += lines.map(l => renderLineCard(l, idxMap.get(l))).join('');
+  }
+  return html;
 }
 
 function renderLineCard(line, idx) {
@@ -800,12 +875,11 @@ function render() {
   document.getElementById('app').innerHTML = `
     ${renderHeader()}
     <div class="main">
-      ${renderScience()}
       ${renderBottlenecks()}
       ${renderBusBalance()}
       ${renderTabs()}
       <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
-      <div class="tab-panel${activeTab==='lines'  ?' active':''}">${STATE.lines.length ? STATE.lines.map((line, idx) => renderLineCard(line, idx)).join('') : '<div class="empty-state"><p>No production lines yet.</p><p>Ask Claude to plan one in the Chat tab.</p></div>'}</div>
+      <div class="tab-panel${activeTab==='lines'  ?' active':''}">${renderLinesTab()}</div>
       <div class="tab-panel${activeTab==='issues' ?' active':''}">${renderIssues()}</div>
       <div class="tab-panel${activeTab==='chat'   ?' active':''}">${renderChat()}</div>
     </div>`;

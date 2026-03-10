@@ -86,7 +86,7 @@ python -m unittest dev.test_cli -v
 `SKILL.md` turns Claude into an active factory co-pilot:
 
 - **CLI mode** — Claude calls `python assets/cli.py` for all production math, tracks factory state conversationally, and outputs `FACTORY_STATE` JSON at session end for import into the dashboard.
-- **Dashboard mode** — a published `application/vnd.ant.html` artifact with science pack progress bars, bottleneck detection, per-line machine tables, and in-artifact chat. Dark and light themes with a toggle button; theme preference persists in `localStorage`. State persists via `window.storage` (cross-device) with `localStorage` fallback. Import/Export buttons sync state with CLI sessions.
+- **Dashboard mode** — a published `application/vnd.ant.html` artifact with an Overview tab (science SPM headline + grouped production lines), Bus Balance (player-declared bus items vs. consumed rates), per-line machine tables, bottleneck detection, and in-artifact chat. Dark and light themes; state persists via `window.storage` (cross-device) with `localStorage` fallback. Import/Export buttons sync state with CLI sessions.
 
 See [SKILL.md §3](10x-factorio-engineer/SKILL.md) for the factory state schema shared by the skill and the dashboard.
 
