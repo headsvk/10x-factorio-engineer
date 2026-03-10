@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""
+Preview the dashboard in the browser with sample state pre-loaded.
+
+Reads dev/sample-state.b64 and injects it into localStorage before the
+dashboard initialises, so the sample factory appears immediately on open.
+A temporary HTML file is written to dev/preview.tmp.html and opened.
+
+Usage:
+    python dev/preview.py
+    python dev/preview.py --no-min   # use unminified source dashboard
+"""
+
+import argparse
+import os
+import re
+import tempfile
+import webbrowser
+
+DEV_DIR   = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(DEV_DIR)
+
+parser = argparse.ArgumentParser(description="Preview dashboard with sample state")
+parser.add_argument("--no-min", action="store_true", help="Use unminified dev/dashboard.html")
+args = parser.parse_args()
+
+if args.no_min:
+    src = os.path.join(DEV_DIR, "dashboard.html")
+else:
+    src = os.path.join(REPO_ROOT, "10x-factorio-engineer", "assets", "dashboard.html")
+
+b64_path = os.path.join(DEV_DIR, "sample-state.b64")
+
+with open(src, encoding="utf-8") as f:
+    html = f.read()
+
+with open(b64_path, encoding="utf-8") as f:
+    sample_b64 = f.read().strip()
+
+# Inject a seed script that pre-populates localStorage before the app boots.
+# Placed just before </body> so it runs after the DOM is parsed but we inject
+# it before the existing inline <script> which calls loadState() on init.
+# Actually we need it BEFORE the main script — insert before the main <script>.
+seed_script = f"""<script>
+localStorage.setItem('factorio_engineer_state', {repr(sample_b64)});
+</script>
+"""
+
+# Insert before the first <script> block so seed runs before app init
+html = html.replace("<script>", seed_script + "<script>", 1)
+
+out_path = os.path.join(DEV_DIR, "preview.tmp.html")
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(html)
+
+print(f"Preview written: {out_path}")
+webbrowser.open("file:///" + out_path.replace("\\", "/"))

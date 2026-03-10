@@ -3,7 +3,7 @@
 Build 10x-factorio-engineer/assets/dashboard.html from the vanilla-HTML source.
 
 Reads  : dev/dashboard.html
-Writes : 10x-factorio-engineer/assets/dashboard.html  (minified by default)
+Writes : 10x-factorio-engineer/assets/dashboard.html  (minified)
 
 Minification (stdlib only, no external tools):
   - Strips HTML comments
@@ -13,9 +13,8 @@ Minification (stdlib only, no external tools):
   blocks is collapsed only at the line level, which is safe for well-formed JS.
 
 Usage:
-    python dev/build_dashboard.py            # minify → assets/dashboard.html
-    python dev/build_dashboard.py --no-min   # copy as-is
-    python dev/build_dashboard.py --open     # build then open in browser
+    python dev/build_dashboard.py          # minify → assets/dashboard.html
+    python dev/build_dashboard.py --open   # build then open in browser
 """
 
 import argparse
@@ -24,8 +23,7 @@ import re
 import webbrowser
 
 parser = argparse.ArgumentParser(description="Build 10x-factorio-engineer/assets/dashboard.html")
-parser.add_argument("--no-min", action="store_true", help="Skip minification, copy as-is")
-parser.add_argument("--open",   action="store_true", help="Open bundle.html in browser after build")
+parser.add_argument("--open", action="store_true", help="Open bundle.html in browser after build")
 args = parser.parse_args()
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,12 +34,11 @@ OUT  = os.path.join(REPO_ROOT, "10x-factorio-engineer", "assets", "dashboard.htm
 with open(SRC, encoding="utf-8") as f:
     html = f.read()
 
-if not args.no_min:
-    # 1. Strip HTML comments (not inside script/style — safe because our file has none)
-    html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
-    # 2. Strip leading/trailing whitespace from each line and drop blank lines
-    lines = [ln.strip() for ln in html.splitlines()]
-    html  = "\n".join(ln for ln in lines if ln)
+# 1. Strip HTML comments (not inside script/style — safe because our file has none)
+html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
+# 2. Strip leading/trailing whitespace from each line and drop blank lines
+lines = [ln.strip() for ln in html.splitlines()]
+html  = "\n".join(ln for ln in lines if ln)
 
 with open(OUT, "w", encoding="utf-8") as f:
     f.write(html)

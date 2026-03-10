@@ -57,6 +57,7 @@ python assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 | `--recipe-beacon RECIPE=COUNT:TIER:QUALITY` | _(none)_ | Per-recipe beacon override; repeatable |
 | `--recipe-belt RECIPE=TIER` | _(none)_ | Per-recipe belt tier override; repeatable |
 | `--recipe-pump RECIPE=QUALITY` | _(none)_ | Per-recipe pump quality override; repeatable |
+| `--bus-item ITEM-ID` | _(none)_ | Treat item as a bus input (raw resource); stops recursion at this item; repeatable |
 
 **Module TYPE values:** `prod` / `speed` / `efficiency` (efficiency stored but not used in machine-count math — no speed/productivity effect)
 
@@ -138,6 +139,7 @@ The CLI emits JSON to stdout. Example:
 | `recipe_beacon_overrides` | Present when `--recipe-beacon` was passed |
 | `recipe_belt_overrides` | Present when `--recipe-belt` was passed |
 | `recipe_pump_overrides` | Present when `--recipe-pump` was passed |
+| `bus_inputs` | Present when `--bus-item` was passed; `{item: rate_per_min}` for items sourced from the bus (separate from `raw_resources`, which contains only true raws like ores) |
 
 Notes:
 - `pumpjack` emits `required_yield_pct` (not `machine_count`) — player divides this across pumpjack fields
@@ -203,10 +205,12 @@ working context and update it after every player message.
     "logistic-science-pack": 45
   },
 
-  // One entry per production line the player has described or planned
+  // One entry per production line the player has described or planned.
+  // Multiple lines for the same item are allowed — use one line per physical block.
   "lines": [
     {
       "item": "electronic-circuit",
+      "label": "Green Circuit Block 1",  // optional; shown as card title; defaults to humanized item name
       "target_rate": 60.0,
       "cli_result": { /* full JSON from cli.py */ },
       "actual_machines": {
@@ -246,6 +250,7 @@ When a player says something like:
 - *"I'm using coal liquefaction"* → add `"heavy-oil": "coal-liquefaction"` to
   `recipe_overrides`, re-run CLI for all affected lines.
 - *"I use blue belts"* → set `preferred_belt: "blue"`.
+- *"I have 2 blocks of iron smelters, 2 red belts each"* → create two `iron-plate` lines, each with `target_rate: 3600` (2 × 1800/min) and labels like `"Iron Smelting Block 1"` / `"Iron Smelting Block 2"`. Multiple lines with the same `item` are valid — one per physical block.
 - *"I use 4 prod-3 modules in all assemblers"* → set `module_configs["assembling-machine-3"] = [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines.
 - *"I have 8 legendary beacons on each assembler-3"* → set `beacon_configs["assembling-machine-3"] = {"count": 8, "tier": 3, "quality": "normal"}`, re-run CLI for all affected lines.
 

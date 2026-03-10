@@ -40,6 +40,7 @@ chat panel is powered by `window.claude.complete()`. A strategy reference
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. |
 | CLI flag added, removed, or changed | 1. Update the module-level docstring at the top of `cli.py` (Usage block). 2. Update the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
 | Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample-state.json` to match the new schema. 4. Run `python dev/gen_sample_state.py` to regenerate `dev/sample-state.b64`. 5. Run `python dev/build_dashboard.py` to rebuild the artifact. |
+| New CLI flag or solver behaviour added | Add tests to `dev/test_cli.py` covering the new feature. Run `python -m unittest dev.test_cli -v` and fix any failures before finishing. Update the test count in `README.md` and in the Tests section of `CLAUDE.md`. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
 
@@ -58,11 +59,12 @@ The goal is that `claude.md` always accurately describes the codebase.
 | `10x-factorio-engineer/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
 | `dev/dashboard.html` | Dashboard source — single vanilla HTML file, no build dependencies |
 | `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
+| `dev/preview.py` | Opens `dev/dashboard.html` in browser with `dev/sample-state.b64` pre-loaded into localStorage; writes `dev/preview.tmp.html` |
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
 | `dev/sample-state.json` | Source JSON for the sample state — edit this, then run `python dev/gen_sample_state.py` to rebuild `sample-state.b64` |
 | `dev/gen_sample_state.py` | Encodes `dev/sample-state.json` → `dev/sample-state.b64` (minified JSON → UTF-8 → base64) |
-| `dev/test_cli.py` | `unittest` suite (106 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (107 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -96,7 +98,8 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 ### `Solver` class state
 
 - `steps`: `{recipe_key: {recipe, machine, machine_count, rate_per_min, beacon_speed_bonus}}` — accumulated across all tree paths; `machine_count` is `float` when beacons active, `Fraction` otherwise
-- `raw_resources`: `{item: Fraction}` — total demanded rate
+- `raw_resources`: `{item: Fraction}` — total demanded rate for true raws (ores, crude-oil, water); excludes bus items
+- `bus_inputs`: `{item: Fraction}` — demanded rate for items sourced from the bus (`--bus-item`); separate from `raw_resources`
 - `surplus`: `{item: Fraction}` — co-product credits not yet consumed
 - `oil_demands`: `{item: Fraction}` — deferred petroleum-gas/light-oil/heavy-oil demands
 - `module_configs`: `{machine_key: [ModuleSpec]}` — global module config per machine (`--modules`)
@@ -104,6 +107,7 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 - `recipe_machine_overrides`: `{recipe_key: machine_key}` — per-recipe machine override (`--recipe-machine`)
 - `recipe_module_overrides`: `{recipe_key: [ModuleSpec]}` — per-recipe module override (`--recipe-modules`)
 - `recipe_beacon_overrides`: `{recipe_key: BeaconSpec}` — per-recipe beacon override (`--recipe-beacon`)
+- `bus_items`: `frozenset[str]` — item IDs treated as bus inputs; stops recursion (`--bus-item`)
 - `machine_quality`: `str` — quality tier applied to all machines (speed bonus via `MACHINE_QUALITY_SPEED`)
 - `beacon_quality`: `str` — quality tier of beacon housings (effectivity via `BEACON_EFFECTIVITY`)
 
@@ -311,7 +315,7 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 106 tests covering:
+`dev/test_cli.py` contains 107 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -333,7 +337,8 @@ python -m unittest dev.test_cli -v
 | `TestPumpOutput` | `--pump` produces `pump`+`pumps_needed` for fluid items; quality throughput values (72000/93600/115200/136800/180000); `--recipe-pump` overrides per recipe |
 | `TestBeaconConfig` | `--beacon MACHINE=COUNT:TIER:QUALITY` computes speed via sqrt formula; `beacon_speed_bonus` in step output; `machine_count` becomes float; beacon quality effectivity (1.5/1.7/1.9/2.1/2.5); per-recipe override via `--recipe-beacon` |
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |
-| `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output |
+| `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
+| `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
 | `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
 
 ---
@@ -408,8 +413,8 @@ external dependencies beyond the browser. State is encoded as base64 (minified
 JSON → UTF-8 bytes → `btoa`) for compact storage and portability.
 
 **Build:** `python dev/build_dashboard.py` — strips HTML comments and blank
-lines, writes `10x-factorio-engineer/assets/dashboard.html`. Use `--no-min` to skip
-minification, `--open` to open the result in a browser immediately.
+lines, writes `10x-factorio-engineer/assets/dashboard.html`. Use `--open` to open
+the result in a browser immediately.
 
 **Header:** compact one-line brand label (`10x Factorio Engineer`) left +
 config pills right (`[Space Age]` when applicable, `[Assembler 3]`,

@@ -18,6 +18,9 @@ env/
 .coverage
 htmlcov/
 
+# Preview temp file
+dev/preview.tmp.html
+
 # Distribution / packaging
 dist/
 build/

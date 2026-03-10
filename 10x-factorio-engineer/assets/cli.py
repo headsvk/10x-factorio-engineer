@@ -20,6 +20,7 @@ Usage:
                   [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
                   [--recipe-belt RECIPE=BELT]                   # repeatable
                   [--recipe-pump RECIPE=QUALITY]                # repeatable
+                  [--bus-item ITEM-ID]                          # repeatable
 
 Auto-loads factorio-prefs.json from the current directory if present.
 CLI flags always override prefs.
@@ -631,6 +632,7 @@ class Solver:
         recipe_machine_overrides: dict | None = None,
         recipe_module_overrides: dict | None = None,
         recipe_beacon_overrides: dict | None = None,
+        bus_items: frozenset | None = None,
     ):
         self.recipe_idx      = recipe_idx
         self.raw_set         = raw_set
@@ -644,9 +646,11 @@ class Solver:
         self.recipe_machine_overrides: dict = recipe_machine_overrides or {}
         self.recipe_module_overrides:  dict = recipe_module_overrides  or {}
         self.recipe_beacon_overrides:  dict = recipe_beacon_overrides  or {}
+        self.bus_items: frozenset = frozenset(bus_items) if bus_items else frozenset()
 
         self.steps: dict[str, dict]             = {}
         self.raw_resources: dict[str, Fraction] = defaultdict(Fraction)
+        self.bus_inputs: dict[str, Fraction]    = defaultdict(Fraction)
         self.surplus: dict[str, Fraction]       = defaultdict(Fraction)
         self.oil_demands: dict[str, Fraction]   = defaultdict(Fraction)
 
@@ -743,6 +747,11 @@ class Solver:
             return
         rate -= self.surplus[item_key]
         self.surplus[item_key] = Fraction(0)
+
+        # Bus item — provided externally on the bus, not mined or crafted
+        if item_key in self.bus_items:
+            self.bus_inputs[item_key] += rate
+            return
 
         # Defer oil products to the linear system
         if item_key in OIL_PRODUCTS:
@@ -1051,6 +1060,12 @@ def format_output(
     out["raw_resources"]    = raw_sorted
     out["miners_needed"]    = miners
 
+    if solver.bus_inputs:
+        out["bus_inputs"] = {
+            k: _f(v)
+            for k, v in sorted(solver.bus_inputs.items(), key=lambda x: -x[1])
+        }
+
     # Belt / pump output (solid vs fluid item distinction)
     is_fluid = fluid_set is not None and args.item in fluid_set
     belt = getattr(args, "belt", None)
@@ -1214,6 +1229,17 @@ Examples:
         dest="recipe_pump",
         help="Per-recipe pump quality override (for display only). Repeatable.",
     )
+    p.add_argument(
+        "--bus-item",
+        action="append", default=[],
+        metavar="ITEM-ID",
+        dest="bus_item",
+        help=(
+            "Treat item as a bus input (raw resource). Stops recursion at this "
+            "item — machines and sub-recipes are not calculated for it. Repeatable. "
+            "E.g. --bus-item iron-plate --bus-item copper-plate"
+        ),
+    )
     if prefs:
         p.set_defaults(**{
             k: v for k, v in prefs.items()
@@ -1271,6 +1297,8 @@ def main() -> None:
         k, v = _parse_kv(raw, "--recipe-pump")
         recipe_pump_overrides[k] = v
 
+    bus_items: frozenset = frozenset(args.bus_item)
+
     data          = load_data(args.dataset)
     raw_set       = build_raw_set(data)
     recipe_idx    = build_recipe_index(data)
@@ -1288,6 +1316,7 @@ def main() -> None:
         recipe_machine_overrides=recipe_machine_overrides or None,
         recipe_module_overrides=recipe_module_overrides or None,
         recipe_beacon_overrides=recipe_beacon_overrides or None,
+        bus_items=bus_items or None,
     )
 
     solver.solve(args.item, Fraction(str(args.rate)))

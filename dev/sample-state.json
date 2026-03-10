@@ -1,7 +1,7 @@
 {
   "save_name": "Green Science Run",
   "dataset": "vanilla",
-  "assembler": 3,
+  "assembler": 2,
   "furnace": "electric",
   "machine_quality": "normal",
   "beacon_quality": "normal",
@@ -9,84 +9,126 @@
   "beacon_configs": {},
   "recipe_overrides": {},
   "machine_overrides": {},
-  "preferred_belt": "blue",
-  "targets": {
-    "automation-science-pack": 45,
-    "logistic-science-pack": 45
-  },
+  "preferred_belt": "red",
+  "targets": {},
   "lines": [
     {
-      "item": "automation-science-pack",
-      "target_rate": 45,
-      "effective_rate": 45,
-      "actual_machines": { "assembling-machine-3": 3 },
-      "player_notes": "running clean",
+      "item": "iron-plate",
+      "label": "Iron Smelting Block 1",
+      "target_rate": 3600,
+      "effective_rate": 3600,
+      "actual_machines": { "electric-furnace": 96 },
+      "player_notes": "2 red belts output",
       "cli_result": {
-        "item": "automation-science-pack",
-        "rate_per_min": 45,
+        "item": "iron-plate",
+        "rate_per_min": 3600.0,
         "dataset": "vanilla",
-        "assembler": 3,
+        "assembler": 2,
         "furnace": "electric",
         "miner": "electric",
         "machine_quality": "normal",
         "beacon_quality": "normal",
         "production_steps": [
-          { "recipe": "automation-science-pack", "machine": "assembling-machine-3", "machine_count": 2.4, "machine_count_ceil": 3, "rate_per_min": 45, "beacon_speed_bonus": 0.0 },
-          { "recipe": "iron-gear-wheel", "machine": "assembling-machine-3", "machine_count": 0.8, "machine_count_ceil": 1, "rate_per_min": 45, "beacon_speed_bonus": 0.0 },
-          { "recipe": "iron-plate", "machine": "electric-furnace", "machine_count": 2.4, "machine_count_ceil": 3, "rate_per_min": 90, "beacon_speed_bonus": 0.0 },
-          { "recipe": "copper-plate", "machine": "electric-furnace", "machine_count": 0.8, "machine_count_ceil": 1, "rate_per_min": 45, "beacon_speed_bonus": 0.0 }
+          { "recipe": "iron-plate", "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 3600.0, "beacon_speed_bonus": 0.0 }
         ],
-        "raw_resources": { "iron-ore": 90, "copper-ore": 45 },
+        "raw_resources": { "iron-ore": 3600.0 },
         "miners_needed": {
-          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 3.0, "machine_count_ceil": 3, "rate_per_min": 90 },
-          "copper-ore": { "machine": "electric-mining-drill", "machine_count": 1.5, "machine_count_ceil": 2, "rate_per_min": 45 }
-        }
+          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0 }
+        },
+        "belt": "red",
+        "belts_needed": 2.0
       }
     },
     {
-      "item": "logistic-science-pack",
-      "target_rate": 45,
-      "effective_rate": 30,
-      "actual_machines": { "assembling-machine-3": 4 },
-      "player_notes": "inserters placed, waiting on green circuits",
+      "item": "iron-plate",
+      "label": "Iron Smelting Block 2",
+      "target_rate": 3600,
+      "effective_rate": 3600,
+      "actual_machines": { "electric-furnace": 96 },
+      "player_notes": "2 red belts output",
       "cli_result": {
-        "item": "logistic-science-pack",
-        "rate_per_min": 45,
+        "item": "iron-plate",
+        "rate_per_min": 3600.0,
         "dataset": "vanilla",
-        "assembler": 3,
+        "assembler": 2,
         "furnace": "electric",
         "miner": "electric",
         "machine_quality": "normal",
         "beacon_quality": "normal",
         "production_steps": [
-          { "recipe": "logistic-science-pack", "machine": "assembling-machine-3", "machine_count": 3.6, "machine_count_ceil": 4, "rate_per_min": 45, "beacon_speed_bonus": 0.0 },
-          { "recipe": "inserter", "machine": "assembling-machine-3", "machine_count": 1.44, "machine_count_ceil": 2, "rate_per_min": 45, "beacon_speed_bonus": 0.0 },
-          { "recipe": "transport-belt", "machine": "assembling-machine-3", "machine_count": 0.72, "machine_count_ceil": 1, "rate_per_min": 45, "beacon_speed_bonus": 0.0 },
-          { "recipe": "electronic-circuit", "machine": "assembling-machine-3", "machine_count": 1.92, "machine_count_ceil": 2, "rate_per_min": 45, "beacon_speed_bonus": 0.0 },
-          { "recipe": "iron-gear-wheel", "machine": "assembling-machine-3", "machine_count": 1.44, "machine_count_ceil": 2, "rate_per_min": 90, "beacon_speed_bonus": 0.0 },
-          { "recipe": "copper-cable", "machine": "assembling-machine-3", "machine_count": 1.2, "machine_count_ceil": 2, "rate_per_min": 135, "beacon_speed_bonus": 0.0 },
-          { "recipe": "iron-plate", "machine": "electric-furnace", "machine_count": 5.4, "machine_count_ceil": 6, "rate_per_min": 202.5, "beacon_speed_bonus": 0.0 },
-          { "recipe": "copper-plate", "machine": "electric-furnace", "machine_count": 1.8, "machine_count_ceil": 2, "rate_per_min": 67.5, "beacon_speed_bonus": 0.0 }
+          { "recipe": "iron-plate", "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 3600.0, "beacon_speed_bonus": 0.0 }
         ],
-        "raw_resources": { "iron-ore": 202.5, "copper-ore": 67.5 },
+        "raw_resources": { "iron-ore": 3600.0 },
         "miners_needed": {
-          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 6.75, "machine_count_ceil": 7, "rate_per_min": 202.5 },
-          "copper-ore": { "machine": "electric-mining-drill", "machine_count": 2.25, "machine_count_ceil": 3, "rate_per_min": 67.5 }
-        }
+          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0 }
+        },
+        "belt": "red",
+        "belts_needed": 2.0
+      }
+    },
+    {
+      "item": "copper-plate",
+      "label": "Copper Smelting Block 1",
+      "target_rate": 3600,
+      "effective_rate": 3600,
+      "actual_machines": { "electric-furnace": 96 },
+      "player_notes": "2 red belts output",
+      "cli_result": {
+        "item": "copper-plate",
+        "rate_per_min": 3600.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "copper-plate", "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 3600.0, "beacon_speed_bonus": 0.0 }
+        ],
+        "raw_resources": { "copper-ore": 3600.0 },
+        "miners_needed": {
+          "copper-ore": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0 }
+        },
+        "belt": "red",
+        "belts_needed": 2.0
+      }
+    },
+    {
+      "item": "electronic-circuit",
+      "label": "Green Circuit Line",
+      "target_rate": 1800,
+      "effective_rate": 1800,
+      "actual_machines": { "assembling-machine-2": 20 },
+      "player_notes": "1 red belt output, pulling iron and copper from bus",
+      "cli_result": {
+        "item": "electronic-circuit",
+        "rate_per_min": 1800.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "copper-cable", "machine": "assembling-machine-2", "machine_count": 30.0, "machine_count_ceil": 30, "rate_per_min": 5400.0, "beacon_speed_bonus": 0.0 },
+          { "recipe": "electronic-circuit", "machine": "assembling-machine-2", "machine_count": 20.0, "machine_count_ceil": 20, "rate_per_min": 1800.0, "beacon_speed_bonus": 0.0 }
+        ],
+        "raw_resources": {},
+        "miners_needed": {},
+        "bus_inputs": { "copper-plate": 2700.0, "iron-plate": 1800.0 },
+        "belt": "red",
+        "belts_needed": 1.0
       }
     }
   ],
-  "bottlenecks": [
-    "logistic-science-pack: producing 30/min, need 45/min — green circuits bottleneck",
-    "iron-plate: smelting column only 5 furnaces, need 6"
-  ],
-  "next_steps": [
-    "Add 1 electric furnace to iron-plate smelting column (row 2)",
-    "Build dedicated electronic-circuit line: 2x Assembler 3 for 45/min",
-    "Expand copper-plate to 3 furnaces once green circuit line is up"
-  ],
+  "bottlenecks": [],
+  "next_steps": [],
   "chat_log": [
-    { "from": "player", "text": "I placed 4 assemblers on logistic science but it's only making 30/min" },
-    { "from": "claude", "text": "The bottleneck is upstream — you need 2 Assembler 3s for green circuits (electronic-circuit) running at 45/min. Right now that line is undersupplied. Also add 1 more electric furnace to iron-plate smelting." }
+    { "from": "player", "text": "I have 2 blocks of iron smelters producing 2 red belts of plates each" },
+    { "from": "claude", "text": "Logged. Each block: 96 electric furnaces → 3600 iron plates/min (2 red belts). Total: 7200/min, consuming 3600 iron-ore/min per block." },
+    { "from": "player", "text": "1 copper smelting block, 2 red belts" },
+    { "from": "claude", "text": "Logged. 96 electric furnaces → 3600 copper plates/min (2 red belts)." },
+    { "from": "player", "text": "add a line for 1 red belt of green circuits, pulling iron and copper from the bus" },
+    { "from": "claude", "text": "20 Assembler 2s for 1800 green circuits/min (1 red belt). Pulls 1800 iron-plate/min and 2700 copper-plate/min from bus. Bus balance: iron +5400/min surplus, copper +900/min surplus — copper is the tight resource." }
   ]
 }

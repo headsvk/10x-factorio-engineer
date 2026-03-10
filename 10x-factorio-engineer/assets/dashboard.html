@@ -174,6 +174,24 @@ letter-spacing: .02em; color: var(--text); }
 font-variant-numeric: tabular-nums; width: 40px; text-align: right; }
 .mini-bar      { height: 4px; background: var(--bg-input); border-radius: 2px; margin-top: 6px; }
 .mini-bar-fill { height: 100%; border-radius: 2px; transition: width .5s; }
+/* ── Bus balance ── */
+.bus-section { margin-bottom: 16px; }
+.bus-row { padding: 9px 12px; border-radius: 4px; border: 1px solid var(--border-sub);
+background: var(--bg-card); margin-bottom: 4px; }
+.bus-row:last-child { margin-bottom: 0; }
+.bus-row-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px; }
+.bus-name { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 14px;
+letter-spacing: .02em; }
+.bus-net-group { display: flex; align-items: baseline; gap: 4px; }
+.bus-net { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; }
+.bus-belt-tag { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800;
+letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+.bus-bar-track { height: 5px; border-radius: 3px; overflow: hidden; margin-bottom: 5px;
+display: flex; }
+.bus-bar-consumed { height: 100%; transition: width .4s ease; }
+.bus-bar-free { height: 100%; flex: 1; transition: background .4s ease; }
+.bus-meta { display: flex; justify-content: space-between;
+font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); }
 /* ── Next steps ── */
 .next-steps { margin-top: 16px; }
 .next-step-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px;
@@ -356,6 +374,7 @@ const MACHINE_NAMES = {
 'agricultural-tower':'Agricultural Tower','captive-spawner':'Captive Spawner',
 };
 const BELT_COLORS = { yellow:'#d4a817', red:'#c84040', blue:'#4060c8', turbo:'#40c8b8' };
+const BELT_THROUGHPUT = { yellow: 900, red: 1800, blue: 2700, turbo: 4500 };
 const SYSTEM_PROMPT = `You are a Factorio factory co-pilot embedded in a dashboard artifact.
 IMPORTANT: If the player reports a factory change, output the COMPLETE updated FACTORY_STATE as a JSON block at the END of your response:
 \`\`\`json
@@ -392,6 +411,12 @@ return ia - ib;
 function esc(s) {
 return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+function fmtRB(rate, beltName) {
+const n = +rate;
+const rateStr = (Number.isInteger(n) ? n : +n.toFixed(1)) + '/min';
+const tp = BELT_THROUGHPUT[beltName] ?? 1800;
+return `${rateStr} <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} ${beltName} belt)</span>`;
+}
 // ── State ────────────────────────────────────────────────────────────────────
 let STATE = { ...DEFAULT_STATE };
 let activeTab = 'overview';
@@ -424,7 +449,7 @@ const [cls, txt] = map[storageMode] || map.none;
 return `<span class="storage-pill ${cls}">${txt}</span>`;
 }
 function renderHeader() {
-const { save_name, dataset, assembler, furnace, machine_quality, module_configs } = STATE;
+const { save_name, dataset, assembler, furnace, machine_quality, module_configs, preferred_belt } = STATE;
 return `
 <div class="header">
 <div class="header-left">
@@ -437,9 +462,10 @@ ${renderStoragePill()}
 <div class="header-right">
 <div class="badges">
 ${dataset === 'space-age' ? '<span class="badge purple">Space Age</span>' : ''}
-<span class="badge">AM${assembler}</span>
+<span class="badge">${machineLabel(`assembling-machine-${assembler}`)}</span>
 <span class="badge">${label(furnace)} Furnace</span>
 ${(machine_quality && machine_quality !== 'normal') ? `<span class="badge">${label(machine_quality)} Machines</span>` : ''}
+${preferred_belt ? `<span class="badge">${label(preferred_belt)} Belt</span>` : ''}
 ${Object.keys(module_configs ?? {}).length ? '<span class="badge">Modules</span>' : ''}
 </div>
 <div class="btn-group">
@@ -456,7 +482,7 @@ const keys = sortedScienceKeys(Object.keys(STATE.targets));
 if (!keys.length) return '';
 const rates = {};
 for (const line of STATE.lines)
-if (line.item in STATE.targets) rates[line.item] = line.effective_rate ?? line.target_rate ?? 0;
+if (line.item in STATE.targets) rates[line.item] = (rates[line.item] ?? 0) + (line.effective_rate ?? line.target_rate ?? 0);
 const bars = keys.map(name => {
 const actual = rates[name];
 const target = STATE.targets[name];
@@ -494,6 +520,53 @@ return `
 ${STATE.bottlenecks.map(b => `<div class="bottleneck-item">• ${esc(humanizeText(b))}</div>`).join('')}
 </div>`;
 }
+function renderBusBalance() {
+// Supply: sum effective_rate for producer lines
+const supply = {};
+for (const line of STATE.lines)
+supply[line.item] = (supply[line.item] ?? 0) + (line.effective_rate ?? line.target_rate ?? 0);
+// Demand: read bus_inputs from cli_result (set when --bus-item was used for this line)
+const demand = {};
+for (const line of STATE.lines)
+for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {}))
+demand[item] = (demand[item] ?? 0) + rate;
+const busItems = Object.keys(supply);
+if (!busItems.length) return '';
+const belt = STATE.preferred_belt;
+const beltTp = BELT_THROUGHPUT[belt] ?? 1800;
+const rows = busItems.map(item => {
+const s = supply[item] ?? 0;
+const d = demand[item] ?? 0;
+const net = s - d;
+const usedPct = s > 0 ? Math.min(100, (d / s) * 100) : 0;
+const netBelts = (net / beltTp).toFixed(2);
+const netCol = net >= 0 ? 'var(--ok)' : 'var(--bad)';
+const sign = net >= 0 ? '+' : '';
+return `
+<div class="bus-row">
+<div class="bus-row-header">
+<span class="bus-name">${esc(label(item))}</span>
+<div class="bus-net-group">
+<span class="bus-net" style="color:${netCol}">${sign}${netBelts}</span>
+<span class="bus-belt-tag">${belt} belt</span>
+</div>
+</div>
+<div class="bus-bar-track">
+<div class="bus-bar-consumed" style="width:${usedPct}%;background:${usedPct>=100?'var(--bad)':'var(--text-dim)'}"></div>
+<div class="bus-bar-free" style="background:${usedPct>=100?'var(--bad-bg)':usedPct>=80?'var(--warn)':'var(--ok)'}"></div>
+</div>
+<div class="bus-meta">
+<span>${fmtRB(d, belt)} consumed</span>
+<span>${fmtRB(s, belt)} supply</span>
+</div>
+</div>`;
+}).join('');
+return `
+<div class="bus-section">
+<div class="section-label">Bus Balance</div>
+${rows}
+</div>`;
+}
 function renderTabs() {
 const tabs = [
 ['overview', 'Overview'],
@@ -519,13 +592,11 @@ const col = statusColor(p);
 return `
 <div class="overview-line ${statusClass(p)}">
 <div class="overview-line-header">
-<span class="overview-line-name">${esc(label(line.item))}</span>
+<span class="overview-line-name">${esc(line.label ?? label(line.item))}</span>
 <div class="overview-stats">
-<span class="rate-text">${actual}/${line.target_rate ?? 0} /min</span>
-<span class="pct-lg" style="color:${col}">${p}%</span>
+<span class="rate-text">${fmtRB(actual, line.cli_result?.belt ?? STATE.preferred_belt)}</span>
 </div>
 </div>
-<div class="mini-bar"><div class="mini-bar-fill" style="width:${p}%;background:${col}"></div></div>
 </div>`;
 }).join('');
 const steps = STATE.next_steps.length ? `
@@ -539,12 +610,12 @@ ${STATE.next_steps.map(s => `
 </div>` : '';
 return items + steps;
 }
-function renderLineCard(line) {
+function renderLineCard(line, idx) {
 const actual = line.effective_rate ?? line.target_rate ?? 0;
 const p = pct(actual, line.target_rate ?? 0);
 const sc  = statusClass(p);
 const col = statusColor(p);
-const isOpen = expandedCards.has(line.item);
+const isOpen = expandedCards.has(idx);
 const steps  = line.cli_result?.production_steps ?? [];
 const belt       = line.cli_result?.belt;
 const beltsNeeded = line.cli_result?.belts_needed;
@@ -553,66 +624,64 @@ const miners = line.cli_result?.miners_needed ?? {};
 let body = '';
 if (isOpen) {
 const machineRows = steps.map(s => {
-const placed = line.actual_machines?.[s.machine] ?? null;
-const needed = s.machine_count_ceil;
-const ok = placed !== null && placed >= needed;
-const placedHtml = placed !== null
-? `<span style="color:${ok?'var(--ok)':'var(--bad)'};font-weight:700">${placed}</span><span style="color:var(--text-dim)"> / ${needed}</span>`
-: `<span style="color:var(--text-dim)">${needed}</span>`;
 return `<tr>
-<td>${esc(s.recipe)}</td>
+<td>${esc(label(s.recipe))}</td>
 <td class="name-col">${esc(machineLabel(s.machine))}</td>
-<td class="r">${placedHtml}</td>
-<td class="r">${s.rate_per_min != null ? `${(+s.rate_per_min).toFixed(1)}/m` : ''}</td>
+<td class="r">${s.machine_count_ceil}</td>
+<td class="r">${s.rate_per_min != null ? fmtRB(s.rate_per_min, STATE.preferred_belt) : ''}</td>
 </tr>`;
 }).join('');
 const machineSection = steps.length ? `
 <div class="card-section">
 <div class="section-label">Machines</div>
 <table>
-<thead><tr><th>Recipe</th><th>Machine</th><th class="r">Placed / Need</th><th class="r">Rate</th></tr></thead>
+<thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Rate</th></tr></thead>
 <tbody>${machineRows}</tbody>
 </table>
 </div>` : '';
-const rawSection = Object.keys(raw).length ? `
+const busInputs = line.cli_result?.bus_inputs ?? {};
+const busInputSection = Object.keys(busInputs).length ? `
+<div class="card-section">
+<div class="section-label">Bus Inputs</div>
+<div class="chips">${Object.entries(busInputs).map(([r, rate]) => {
+const b = STATE.preferred_belt;
+return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmtRB(rate, b)}</span></span>`;
+}).join('')}</div>
+</div>` : '';
+const ownRaw = Object.entries(raw);
+const ownMiners = Object.entries(miners);
+const rawSection = ownRaw.length ? `
 <div class="card-section">
 <div class="section-label">Raw Resources</div>
-<div class="chips">${Object.entries(raw).map(([r, rate]) =>
-`<span class="chip">${esc(r)}: <span style="color:var(--text)">${(+rate).toFixed(1)}/min</span></span>`
+<div class="chips">${ownRaw.map(([r, rate]) =>
+`<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmtRB(rate, STATE.preferred_belt)}</span></span>`
 ).join('')}</div>
 </div>` : '';
-const minerSection = Object.keys(miners).length ? `
+const minerSection = ownMiners.length ? `
 <div class="card-section">
 <div class="section-label">Miners / Extractors</div>
-<div class="chips">${Object.entries(miners).map(([r, info]) => {
+<div class="chips">${ownMiners.map(([r, info]) => {
 const isYield = info.required_yield_pct != null;
 const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${info.machine_count_ceil}×`;
 const countCl = isYield ? 'var(--warn)' : 'var(--text)';
-return `<span class="chip">${esc(r)}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}</span></span>`;
+return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}</span></span>`;
 }).join('')}</div>
-</div>` : '';
-const beltSection = belt != null ? `
-<div class="card-section">
-<div class="section-label">Output Belts</div>
-<div class="chips"><span class="chip"><span style="color:${BELT_COLORS[belt]||'var(--text-muted)'};font-weight:700">${belt}</span>: <span style="color:var(--text-dim)">${beltsNeeded?.toFixed(3)} lanes</span></span></div>
 </div>` : '';
 const noteSection = line.player_notes ? `
 <div class="player-notes">${esc(line.player_notes)}</div>` : '';
-body = `<div class="card-body">${machineSection}${rawSection}${minerSection}${beltSection}${noteSection}</div>`;
+body = `<div class="card-body">${machineSection}${busInputSection}${rawSection}${minerSection}${noteSection}</div>`;
 }
 return `
 <div class="line-card ${sc}">
-<div class="card-header ${sc}" data-card="${esc(line.item)}">
+<div class="card-header ${sc}" data-card="${idx}">
 <div class="card-header-left">
 <span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
-<span class="card-title">${esc(label(line.item))}</span>
+<span class="card-title">${esc(line.label ?? label(line.item))}</span>
 </div>
 <div class="card-header-right">
-<span class="rate-text">${actual}/${line.target_rate ?? 0} /min</span>
-<span class="pct-text" style="color:${col}">${p}%</span>
+<span class="rate-text">${fmtRB(actual, belt ?? STATE.preferred_belt)}</span>
 </div>
 </div>
-<div class="card-progress"><div class="card-progress-fill" style="width:${p}%;background:${col}"></div></div>
 ${body}
 </div>`;
 }
@@ -654,9 +723,10 @@ ${renderHeader()}
 <div class="main">
 ${renderScience()}
 ${renderBottlenecks()}
+${renderBusBalance()}
 ${renderTabs()}
 <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
-<div class="tab-panel${activeTab==='lines'  ?' active':''}">${STATE.lines.length ? STATE.lines.map(renderLineCard).join('') : '<div class="empty-state"><p>No production lines yet.</p><p>Ask Claude to plan one in the Chat tab.</p></div>'}</div>
+<div class="tab-panel${activeTab==='lines'  ?' active':''}">${STATE.lines.length ? STATE.lines.map((line, idx) => renderLineCard(line, idx)).join('') : '<div class="empty-state"><p>No production lines yet.</p><p>Ask Claude to plan one in the Chat tab.</p></div>'}</div>
 <div class="tab-panel${activeTab==='issues' ?' active':''}">${renderIssues()}</div>
 <div class="tab-panel${activeTab==='chat'   ?' active':''}">${renderChat()}</div>
 </div>`;
@@ -673,8 +743,8 @@ document.querySelectorAll('.tab-btn').forEach(btn =>
 btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); }));
 document.querySelectorAll('.card-header[data-card]').forEach(hdr =>
 hdr.addEventListener('click', e => {
-const item = hdr.dataset.card;
-expandedCards.has(item) ? expandedCards.delete(item) : expandedCards.add(item);
+const idx = +hdr.dataset.card;
+expandedCards.has(idx) ? expandedCards.delete(idx) : expandedCards.add(idx);
 render();
 }));
 const btnExport = document.getElementById('btn-export');

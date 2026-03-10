@@ -47,10 +47,10 @@ def _solver(dataset: str = "vanilla", **kwargs) -> cli.Solver:
         machine_quality          = kwargs.get("machine_quality",          "normal"),
         beacon_quality           = kwargs.get("beacon_quality",           "normal"),
         recipe_overrides         = kwargs.get("recipe_overrides",         None),
-        machine_overrides        = kwargs.get("machine_overrides",        None),
         recipe_machine_overrides = kwargs.get("recipe_machine_overrides", None),
         recipe_module_overrides  = kwargs.get("recipe_module_overrides",  None),
         recipe_beacon_overrides  = kwargs.get("recipe_beacon_overrides",  None),
+        bus_items                = kwargs.get("bus_items",                None),
     )
 
 
@@ -699,82 +699,6 @@ class TestSpaceAgeTurboBelt(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Machine override (--machine CATEGORY=MACHINE)
-# ---------------------------------------------------------------------------
-
-class TestMachineOverride(unittest.TestCase):
-    """
-    --machine CATEGORY=MACHINE lets players redirect recipes to a different
-    machine than the category default.  Common use-case: a player who has
-    the foundry researched but still wants to see assembler-based costings,
-    or vice-versa.
-    """
-
-    def test_metallurgy_default_is_foundry(self):
-        # casting-iron (category: metallurgy) routes to foundry without override.
-        s = _solver("space-age", recipe_overrides={"iron-plate": "casting-iron"})
-        s.solve("iron-plate", Fraction(60))
-        self.assertEqual(s.steps["casting-iron"]["machine"], "foundry")
-
-    def test_override_foundry_to_assembler3(self):
-        # With --machine metallurgy=assembling-machine-3, same recipe → assembler.
-        s = _solver("space-age",
-                    recipe_overrides={"iron-plate": "casting-iron"},
-                    machine_overrides={"metallurgy": "assembling-machine-3"})
-        s.solve("iron-plate", Fraction(60))
-        self.assertEqual(s.steps["casting-iron"]["machine"], "assembling-machine-3")
-
-    def test_machine_override_increases_count(self):
-        # foundry speed=4 >> assembler-3 speed=5/4, so overriding to assembler
-        # must require more machines for the same rate.
-        foundry = _solver("space-age", recipe_overrides={"iron-plate": "casting-iron"})
-        foundry.solve("iron-plate", Fraction(60))
-
-        assembler = _solver("space-age",
-                            recipe_overrides={"iron-plate": "casting-iron"},
-                            machine_overrides={"metallurgy": "assembling-machine-3"})
-        assembler.solve("iron-plate", Fraction(60))
-
-        self.assertGreater(
-            assembler.steps["casting-iron"]["machine_count"],
-            foundry.steps["casting-iron"]["machine_count"],
-        )
-
-    def test_machine_override_in_json_output(self):
-        import argparse
-        overrides_m = {"metallurgy": "assembling-machine-3"}
-        s = _solver("space-age",
-                    recipe_overrides={"iron-plate": "casting-iron"},
-                    machine_overrides=overrides_m)
-        s.solve("iron-plate", Fraction(60))
-        s.resolve_oil(_DATA["space-age"]["data"])
-        fluid_set = cli.build_fluid_set(_DATA["space-age"]["data"])
-
-        args = argparse.Namespace(
-            item="iron-plate", rate=60, dataset="space-age",
-            assembler=3, furnace="electric", miner="electric",
-            machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
-            module_configs=None, beacon_configs=None,
-            recipe_machine_overrides=None, recipe_module_overrides=None,
-            recipe_beacon_overrides=None, recipe_belt_overrides=None,
-            recipe_pump_overrides=None,
-        )
-        out = cli.format_output(args, s, _DATA["space-age"]["resource_info"],
-                                fluid_set=fluid_set)
-        self.assertEqual(out["machine_overrides"], overrides_m)
-
-    def test_unknown_machine_falls_through(self):
-        # Overriding to a machine not in MACHINE_CRAFTING_SPEED is ignored;
-        # the category default (foundry) is used instead.
-        s = _solver("space-age",
-                    recipe_overrides={"iron-plate": "casting-iron"},
-                    machine_overrides={"metallurgy": "nonexistent-machine"})
-        s.solve("iron-plate", Fraction(60))
-        self.assertEqual(s.steps["casting-iron"]["machine"], "foundry")
-
-
-# ---------------------------------------------------------------------------
 # Prefs file (factorio-prefs.json)
 # ---------------------------------------------------------------------------
 
@@ -843,10 +767,10 @@ def _solver_new(dataset: str = "vanilla", **kwargs) -> cli.Solver:
         machine_quality        = kwargs.get("machine_quality",        "normal"),
         beacon_quality         = kwargs.get("beacon_quality",         "normal"),
         recipe_overrides       = kwargs.get("recipe_overrides",       None),
-        machine_overrides      = kwargs.get("machine_overrides",      None),
         recipe_machine_overrides = kwargs.get("recipe_machine_overrides", None),
         recipe_module_overrides  = kwargs.get("recipe_module_overrides",  None),
         recipe_beacon_overrides  = kwargs.get("recipe_beacon_overrides",  None),
+        bus_items              = kwargs.get("bus_items",              None),
     )
 
 
@@ -1532,20 +1456,92 @@ class TestRecipeMachineOverride(unittest.TestCase):
                                 fluid_set=fluid_set)
         self.assertEqual(out["recipe_machine_overrides"], rm_overrides)
 
-    def test_recipe_machine_and_category_machine_independent(self):
-        # --machine CATEGORY=X (category default) and --recipe-machine RECIPE=Y
-        # must not interfere with each other.
-        # Note: in Factorio 2.0.55 ASP uses copper-plate + iron-gear-wheel.
-        s = _solver_new(
-            machine_overrides={"crafting": "assembling-machine-1"},
-            recipe_machine_overrides={"iron-gear-wheel": "foundry"},
+
+class TestBusItem(unittest.TestCase):
+    """
+    --bus-item ITEM-ID stops recursion at that item and records demand in
+    solver.bus_inputs (separate from raw_resources).  format_output emits a
+    "bus_inputs" dict; raw_resources contains only true raws (ores, etc.).
+    """
+
+    def test_bus_item_stops_recursion(self):
+        # With --bus-item iron-plate, no furnace step and no iron-ore in raw_resources.
+        s = _solver_new(bus_items=frozenset(["iron-plate"]))
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertNotIn("iron-plate", s.steps)
+        self.assertNotIn("iron-ore", s.raw_resources)
+
+    def test_bus_item_goes_to_bus_inputs_not_raw(self):
+        # Bus items must appear in bus_inputs, NOT raw_resources.
+        s = _solver_new(bus_items=frozenset(["iron-plate"]))
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertIn("iron-plate", s.bus_inputs)
+        self.assertNotIn("iron-plate", s.raw_resources)
+        # electronic-circuit needs 1 iron-plate per circuit → 60/min
+        self.assertEqual(s.bus_inputs["iron-plate"], Fraction(60))
+
+    def test_multiple_bus_items(self):
+        # Both iron-plate and copper-plate as bus items: only assembler steps remain.
+        s = _solver_new(bus_items=frozenset(["iron-plate", "copper-plate"]))
+        s.solve("electronic-circuit", Fraction(60))
+        recipe_keys = set(s.steps.keys())
+        self.assertIn("electronic-circuit", recipe_keys)
+        self.assertIn("copper-cable", recipe_keys)
+        self.assertNotIn("iron-plate", recipe_keys)
+        self.assertNotIn("copper-plate", recipe_keys)
+        # raw_resources must be empty — no ores needed when all plates come from bus
+        self.assertNotIn("iron-ore", s.raw_resources)
+        self.assertNotIn("copper-ore", s.raw_resources)
+        self.assertNotIn("iron-plate", s.raw_resources)
+        self.assertNotIn("copper-plate", s.raw_resources)
+
+    def test_bus_item_rates_are_correct(self):
+        # electronic-circuit @ 60/min needs 60 iron-plate/min and 90 copper-plate/min.
+        s = _solver_new(bus_items=frozenset(["iron-plate", "copper-plate"]))
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertEqual(s.bus_inputs["iron-plate"],   Fraction(60))
+        self.assertEqual(s.bus_inputs["copper-plate"], Fraction(90))
+
+    def test_bus_inputs_in_json_output(self):
+        import argparse
+        bus = frozenset(["iron-plate", "copper-plate"])
+        s = _solver_new(bus_items=bus)
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
+        args = argparse.Namespace(
+            item="electronic-circuit", rate=60, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None, recipe_belt_overrides=None,
+            recipe_pump_overrides=None,
         )
-        s.solve("automation-science-pack", Fraction(60))
-        # iron-gear-wheel specifically → foundry (recipe override wins over category)
-        self.assertEqual(s.steps["iron-gear-wheel"]["machine"], "foundry")
-        # automation-science-pack (crafting category, no recipe override)
-        # → assembling-machine-1 (category override applies)
-        self.assertEqual(s.steps["automation-science-pack"]["machine"], "assembling-machine-1")
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
+                                fluid_set=fluid_set)
+        self.assertIn("bus_inputs", out)
+        self.assertEqual(set(out["bus_inputs"].keys()), {"copper-plate", "iron-plate"})
+        self.assertNotIn("bus_items", out)
+        # raw_resources must be empty
+        self.assertEqual(out["raw_resources"], {})
+
+    def test_no_bus_inputs_absent_from_output(self):
+        # bus_inputs key must be absent when no --bus-item flags are given.
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        self.assertNotIn("bus_inputs", out)
+
+    def test_bus_item_not_in_miners(self):
+        # miners_needed is derived from raw_resources, so bus items never appear there.
+        s = _solver_new(bus_items=frozenset(["iron-plate", "copper-plate"]))
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        resource_info = _DATA["vanilla"]["resource_info"]
+        miners = cli.compute_miners(s.raw_resources, resource_info, "electric")
+        self.assertNotIn("iron-plate", miners)
+        self.assertNotIn("copper-plate", miners)
+        self.assertEqual(miners, {})
 
 
 if __name__ == "__main__":

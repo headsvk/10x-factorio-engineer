@@ -24,10 +24,11 @@ A Factorio factory co-pilot built on two components:
 dev/
   dashboard.html            # Dashboard source — single vanilla HTML, no build deps
   build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html
+  preview.py                # Opens dashboard in browser with sample state pre-loaded
   gen_sample_state.py       # Encodes sample-state.json → sample-state.b64
   sample-state.json         # Sample factory state source JSON
   sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
-  test_cli.py               # unittest suite (106 tests, stdlib only)
+  test_cli.py               # unittest suite (107 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite
   artifact-api.md           # Field research doc for claude.ai artifact APIs
 ```
@@ -57,6 +58,10 @@ python assets/cli.py --item electronic-circuit --rate 60 \
 # Override recipe
 python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
 
+# Bus items (pull iron/copper from bus, don't recurse into smelting)
+python assets/cli.py --item electronic-circuit --rate 1800 --belt red \
+    --bus-item iron-plate --bus-item copper-plate
+
 # Space Age with big mining drills
 python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
 
@@ -72,7 +77,7 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 python -m unittest dev.test_cli -v
 ```
 
-106 tests, stdlib only.
+107 tests, stdlib only.
 
 ---
 
@@ -88,9 +93,9 @@ See [SKILL.md §3](10x-factorio-engineer/SKILL.md) for the factory state schema 
 ### Building the dashboard
 
 ```bash
-python dev/build_dashboard.py           # minify dev/dashboard.html → assets/dashboard.html
-python dev/build_dashboard.py --no-min  # copy as-is (easier to inspect)
+python dev/build_dashboard.py    # minify dev/dashboard.html → assets/dashboard.html
 python dev/build_dashboard.py --open    # build and open in browser
+python dev/preview.py            # open dev/dashboard.html in browser with sample state pre-loaded
 ```
 
 ---
