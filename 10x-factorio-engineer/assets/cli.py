@@ -3,7 +3,7 @@
 Factorio Production Calculator
 
 Usage:
-    python cli.py --item <item-id> --rate <N>
+    python cli.py --item <item-id> (--rate <N> | --machines <N>)
                   [--assembler 1|2|3]
                   [--furnace stone|steel|electric]
                   [--miner electric|big]
@@ -723,6 +723,51 @@ class Solver:
             * float(module_bonus)
         )
 
+    def rate_for_machines(self, item_key: str, machines: float) -> Fraction:
+        """
+        Return the items/min output rate that ``machines`` machines produce for
+        item_key, honouring all configured module, beacon, machine-quality, and
+        recipe-machine overrides.  Mirrors the inverse of the machine_count
+        formula in solve(), so solve(item, rate_for_machines(item, N)) gives
+        back exactly N machines for the top-level step.
+        """
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides)
+        if recipe is None:
+            raise ValueError(f"No recipe found for item '{item_key}'")
+
+        recipe_key = recipe["key"]
+
+        result_amount = Fraction(1)
+        for res in recipe.get("results", []):
+            if res["name"] == item_key:
+                result_amount = Fraction(str(res.get("amount", 1)))
+                break
+
+        energy_req = Fraction(str(recipe.get("energy_required", "0.5")))
+        cat        = recipe.get("category", "crafting")
+
+        machine_key, base_speed = self._resolve_machine(recipe_key, cat)
+
+        quality_mult    = Fraction(1) + MACHINE_QUALITY_SPEED[self.machine_quality]
+        effective_speed = base_speed * quality_mult
+
+        allow_prod = recipe.get("allow_productivity", False)
+        specs      = self._get_modules(recipe_key, machine_key)
+        prod_bonus, speed_mod_bonus = self._compute_module_effects(specs, machine_key, allow_prod)
+        effective_speed = effective_speed * (Fraction(1) + speed_mod_bonus)
+
+        effective_result = result_amount * (Fraction(1) + prod_bonus)
+
+        beacon_spec        = self._get_beacon(recipe_key, machine_key)
+        beacon_speed_bonus = self._compute_beacon_speed(beacon_spec)
+
+        machines_frac = Fraction(str(machines))
+        if beacon_speed_bonus:
+            eff_total = float(effective_speed) * (1.0 + beacon_speed_bonus)
+            rate_f    = float(machines_frac) * eff_total * float(effective_result) * 60.0 / float(energy_req)
+            return Fraction(str(round(rate_f, 8)))
+        return machines_frac * effective_speed * effective_result * 60 / energy_req
+
     def _resolve_machine(self, recipe_key: str, cat: str) -> tuple:
         """
         Return (machine_key, base_speed) respecting recipe-level machine overrides.
@@ -1143,8 +1188,15 @@ Examples:
     )
     p.add_argument("--item",     required=True,
                    help="Item ID (e.g. electronic-circuit).")
-    p.add_argument("--rate",     required=True, type=float,
+    p.add_argument("--rate",     required=False, default=None, type=float,
                    help="Target production rate in items / minute.")
+    p.add_argument("--machines", required=False, default=None, type=float,
+                   help=(
+                       "Number of machines for the target item (fractional ok). "
+                       "The CLI derives --rate from this value using the item's "
+                       "recipe, machine speed, and any --modules / --beacon config. "
+                       "Exactly one of --rate or --machines must be supplied."
+                   ))
     p.add_argument("--assembler", default=3, type=int, choices=[1, 2, 3],
                    help="Assembling machine level (default: 3).")
     p.add_argument("--furnace",  default="electric",
@@ -1246,7 +1298,10 @@ Examples:
             if k in {"dataset", "assembler", "furnace", "miner",
                      "machine_quality", "beacon_quality", "belt", "pump"}
         })
-    return p.parse_args()
+    args = p.parse_args()
+    if (args.rate is None) == (args.machines is None):
+        p.error("Exactly one of --rate or --machines must be provided.")
+    return args
 
 
 def main() -> None:
@@ -1319,7 +1374,12 @@ def main() -> None:
         bus_items=bus_items or None,
     )
 
-    solver.solve(args.item, Fraction(str(args.rate)))
+    if args.machines is not None:
+        rate = solver.rate_for_machines(args.item, args.machines)
+        args.rate = float(rate)
+    else:
+        rate = Fraction(str(args.rate))
+    solver.solve(args.item, rate)
     solver.resolve_oil(data)
 
     # Attach parsed configs to args so format_output can echo them

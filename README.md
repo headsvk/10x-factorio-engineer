@@ -28,7 +28,7 @@ dev/
   gen_sample_state.py       # Encodes sample-state.json → sample-state.b64
   sample-state.json         # Sample factory state source JSON
   sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
-  test_cli.py               # unittest suite (107 tests, stdlib only)
+  test_cli.py               # unittest suite (114 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite
   artifact-api.md           # Field research doc for claude.ai artifact APIs
 ```
@@ -58,6 +58,9 @@ python assets/cli.py --item electronic-circuit --rate 60 \
 # Override recipe
 python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
 
+# Machine-count mode — specify machines instead of a target rate
+python assets/cli.py --item transport-belt --machines 2 --assembler 2
+
 # Bus items (pull iron/copper from bus, don't recurse into smelting)
 python assets/cli.py --item electronic-circuit --rate 1800 --belt red \
     --bus-item iron-plate --bus-item copper-plate
@@ -77,7 +80,7 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 python -m unittest dev.test_cli -v
 ```
 
-107 tests, stdlib only.
+114 tests, stdlib only.
 
 ---
 

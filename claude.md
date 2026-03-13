@@ -64,7 +64,7 @@ The goal is that `claude.md` always accurately describes the codebase.
 | `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
 | `dev/sample-state.json` | Source JSON for the sample state — edit this, then run `python dev/gen_sample_state.py` to rebuild `sample-state.b64` |
 | `dev/gen_sample_state.py` | Encodes `dev/sample-state.json` → `dev/sample-state.b64` (minified JSON → UTF-8 → base64) |
-| `dev/test_cli.py` | `unittest` suite (107 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (114 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -315,7 +315,7 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 107 tests covering:
+`dev/test_cli.py` contains 114 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -340,6 +340,7 @@ python -m unittest dev.test_cli -v
 | `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
 | `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
+| `TestMachinesFlag` | `rate_for_machines` round-trips integer/fractional machine counts; Fraction return type without beacons; prod-module and beacon round-trips; raises on raw resource; assembler level respected |
 
 ---
 

@@ -34,13 +34,14 @@ involving machine counts, raw resource rates, belt counts, or throughput.
 ### Invocation pattern
 
 ```bash
-python assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
+python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [OPTIONS]
 ```
 
 | Option | Default | Notes |
 |--------|---------|-------|
 | `--item ITEM-ID` | required | Item ID (e.g. `electronic-circuit`) |
-| `--rate N` | required | Target items/minute |
+| `--rate N` | _(one required)_ | Target items/minute |
+| `--machines N` | _(one required)_ | Number of machines for the target item; fractional OK (e.g. `0.5`). The CLI derives the effective rate from machine speed, quality, modules, and beacons. Exactly one of `--rate` or `--machines` must be given. |
 | `--assembler 1/2/3` | `3` | Assembling machine tier |
 | `--furnace stone/steel/electric` | `electric` | Furnace type |
 | `--miner electric/big` | `electric` | `big` = Space Age big mining drill |
@@ -68,6 +69,9 @@ python assets/cli.py --item <item-id> --rate <N_per_min> [OPTIONS]
 ```bash
 # How many machines for 45 science packs/min?
 python assets/cli.py --item automation-science-pack --rate 45
+
+# What do 2 assembler-2 machines produce for transport-belt?
+python assets/cli.py --item transport-belt --machines 2 --assembler 2
 
 # Processing units with 4× prod-3 modules in assembler-3
 python assets/cli.py --item processing-unit --rate 10 --modules assembling-machine-3=4:prod:3:normal --furnace electric

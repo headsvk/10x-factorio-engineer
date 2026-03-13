@@ -1544,5 +1544,74 @@ class TestBusItem(unittest.TestCase):
         self.assertEqual(miners, {})
 
 
+# ---------------------------------------------------------------------------
+# --machines flag
+# ---------------------------------------------------------------------------
+
+class TestMachinesFlag(unittest.TestCase):
+    """
+    rate_for_machines(item, N) must invert the machine_count formula in solve(),
+    so that solve(item, rate_for_machines(item, N)) gives back exactly N machines
+    for the top-level step.
+    """
+
+    def test_round_trip_integer(self):
+        # 2 assembler-2 running transport-belt → solve should give back 2 machines.
+        s = _solver_new(assembler_level=2)
+        rate = s.rate_for_machines("transport-belt", 2)
+        s2 = _solver_new(assembler_level=2)
+        s2.solve("transport-belt", rate)
+        self.assertEqual(s2.steps["transport-belt"]["machine_count"], Fraction(2))
+
+    def test_round_trip_fractional(self):
+        # 0.5 machines is a valid fractional input.
+        s = _solver_new(assembler_level=3)
+        rate = s.rate_for_machines("electronic-circuit", 0.5)
+        s2 = _solver_new(assembler_level=3)
+        s2.solve("electronic-circuit", rate)
+        self.assertEqual(s2.steps["electronic-circuit"]["machine_count"], Fraction(1, 2))
+
+    def test_rate_is_fraction_without_beacons(self):
+        # Without beacons the returned rate must be an exact Fraction.
+        s = _solver_new()
+        rate = s.rate_for_machines("iron-gear-wheel", 4)
+        self.assertIsInstance(rate, Fraction)
+
+    def test_round_trip_with_prod_modules(self):
+        # Productivity modules reduce input usage and increase effective output.
+        # The round-trip must still return exactly N machines.
+        mods = {"assembling-machine-3": [_mspec(4, "prod", 3)]}
+        s = _solver_new(module_configs=mods)
+        rate = s.rate_for_machines("electronic-circuit", 3)
+        s2 = _solver_new(module_configs=mods)
+        s2.solve("electronic-circuit", rate)
+        self.assertEqual(s2.steps["electronic-circuit"]["machine_count"], Fraction(3))
+
+    def test_round_trip_with_beacons(self):
+        # Beacons introduce float arithmetic (sqrt); use assertAlmostEqual.
+        bcfg = {"assembling-machine-3": _bspec(8, 3)}
+        s = _solver_new(beacon_configs=bcfg)
+        rate = s.rate_for_machines("electronic-circuit", 5)
+        s2 = _solver_new(beacon_configs=bcfg)
+        s2.solve("electronic-circuit", rate)
+        self.assertAlmostEqual(
+            float(s2.steps["electronic-circuit"]["machine_count"]), 5.0, places=4
+        )
+
+    def test_no_recipe_raises(self):
+        s = _solver_new()
+        with self.assertRaises(ValueError):
+            s.rate_for_machines("iron-ore", 1)  # raw resource, no recipe
+
+    def test_assembler_level_respected(self):
+        # assembler-2 (speed 0.75) is slower than assembler-3 (speed 1.25),
+        # so it produces a lower rate for the same machine count.
+        s2 = _solver_new(assembler_level=2)
+        s3 = _solver_new(assembler_level=3)
+        rate2 = s2.rate_for_machines("electronic-circuit", 1)
+        rate3 = s3.rate_for_machines("electronic-circuit", 1)
+        self.assertLess(rate2, rate3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
