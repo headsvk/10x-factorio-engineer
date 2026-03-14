@@ -143,9 +143,9 @@ FIXED_MACHINE_FOR_CAT: dict[str, tuple[str, Fraction]] = {
     "organic-or-chemistry":              ("biochamber",              Fraction(3, 2)),
     "organic-or-hand-crafting":          ("biochamber",              Fraction(3, 2)),
     "electromagnetics":                  ("electromagnetic-plant",   Fraction(2)),
-    "electronics":                       ("electronics-assembly",    Fraction(3)),
-    "electronics-or-assembling":         ("electronics-assembly",    Fraction(3)),
-    "electronics-with-fluid":            ("electronics-assembly",    Fraction(3)),
+    "electronics":                       ("electromagnetic-plant",   Fraction(2)),
+    "electronics-or-assembling":         ("electromagnetic-plant",   Fraction(2)),
+    "electronics-with-fluid":            ("electromagnetic-plant",   Fraction(2)),
     "metallurgy":                        ("foundry",                 Fraction(4)),
     "metallurgy-or-assembling":          ("foundry",                 Fraction(4)),
     "crafting-with-fluid-or-metallurgy": ("foundry",                 Fraction(4)),
@@ -175,7 +175,6 @@ MACHINE_CRAFTING_SPEED: dict[str, Fraction] = {
     "cryogenic-plant":         Fraction(3, 2),
     "biochamber":              Fraction(3, 2),
     "electromagnetic-plant":   Fraction(2),
-    "electronics-assembly":    Fraction(3),
     "foundry":                 Fraction(4),
     "crusher":                 Fraction(1),
     "agricultural-tower":      Fraction(1),
@@ -258,6 +257,49 @@ PUMP_THROUGHPUT: dict[str, int] = {
     "legendary": 180_000,
 }
 
+# Beacon idle power draw by beacon housing quality (kW)
+BEACON_POWER_KW: dict[str, int] = {
+    "normal":    480,
+    "uncommon":  400,
+    "rare":      320,
+    "epic":      240,
+    "legendary": 80,
+}
+
+# Tile footprint (longest dimension) used to compute beacon sharing factor
+MACHINE_SIZE: dict[str, int] = {
+    "assembling-machine-1":  3,
+    "assembling-machine-2":  3,
+    "assembling-machine-3":  3,
+    "electric-furnace":      3,
+    "chemical-plant":        3,
+    "centrifuge":            3,
+    "biochamber":            3,
+    "agricultural-tower":    3,
+    "electromagnetic-plant": 4,
+    "crusher":               3,   # 2×3 footprint; use longest dimension
+    "oil-refinery":          5,
+    "foundry":               5,
+    "cryogenic-plant":       5,
+    "captive-spawner":       5,
+    "big-mining-drill":      5,
+    "electric-mining-drill": 3,
+    "rocket-silo":           9,
+}
+
+# Energy consumption penalty from speed/prod modules — NOT quality-scaled
+MODULE_CONSUMPTION_PENALTY: dict[str, dict[int, Fraction]] = {
+    "speed": {1: Fraction(1, 2),  2: Fraction(3, 5),  3: Fraction(7, 10)},
+    "prod":  {1: Fraction(2, 5),  2: Fraction(3, 5),  3: Fraction(4, 5)},
+}
+
+# Efficiency module reduction per slot — IS quality-scaled via MODULE_QUALITY_MULT
+MODULE_EFFICIENCY_REDUCTION: dict[int, Fraction] = {
+    1: Fraction(3, 10),
+    2: Fraction(2, 5),
+    3: Fraction(1, 2),
+}
+
 # Module slots per machine (not stored in dataset -- hardcoded from game data).
 # Machines with 0 slots effectively get no productivity bonus regardless of tier.
 MACHINE_MODULE_SLOTS: dict[str, int] = {
@@ -276,7 +318,6 @@ MACHINE_MODULE_SLOTS: dict[str, int] = {
     "cryogenic-plant":       4,
     "biochamber":            4,
     "electromagnetic-plant": 5,
-    "electronics-assembly":  5,
     "foundry":               4,
     "crusher":               2,
     "agricultural-tower":    0,
@@ -392,6 +433,102 @@ def build_fluid_set(data: dict) -> frozenset:
             if key:
                 fluids.add(key)
     return frozenset(fluids)
+
+
+def build_machine_power_w(data: dict) -> dict[str, int]:
+    """
+    Return {machine_key: watts} for all **electric** machines in the dataset.
+    Burner machines are excluded (missing key → 0 W in callers).
+
+    Scans: crafting_machines, agricultural_tower, rocket_silo, mining_drills.
+    The dataset key 'captive-biter-spawner' (burner) is automatically excluded
+    because its energy_source type is 'burner'.
+    """
+    result: dict[str, int] = {}
+    sources: list[list] = [
+        data.get("crafting_machines", []),
+        data.get("agricultural_tower", []),
+        data.get("rocket_silo", []),
+        data.get("mining_drills", []),
+    ]
+    for machine_list in sources:
+        for m in machine_list:
+            if m.get("energy_source", {}).get("type") != "electric":
+                continue
+            key = m.get("key", "")
+            watts = m.get("energy_usage", 0)
+            if key and watts:
+                result[key] = int(watts)
+    return result
+
+
+def _beacon_sharing_factor(machine_key: str) -> int:
+    """
+    In a standard double-row beacon layout beacons are shared between machines.
+    Returns the approximate number of machines each physical beacon is shared
+    across, based on machine tile size:
+      size ≤ 4 → 4 machines per beacon
+      size 5-7 → 2 machines per beacon
+      size ≥ 8 → 1 machine per beacon (e.g. rocket-silo)
+    """
+    size = MACHINE_SIZE.get(machine_key, 3)
+    if size <= 4:
+        return 4
+    if size <= 7:
+        return 2
+    return 1
+
+
+def _compute_step_power(
+    machine_key: str,
+    machine_count: "float | Fraction",
+    module_specs: list,
+    beacon_spec: "dict | None",
+    beacon_quality: str,
+    machine_power_w: dict,
+) -> tuple[float, float, float]:
+    """
+    Compute (power_kw, power_kw_ceil, beacon_power_kw) for one production step.
+
+    * power_kw      — exact fractional machine_count × adjusted draw
+    * power_kw_ceil — ceiling machine count × adjusted draw
+    * beacon_power_kw — physical beacon count × beacon idle draw
+    """
+    base_w = machine_power_w.get(machine_key, 0)
+    if base_w == 0:
+        return (0.0, 0.0, 0.0)
+
+    # Build energy_bonus from module specs
+    energy_bonus: Fraction = Fraction(0)
+    for spec in module_specs:
+        count = Fraction(spec["count"])
+        mtype = spec["type"]
+        tier  = spec["tier"]
+        qual  = spec.get("quality", "normal")
+        if mtype == "efficiency":
+            # Efficiency: subtract; IS quality-scaled
+            energy_bonus -= count * MODULE_EFFICIENCY_REDUCTION[tier] * MODULE_QUALITY_MULT[qual]
+        elif mtype in MODULE_CONSUMPTION_PENALTY:
+            # Speed/prod: add penalty; NOT quality-scaled
+            energy_bonus += count * MODULE_CONSUMPTION_PENALTY[mtype][tier]
+
+    # Clamp to −80% floor
+    energy_bonus = max(energy_bonus, Fraction(-4, 5))
+
+    factor: Fraction = Fraction(base_w, 1000) * (Fraction(1) + energy_bonus)
+
+    power_kw      = float(machine_count * factor)
+    power_kw_ceil = float(math.ceil(machine_count) * factor)
+
+    # Beacon power
+    if beacon_spec is None or beacon_spec.get("count", 0) == 0:
+        beacon_power_kw = 0.0
+    else:
+        sharing  = _beacon_sharing_factor(machine_key)
+        physical = math.ceil(float(machine_count)) * beacon_spec["count"] / sharing
+        beacon_power_kw = physical * BEACON_POWER_KW[beacon_quality]
+
+    return (power_kw, power_kw_ceil, beacon_power_kw)
 
 
 # ---------------------------------------------------------------------------
@@ -986,7 +1123,10 @@ def compute_miners(
     raw_resources: dict[str, Fraction],
     resource_info: dict,
     miner_type: str,
+    machine_power_w: dict | None = None,
 ) -> dict:
+    if machine_power_w is None:
+        machine_power_w = {}
     drill_key = "big-mining-drill" if miner_type == "big" else "electric-mining-drill"
     result: dict[str, dict] = {}
 
@@ -1000,12 +1140,16 @@ def compute_miners(
             machine   = "offshore-pump"
             rate_each = OFFSHORE_PUMP_RATE
             count = rate / rate_each
-            result[item] = {
+            entry: dict = {
                 "machine":            machine,
                 "machine_count":      round(float(count), 4),
                 "machine_count_ceil": math.ceil(count),
                 "rate_per_min":       round(float(rate), 4),
             }
+            base_w = machine_power_w.get(machine, 0)
+            if base_w:
+                entry["power_kw"] = round(float(count * Fraction(base_w, 1000)), 4)
+            result[item] = entry
         elif cat in PUMPJACK_CATEGORIES:
             # FactorioLab-style: report total required field yield % rather than
             # machine count, since pumpjack throughput depends on field depletion.
@@ -1021,12 +1165,16 @@ def compute_miners(
             machine   = drill_key
             rate_each = (MINER_SPEED[drill_key] / info["mining_time"]) * info["yield"] * 60
             count = rate / rate_each
-            result[item] = {
+            entry = {
                 "machine":            machine,
                 "machine_count":      round(float(count), 4),
                 "machine_count_ceil": math.ceil(count),
                 "rate_per_min":       round(float(rate), 4),
             }
+            base_w = machine_power_w.get(machine, 0)
+            if base_w:
+                entry["power_kw"] = round(float(count * Fraction(base_w, 1000)), 4)
+            result[item] = entry
 
     return result
 
@@ -1044,34 +1192,57 @@ def format_output(
     solver: "Solver",
     resource_info: dict,
     fluid_set: frozenset | None = None,
+    machine_power_w: dict | None = None,
 ) -> dict:
     """
     Assemble the final JSON output dict from solver results and CLI args.
 
     Belt output is included only when args.belt is set and the item is solid.
     Pump output is included only when args.pump is set and the item is a fluid.
+    Power fields are included when machine_power_w is provided.
     """
-    steps_list = sorted(
-        [
-            {
-                "recipe":             s["recipe"],
-                "machine":            s["machine"],
-                "machine_count":      _f(s["machine_count"]),
-                "machine_count_ceil": math.ceil(s["machine_count"]),
-                "rate_per_min":       _f(s["rate_per_min"]),
-                "beacon_speed_bonus": round(s["beacon_speed_bonus"], 6),
-            }
-            for s in solver.steps.values()
-        ],
-        key=lambda x: -x["rate_per_min"],
-    )
+    if machine_power_w is None:
+        machine_power_w = {}
+
+    steps_list_raw = []
+    for s in solver.steps.values():
+        recipe_key  = s["recipe"]
+        machine_key = s["machine"]
+        machine_count = s["machine_count"]
+
+        # Look up module / beacon config for this step (same priority as solver)
+        module_specs = solver._get_modules(recipe_key, machine_key)
+        beacon_spec  = solver._get_beacon(recipe_key, machine_key)
+
+        pwr, pwr_ceil, bpwr = _compute_step_power(
+            machine_key, machine_count, module_specs,
+            beacon_spec, solver.beacon_quality, machine_power_w,
+        )
+
+        step_out: dict = {
+            "recipe":             recipe_key,
+            "machine":            machine_key,
+            "machine_count":      _f(machine_count),
+            "machine_count_ceil": math.ceil(machine_count),
+            "rate_per_min":       _f(s["rate_per_min"]),
+            "beacon_speed_bonus": round(s["beacon_speed_bonus"], 6),
+            "power_kw":           round(pwr,      4),
+            "power_kw_ceil":      round(pwr_ceil, 4),
+            "beacon_power_kw":    round(bpwr,     4),
+        }
+        steps_list_raw.append(step_out)
+
+    steps_list = sorted(steps_list_raw, key=lambda x: -x["rate_per_min"])
 
     raw_sorted = {
         k: _f(v)
         for k, v in sorted(solver.raw_resources.items(), key=lambda x: -x[1])
     }
 
-    miners = compute_miners(solver.raw_resources, resource_info, args.miner)
+    miners = compute_miners(
+        solver.raw_resources, resource_info, args.miner,
+        machine_power_w=machine_power_w,
+    )
 
     out: dict = {
         "item":            args.item,
@@ -1101,9 +1272,20 @@ def format_output(
     if getattr(args, "recipe_beacon_overrides", None):
         out["recipe_beacon_overrides"] = args.recipe_beacon_overrides
 
-    out["production_steps"] = steps_list
-    out["raw_resources"]    = raw_sorted
-    out["miners_needed"]    = miners
+    # Accumulate total power (MW)
+    total_step_pwr      = sum(s["power_kw"] + s["beacon_power_kw"] for s in steps_list)
+    total_step_pwr_ceil = sum(s["power_kw_ceil"] + s["beacon_power_kw"] for s in steps_list)
+    miner_pwr = sum(
+        v["power_kw"]
+        for v in miners.values()
+        if isinstance(v, dict) and "power_kw" in v
+    )
+
+    out["production_steps"]    = steps_list
+    out["raw_resources"]       = raw_sorted
+    out["miners_needed"]       = miners
+    out["total_power_mw"]      = round((total_step_pwr + miner_pwr) / 1000, 4)
+    out["total_power_mw_ceil"] = round((total_step_pwr_ceil + miner_pwr) / 1000, 4)
 
     if solver.bus_inputs:
         out["bus_inputs"] = {
@@ -1354,11 +1536,12 @@ def main() -> None:
 
     bus_items: frozenset = frozenset(args.bus_item)
 
-    data          = load_data(args.dataset)
-    raw_set       = build_raw_set(data)
-    recipe_idx    = build_recipe_index(data)
-    resource_info = build_resource_info(data)
-    fluid_set     = build_fluid_set(data)
+    data            = load_data(args.dataset)
+    raw_set         = build_raw_set(data)
+    recipe_idx      = build_recipe_index(data)
+    resource_info   = build_resource_info(data)
+    fluid_set       = build_fluid_set(data)
+    machine_power_w = build_machine_power_w(data)
 
     solver = Solver(
         recipe_idx, raw_set,
@@ -1392,7 +1575,8 @@ def main() -> None:
     args.recipe_pump_overrides    = recipe_pump_overrides    or None
 
     print(json.dumps(format_output(
-        args, solver, resource_info, fluid_set=fluid_set,
+        args, solver, resource_info,
+        fluid_set=fluid_set, machine_power_w=machine_power_w,
     ), indent=2))
 
 

@@ -1613,5 +1613,355 @@ class TestMachinesFlag(unittest.TestCase):
         self.assertLess(rate2, rate3)
 
 
+# ---------------------------------------------------------------------------
+# Power consumption  (build_machine_power_w, _compute_step_power, miners)
+# ---------------------------------------------------------------------------
+#
+# Key machine power draws (vanilla, electric only):
+#   assembling-machine-3: 375 kW
+#   electric-furnace:     180 kW
+#   electric-mining-drill: 90 kW
+#   stone-furnace:        burner → 0 W in power dict
+#
+# MODULE_CONSUMPTION_PENALTY (NOT quality-scaled):
+#   speed-3: +0.70 per slot
+#   prod-3:  +0.80 per slot
+# MODULE_EFFICIENCY_REDUCTION (IS quality-scaled):
+#   eff-3-normal:    0.50 per slot
+#   eff-3-legendary: 0.50 × 2.5 = 1.25 per slot
+# Efficiency floor: max(energy_bonus, -0.80)
+# ---------------------------------------------------------------------------
+
+def _fmt_power(
+    dataset: str,
+    item: str,
+    rate: float,
+    *,
+    solver: "cli.Solver | None" = None,
+    **solver_kwargs,
+) -> dict:
+    """Run solver + format_output including machine_power_w."""
+    import argparse
+    d = _DATA[dataset]
+    machine_power_w = cli.build_machine_power_w(d["data"])
+    if solver is None:
+        s = _solver_new(dataset, **solver_kwargs)
+        s.solve(item, Fraction(rate))
+        s.resolve_oil(d["data"])
+    else:
+        s = solver
+    fluid_set = cli.build_fluid_set(d["data"])
+    args = argparse.Namespace(
+        item=item, rate=rate, dataset=dataset,
+        assembler=3, furnace="electric", miner="electric",
+        machine_quality="normal", beacon_quality="normal",
+        belt=None, pump=None,
+        module_configs=None, beacon_configs=None,
+        recipe_machine_overrides=None, recipe_module_overrides=None,
+        recipe_beacon_overrides=None,
+        recipe_belt_overrides=None, recipe_pump_overrides=None,
+    )
+    return cli.format_output(args, s, d["resource_info"],
+                             fluid_set=fluid_set,
+                             machine_power_w=machine_power_w)
+
+
+class TestPowerConsumption(unittest.TestCase):
+
+    def test_electric_machine_has_power(self):
+        # electric-furnace @ 60 iron-plate/min: machines=8/5, 180 kW each
+        # power_kw = 1.6 × 180 = 288.0
+        out = _fmt_power("vanilla", "iron-plate", 60)
+        step = next(s for s in out["production_steps"] if s["recipe"] == "iron-plate")
+        self.assertGreater(step["power_kw"], 0.0)
+        self.assertAlmostEqual(step["power_kw"], 288.0, places=2)
+
+    def test_burner_machine_power_zero(self):
+        # stone-furnace is a burner → power_kw must be 0.0
+        s = _solver_new(
+            furnace_type="stone",
+            recipe_machine_overrides={"iron-plate": "iron-plate"},
+        )
+        # Use stone furnace directly via furnace_type
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+        s2 = _solver_new(furnace_type="stone")
+        s2.solve("iron-plate", Fraction(60))
+        fluid_set = cli.build_fluid_set(d["data"])
+        args = argparse.Namespace(
+            item="iron-plate", rate=60, dataset="vanilla",
+            assembler=3, furnace="stone", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out = cli.format_output(args, s2, d["resource_info"],
+                                fluid_set=fluid_set,
+                                machine_power_w=machine_power_w)
+        step = next(s for s in out["production_steps"] if s["recipe"] == "iron-plate")
+        self.assertEqual(step["power_kw"], 0.0)
+        self.assertEqual(step["power_kw_ceil"], 0.0)
+
+    def test_efficiency_modules_reduce_power(self):
+        # 1× eff-3-normal in electric-furnace (2 slots, 1 effective slot used):
+        # energy_bonus = −0.5  →  power = 1.6 × 180 × 0.5 = 144 kW
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+        s_eff = _solver_new(
+            furnace_type="electric",
+            module_configs={"electric-furnace": [_mspec(1, "efficiency", 3)]},
+        )
+        s_eff.solve("iron-plate", Fraction(60))
+        fluid_set = cli.build_fluid_set(d["data"])
+        args = argparse.Namespace(
+            item="iron-plate", rate=60, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs={"electric-furnace": [_mspec(1, "efficiency", 3)]},
+            beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out_eff = cli.format_output(args, s_eff, d["resource_info"],
+                                    fluid_set=fluid_set,
+                                    machine_power_w=machine_power_w)
+
+        out_base = _fmt_power("vanilla", "iron-plate", 60)
+
+        step_eff  = next(s for s in out_eff["production_steps"]  if s["recipe"] == "iron-plate")
+        step_base = next(s for s in out_base["production_steps"] if s["recipe"] == "iron-plate")
+        self.assertLess(step_eff["power_kw"], step_base["power_kw"])
+        self.assertAlmostEqual(step_eff["power_kw"], 144.0, places=2)
+
+    def test_efficiency_quality_scaled(self):
+        # legendary eff-3 reduces power more than normal eff-3 (before clamping).
+        # electric-furnace has 2 slots.
+        # normal eff-3 (1 slot):    energy_bonus = −0.5   → factor 0.5
+        # legendary eff-3 (1 slot): energy_bonus = −0.5×2.5 = −1.25 → clamped to −0.8, factor 0.2
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+
+        def _make(quality: str) -> dict:
+            s = _solver_new(
+                furnace_type="electric",
+                module_configs={"electric-furnace": [_mspec(1, "efficiency", 3, quality)]},
+            )
+            s.solve("iron-plate", Fraction(60))
+            fluid_set = cli.build_fluid_set(d["data"])
+            args = argparse.Namespace(
+                item="iron-plate", rate=60, dataset="vanilla",
+                assembler=3, furnace="electric", miner="electric",
+                machine_quality="normal", beacon_quality="normal",
+                belt=None, pump=None,
+                module_configs={"electric-furnace": [_mspec(1, "efficiency", 3, quality)]},
+                beacon_configs=None,
+                recipe_machine_overrides=None, recipe_module_overrides=None,
+                recipe_beacon_overrides=None,
+                recipe_belt_overrides=None, recipe_pump_overrides=None,
+            )
+            return cli.format_output(args, s, d["resource_info"],
+                                     fluid_set=fluid_set,
+                                     machine_power_w=machine_power_w)
+
+        out_norm = _make("normal")
+        out_leg  = _make("legendary")
+        step_norm = next(s for s in out_norm["production_steps"] if s["recipe"] == "iron-plate")
+        step_leg  = next(s for s in out_leg["production_steps"]  if s["recipe"] == "iron-plate")
+        # legendary reduces power more (or equal if both hit floor)
+        self.assertLessEqual(step_leg["power_kw"], step_norm["power_kw"])
+        # Confirm: 1 slot normal → 0.5 factor, legendary → 0.2 factor (clamped to 0.2)
+        self.assertAlmostEqual(step_norm["power_kw"], 144.0, places=2)
+        self.assertAlmostEqual(step_leg["power_kw"],  57.6,  places=2)
+
+    def test_speed_modules_not_quality_scaled(self):
+        # Speed module consumption penalty is NOT quality-scaled.
+        # Call _compute_step_power directly with identical machine_count to isolate
+        # the power draw factor from any speed-induced machine count change.
+        # electric-furnace 180 kW; 1 slot speed-3-normal vs speed-3-legendary
+        # Both apply +0.7 consumption penalty → same energy_bonus → same factor.
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+        machine_count = Fraction(8, 5)  # fixed count (same as 60/min baseline)
+
+        pwr_n, _, _ = cli._compute_step_power(
+            "electric-furnace", machine_count,
+            [_mspec(1, "speed", 3, "normal")],
+            None, "normal", machine_power_w,
+        )
+        pwr_l, _, _ = cli._compute_step_power(
+            "electric-furnace", machine_count,
+            [_mspec(1, "speed", 3, "legendary")],
+            None, "normal", machine_power_w,
+        )
+        # Penalty is not quality-scaled: both should be identical
+        self.assertAlmostEqual(pwr_n, pwr_l, places=6)
+
+    def test_prod_modules_increase_power(self):
+        # prod-3 modules add a consumption penalty; power must be higher than base.
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+
+        s_prod = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "prod", 3)]
+        })
+        s_prod.solve("electronic-circuit", Fraction(60))
+        fluid_set = cli.build_fluid_set(d["data"])
+        args = argparse.Namespace(
+            item="electronic-circuit", rate=60, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
+            beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out_prod = cli.format_output(args, s_prod, d["resource_info"],
+                                     fluid_set=fluid_set,
+                                     machine_power_w=machine_power_w)
+        out_base = _fmt_power("vanilla", "electronic-circuit", 60)
+
+        step_prod = next(s for s in out_prod["production_steps"] if s["recipe"] == "electronic-circuit")
+        step_base = next(s for s in out_base["production_steps"] if s["recipe"] == "electronic-circuit")
+        # Per-machine power draw must be higher with prod modules
+        mc_prod = step_prod["machine_count"]
+        mc_base = step_base["machine_count"]
+        assert mc_prod > 0 and mc_base > 0
+        factor_prod = step_prod["power_kw"] / mc_prod
+        factor_base = step_base["power_kw"] / mc_base
+        self.assertGreater(factor_prod, factor_base)
+
+    def test_efficiency_floor_80pct(self):
+        # electric-furnace has 2 slots; max 2 eff-3-normal slots.
+        # 2 × 0.5 = 1.0 reduction → clamped to -0.8 → factor = 0.2
+        # power_kw = 1.6 × 180 × 0.2 = 57.6
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+
+        s = _solver_new(
+            furnace_type="electric",
+            module_configs={"electric-furnace": [_mspec(4, "efficiency", 3)]},
+        )
+        s.solve("iron-plate", Fraction(60))
+        fluid_set = cli.build_fluid_set(d["data"])
+        args = argparse.Namespace(
+            item="iron-plate", rate=60, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs={"electric-furnace": [_mspec(4, "efficiency", 3)]},
+            beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"],
+                                fluid_set=fluid_set,
+                                machine_power_w=machine_power_w)
+        step = next(x for x in out["production_steps"] if x["recipe"] == "iron-plate")
+        # Floor at 20% of base (288 kW base)
+        self.assertAlmostEqual(step["power_kw"], 57.6, places=2)
+
+    def test_beacon_power_sharing_size3(self):
+        # assembling-machine-3 is size 3 → sharing factor = 4
+        # electronic-circuit @ 60/min: machines = 2/5 = 0.4
+        # ceil(0.4) = 1; physical = 1 * beacon_count / 4
+        # With 4 beacons: physical = 1 * 4 / 4 = 1
+        # beacon_power_kw = 1 * BEACON_POWER_KW["normal"] = 480
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+        s = _solver_new(beacon_configs={
+            "assembling-machine-3": _bspec(4, 3, "normal")
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        fluid_set = cli.build_fluid_set(d["data"])
+        args = argparse.Namespace(
+            item="electronic-circuit", rate=60, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None,
+            beacon_configs={"assembling-machine-3": _bspec(4, 3, "normal")},
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"],
+                                fluid_set=fluid_set,
+                                machine_power_w=machine_power_w)
+        step = next(x for x in out["production_steps"] if x["recipe"] == "electronic-circuit")
+        # ceil(machines) = 1, beacon_count=4, sharing=4 → 1 physical beacon × 480 kW
+        self.assertAlmostEqual(step["beacon_power_kw"], 480.0, places=2)
+
+    def test_beacon_power_sharing_size5(self):
+        # oil-refinery is size 5 → sharing factor = 2
+        # Use AOP (advanced-oil-processing); give it a beacon config.
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+        s = _solver_new(beacon_configs={
+            "oil-refinery": _bspec(4, 3, "normal")
+        })
+        s.solve("heavy-oil", Fraction(100))
+        s.resolve_oil(d["data"])
+        fluid_set = cli.build_fluid_set(d["data"])
+        args = argparse.Namespace(
+            item="heavy-oil", rate=100, dataset="vanilla",
+            assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            belt=None, pump=None,
+            module_configs=None,
+            beacon_configs={"oil-refinery": _bspec(4, 3, "normal")},
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+            recipe_belt_overrides=None, recipe_pump_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"],
+                                fluid_set=fluid_set,
+                                machine_power_w=machine_power_w)
+        aop_step = next(x for x in out["production_steps"]
+                        if x["recipe"] == "advanced-oil-processing")
+        mc_ceil = aop_step["machine_count_ceil"]
+        # sharing=2 → physical = mc_ceil * 4 / 2 = mc_ceil * 2
+        expected_bpwr = mc_ceil * 4 / 2 * 480
+        self.assertAlmostEqual(aop_step["beacon_power_kw"], expected_bpwr, places=1)
+
+    def test_total_power_mw_in_output(self):
+        # top-level total_power_mw must equal sum of per-step power / 1000
+        out = _fmt_power("vanilla", "electronic-circuit", 60)
+        step_sum = sum(s["power_kw"] + s["beacon_power_kw"]
+                       for s in out["production_steps"])
+        miner_sum = sum(
+            v["power_kw"] for v in out["miners_needed"].values()
+            if isinstance(v, dict) and "power_kw" in v
+        )
+        expected_mw = round((step_sum + miner_sum) / 1000, 4)
+        self.assertIn("total_power_mw", out)
+        self.assertAlmostEqual(out["total_power_mw"], expected_mw, places=4)
+
+    def test_miner_power_kw_present(self):
+        # electric-mining-drill: 90 kW each
+        # iron-plate @ 60/min → iron-ore at 60/min
+        # rate_each = (0.5/1) × 1 × 60 = 30/min → 2 drills → 2 × 90 = 180 kW
+        out = _fmt_power("vanilla", "iron-plate", 60)
+        self.assertIn("iron-ore", out["miners_needed"])
+        entry = out["miners_needed"]["iron-ore"]
+        self.assertIn("power_kw", entry)
+        self.assertGreater(entry["power_kw"], 0.0)
+        self.assertAlmostEqual(entry["power_kw"], 180.0, places=2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
