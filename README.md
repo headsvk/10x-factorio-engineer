@@ -116,7 +116,6 @@ the same data that powers <https://kirkmcdonald.github.io/calc.html>.
 ### CLI / Calculator
 
 - **Quality recycling loops** — model the throughput cost of quality recycling lines for legendary production
-- **Quality recycling loops** — model the throughput cost of quality recycling lines for legendary production
 - **Multi-target solve** — one CLI call for a full science block with shared intermediates deduplicated
 
 ### Dashboard

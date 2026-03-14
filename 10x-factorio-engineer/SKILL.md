@@ -109,14 +109,19 @@ The CLI emits JSON to stdout. Example:
       "machine_count": 7.5,
       "machine_count_ceil": 8,
       "rate_per_min": 10.0,
-      "beacon_speed_bonus": 10.0
+      "beacon_speed_bonus": 10.0,
+      "power_kw": 2812.5,
+      "power_kw_ceil": 3000.0,
+      "beacon_power_kw": 7680.0
     }
   ],
   "raw_resources": { "crude-oil": 487.18, "iron-ore": 120.0 },
   "miners_needed": {
     "crude-oil": { "machine": "pumpjack", "required_yield_pct": 81.2, "rate_per_min": 487.18 },
-    "iron-ore": { "machine": "electric-mining-drill", "machine_count": 4.0, "machine_count_ceil": 4, "rate_per_min": 120.0 }
+    "iron-ore": { "machine": "electric-mining-drill", "machine_count": 4.0, "machine_count_ceil": 4, "rate_per_min": 120.0, "power_kw": 360.0 }
   },
+  "total_power_mw": 10.8525,
+  "total_power_mw_ceil": 11.04,
   "module_configs": { "assembling-machine-3": [{"count": 2, "type": "prod", "tier": 3, "quality": "rare"}] },
   "beacon_configs": { "assembling-machine-3": {"count": 8, "tier": 3, "quality": "legendary"} },
   "recipe_overrides": { "heavy-oil": "coal-liquefaction" },
@@ -130,9 +135,11 @@ The CLI emits JSON to stdout. Example:
 
 | Key | What it tells you |
 |-----|------------------|
-| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `beacon_speed_bonus` |
+| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw` |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
-| `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields) |
+| `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw` |
+| `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |
+| `total_power_mw_ceil` | Same using ceiled machine counts |
 | `belt` + `belts_needed` | Present when `--belt` is set and item is solid; `belts_needed` = `rate / belt_throughput` |
 | `pump` + `pumps_needed` | Present when `--pump` is set and item is a fluid |
 | `module_configs` | Present when `--modules` was passed; module specs per machine |
@@ -146,9 +153,11 @@ The CLI emits JSON to stdout. Example:
 | `bus_inputs` | Present when `--bus-item` was passed; `{item: rate_per_min}` for items sourced from the bus (separate from `raw_resources`, which contains only true raws like ores) |
 
 Notes:
-- `pumpjack` emits `required_yield_pct` (not `machine_count`) — player divides this across pumpjack fields
+- `pumpjack` emits `required_yield_pct` (not `machine_count`) — player divides this across pumpjack fields; no `power_kw` (pumpjack is not electric)
 - `offshore-pump` emits `machine_count` + `machine_count_ceil`
 - `beacon_speed_bonus` is 0.0 when no beacons configured; `machine_count` becomes `float` (not `Fraction`) when beacons active
+- `power_kw` is 0.0 for burner machines (stone furnace, steel furnace, biochamber, captive spawner)
+- `beacon_power_kw` uses a sharing factor based on machine tile size (÷4 for ≤4-tile, ÷2 for 5–7-tile) to model physical beacon count in a standard double-row layout
 
 **Critical rule**: Never report a machine count or resource rate to the player
 without first running the CLI and citing the exact value from its JSON output.

@@ -37,12 +37,13 @@ chat panel is powered by `window.claude.complete()`. A strategy reference
 | Trigger | Required follow-up action |
 |---------|--------------------------|
 | `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. To preview: run `python dev/preview.py` then use the Claude Preview MCP tool (server name `dashboard-preview`, config at `.claude/launch.json`) — **never** open the file in a browser via `--open` or `subprocess`. |
-| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. |
+| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. The JSON example must include every field that appears in real CLI output — run the CLI and copy actual values rather than inventing them. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. Verify by grepping SKILL.md for each new field name and confirming it appears in both the example block and the field table. |
 | CLI flag added, removed, or changed | 1. Update the module-level docstring at the top of `cli.py` (Usage block). 2. Update the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
 | Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample-state.json` to match the new schema. 4. Run `python dev/gen_sample_state.py` to regenerate `dev/sample-state.b64`. 5. Run `python dev/build_dashboard.py` to rebuild the artifact. |
 | New CLI flag or solver behaviour added | Add tests to `dev/test_cli.py` covering the new feature. Run `python -m unittest dev.test_cli -v` and fix any failures before finishing. Update the test count in `README.md` and in the Tests section of `CLAUDE.md`. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
+| Before spawning a subagent to implement CLI or dashboard changes | Include in the subagent prompt: (1) an instruction to read and follow all maintenance rules in `CLAUDE.md` before finishing, and (2) an explicit end-of-task checklist derived from those rules — e.g. "grep SKILL.md for every new JSON field added to cli.py output and confirm each appears in both the example block and the field table in §2". Subagents do not automatically load `CLAUDE.md`. |
 
 The goal is that `claude.md` always accurately describes the codebase.
 
@@ -64,7 +65,7 @@ The goal is that `claude.md` always accurately describes the codebase.
 | `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
 | `dev/sample-state.json` | Source JSON for the sample state — edit this, then run `python dev/gen_sample_state.py` to rebuild `sample-state.b64` |
 | `dev/gen_sample_state.py` | Encodes `dev/sample-state.json` → `dev/sample-state.b64` (minified JSON → UTF-8 → base64) |
-| `dev/test_cli.py` | `unittest` suite (114 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (125 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -86,6 +87,9 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `build_recipe_index(data)` | `{item_key: [recipe, ...]}`, skips recycling + barrel subgroups |
 | `build_resource_info(data)` | `{item: {mining_time, yield, category}}` using `Fraction` |
 | `build_fluid_set(data)` | `frozenset` of item keys whose type is `"fluid"` in the dataset |
+| `build_machine_power_w(data)` | `{machine_key: watts}` for electric machines only (burners excluded); scans `crafting_machines`, `agricultural_tower`, `rocket_silo`, `mining_drills` |
+| `_beacon_sharing_factor(machine_key)` | Returns how many machines share each physical beacon (4 for ≤4-tile machines, 2 for 5–7-tile, 1 for ≥8-tile) |
+| `_compute_step_power(...)` | Returns `(power_kw, power_kw_ceil, beacon_power_kw)` for a production step using module/beacon config |
 | `get_machine(cat, assembler_level, furnace_type)` | Maps recipe category → `(machine_key, speed)` |
 | `pick_recipe(item_key, recipe_idx, overrides)` | Picks canonical recipe (see selection logic below) |
 | `_gauss2 / _gauss3` | Exact `Fraction` Gaussian elimination (2×2 and 3×3) |
@@ -284,7 +288,7 @@ Negative-variable cases (surplus of one oil fraction) are handled by clamping to
 - `cryogenics*` → cryogenic-plant (speed 3/2)
 - `organic*` → biochamber (speed 3/2)
 - `electromagnetics` → electromagnetic-plant (speed 2)
-- `electronics*` → electronics-assembly (speed 3)
+- `electronics*`, `electronics-or-assembling`, `electronics-with-fluid` → electromagnetic-plant (speed 2)
 - `metallurgy*`, `crafting-with-fluid-or-metallurgy` → foundry (speed 4)
 - `crushing` → crusher (speed 1)
 - `pressing` → agricultural-tower (speed 1)
@@ -315,7 +319,7 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 114 tests covering:
+`dev/test_cli.py` contains 125 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -341,6 +345,7 @@ python -m unittest dev.test_cli -v
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
 | `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
 | `TestMachinesFlag` | `rate_for_machines` round-trips integer/fractional machine counts; Fraction return type without beacons; prod-module and beacon round-trips; raises on raw resource; assembler level respected |
+| `TestPowerConsumption` | Electric machines have `power_kw > 0`; burner machines give 0; efficiency modules reduce power (quality-scaled); speed/prod penalty not quality-scaled; efficiency floor at −80%; beacon sharing (3×3 = ÷4, 5×5 = ÷2); `total_power_mw` in output; miner `power_kw` present |
 
 ---
 
@@ -374,9 +379,7 @@ Top-level keys: `items[]`, `recipes[]`, `resources[]`, `planets[]`
 
 ## Known Limitations / Pending Work
 
-1. **No power consumption tracking**: Efficiency modules are stored and echoed in output but have no effect on machine-count math. Power draw per step is not calculated.
-
-2. **No quality recycling loops**: Quality tier progression (e.g. recycling normal→legendary) is not modelled. Machine/module/beacon quality multipliers are applied directly but the throughput cost of quality recycling lines is out of scope.
+1. **No quality recycling loops**: Quality tier progression (e.g. recycling normal→legendary) is not modelled. Machine/module/beacon quality multipliers are applied directly but the throughput cost of quality recycling lines is out of scope.
 
 
 ---
