@@ -509,6 +509,8 @@ only read it when a strategy question actually comes up.
 | Megabase planning and UPS optimization | Yes |
 | Blueprints — where to find them, decoding strings | Yes |
 | Space Age: Vulcanus, Fulgora, Gleba, Aquilo strategies | Yes |
+| Space Age science packs (what each planet produces) | Yes |
+| Quality modules, quality tiers, quality recycling loops | Yes |
 | Solar, nuclear, fusion, lightning power | Yes |
 | Combat: biters, demolishers, pentapods, asteroids | Yes |
 | All turret types (vanilla + Space Age) | Yes |

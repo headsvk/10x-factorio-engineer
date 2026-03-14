@@ -44,8 +44,54 @@ chat panel is powered by `window.claude.complete()`. A strategy reference
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
 | Before spawning a subagent to implement CLI or dashboard changes | Include in the subagent prompt: (1) an instruction to read and follow all maintenance rules in `CLAUDE.md` before finishing, and (2) an explicit end-of-task checklist derived from those rules — e.g. "grep SKILL.md for every new JSON field added to cli.py output and confirm each appears in both the example block and the field table in §2". Subagents do not automatically load `CLAUDE.md`. |
+| Every 30 days | Run the strategy-topics.md wiki maintenance workflow (see below). The MediaWiki RecentChanges API only goes back 30 days — running less frequently means changes fall out of the window undetected. |
 
 The goal is that `claude.md` always accurately describes the codebase.
+
+---
+
+## Strategy Reference Maintenance (Every 30 Days)
+
+`10x-factorio-engineer/references/strategy-topics.md` embeds facts crawled from the Factorio
+wiki. The wiki is actively updated — run this workflow monthly to pick up changes.
+
+### Workflow
+
+**Step 1 — Fetch recently changed pages via MediaWiki API:**
+```
+https://wiki.factorio.com/api.php?action=query&list=recentchanges&rcnamespace=0&rclimit=500&rcdays=30&rctype=edit|new&format=json
+```
+This returns all English main-namespace pages edited in the last 30 days. Filter out
+translations (`/zh`, `/ru`, `/de`, etc.) and non-article pages (`Special:`, `File:`, etc.).
+
+**Step 2 — Cross-reference against already-embedded pages:**
+The pages we have content from in strategy-topics.md are listed in `findings.md` under
+"Inventory of all Fetch instructions". Check which recently-changed pages overlap.
+
+**Step 3 — Re-crawl changed pages using cf-crawl:**
+For each changed page that overlaps with our embedded content, crawl it with:
+```bash
+curl -X POST 'https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/browser-rendering/crawl' \
+  -H 'Authorization: Bearer {API_TOKEN}' \
+  -H 'Content-Type: application/json' \
+  -d '{"url": "https://wiki.factorio.com/PAGE", "limit": 1, "render": false, "formats": ["markdown"]}'
+```
+Credentials are in `~/.env` as `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+Use `render: false` for wiki pages (static HTML). Each page = 1 crawl job.
+
+**Step 4 — Diff and update strategy-topics.md:**
+Compare the newly crawled content against what's embedded. Update any facts that changed.
+Focus on numbers (stats, ratios, percentages) and mechanics — those are most likely to drift.
+
+**Step 5 — Also check for new high-value pages:**
+Filter the full RecentChanges list for pages not yet embedded but relevant to players
+(new buildings, mechanics, Space Age content). Crawl and add as new sections if warranted.
+
+### Notes
+- The 30-day window is a hard limit of the MediaWiki API — do not skip months
+- `render: false` crawls won't follow links between unrelated pages — crawl each target URL directly
+- `findings.md` in the repo root tracks all crawl history and page inventory
+- Cloudflare paid plan: no daily job limit, 600 req/min REST API
 
 ---
 

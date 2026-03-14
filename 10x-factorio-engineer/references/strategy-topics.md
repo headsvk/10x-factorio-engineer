@@ -1,13 +1,14 @@
 # Factorio Strategy Topics
 
-This file lists discussion topics Claude can help with, along with the best
-sources to fetch on demand. When a topic comes up, fetch the listed URLs,
-read the content, and use it to ground the discussion. Don't pre-load — only
-fetch when the player actually asks.
+This file contains pre-embedded strategy knowledge for the most common Factorio topics.
+Key facts from the Factorio wiki and community resources have been crawled and inlined
+directly — no on-demand fetching required for covered topics.
 
-Claude already has strong training knowledge on most of these topics. Fetch
-sources when the player wants specifics, current blueprints, or when the
-topic is Space Age content (newer, less represented in training data).
+**Wiki URLs** (`**Wiki:** URL`) are passive references — open them only if the player
+wants the full article or asks for a detail not covered here.
+
+**See also** entries point to forums, community searches, or external sites that
+cannot be pre-crawled — surface these to players when relevant.
 
 ---
 
@@ -61,65 +62,216 @@ the Factorio wiki for anything 2.0-specific.
 ## Factory Layout Strategies
 
 ### Main Bus
-**Fetch:** https://wiki.factorio.com/Tutorial:Main_bus
-**When to fetch:** Player asks how to set up a bus, what to put on it, how
-wide to make it, when to abandon it, or how to transition away.
-**Claude knows:** Core concept well. Fetch wiki for specific ratios and
-diagrams.
+**Wiki:** https://wiki.factorio.com/Tutorial:Main_bus
+
+A main bus is a set of parallel belts carrying the most-used intermediate items through the
+centre of the base. Sub-factories branch off the side, take what they need, and return
+nothing — the bus flows one direction only.
+
+**What to put on the bus (common choices):**
+- Iron plates (multiple belts — cornerstone of everything)
+- Copper plates (~equal quantity to iron overall)
+- Iron gear wheels (half the belt space of iron plates; used in many recipes)
+- Electronic circuits (green circuits — demand only grows)
+- Advanced circuits (red circuits)
+- Processing units (blue circuits)
+- Steel plates
+- Plastic bars (or coal to make it locally)
+- Stone / stone bricks
+- Sulfur
+- Batteries
+
+**Fluid bus (optional):** sulfuric acid, lubricant, water — pipes run alongside.
+
+**Tip:** Copper cable is better produced on-site rather than bused — it takes more belt
+space than the copper plates it's made from.
+
+**Bus width and spacing rules:**
+- Leave **2 free tile gaps** per group of 4 belts so underground belts can surface and
+  cross-belts can pass through
+- Leave **6–10 tile gaps between sub-factories** along the bus for future expansion
+- Group only 1–2 different items together — mixing more causes split-off headaches
+
+**Splitting off from the bus:**
+- Use a splitter with **output priority** set toward your sub-factory. The belt fills
+  completely before overflow continues down the bus — clean, no lane imbalance.
+- Avoid taking two belts off a 4-wide group without lane-balancing: the middle splitter
+  only delivers half-belt throughput to each side.
+
+**When to abandon the bus:**
+- Once logistic robots are available, many players start moving items by bot instead
+- For megabase scale, trains replace the bus entirely — city block designs have no bus
+- Transition naturally: add trains/robots for new production, let the bus serve what it
+  already feeds
+
+### Belt Throughput & Compression
+**Wiki:** https://wiki.factorio.com/Belt_transport_system
+
+**Belt tiers and throughput (items/second per full belt, both lanes):**
+
+| Belt | Color | Items/sec | Items/min | Underground max gap |
+|------|-------|-----------|-----------|---------------------|
+| Transport belt | Yellow | 15 | 900 | 4 tiles |
+| Fast transport belt | Red | 30 | 1,800 | 6 tiles |
+| Express transport belt | Blue | 45 | 2,700 | 8 tiles |
+| Turbo transport belt (Space Age) | Green | 60 | 3,600 | (same underground mechanic) |
+
+Each straight belt piece holds **8 items**. Belt speed: yellow 1.875 t/s, red 3.75 t/s, blue 5.625 t/s, turbo 7.5 t/s.
+
+**Lane compression:**
+- A belt is "compressed" when both lanes are continuously full — this is maximum throughput.
+- Inserters place items onto **one lane only** (the far lane from the inserter's perspective, or the right lane if the belt runs parallel). Inserters taking from a belt prefer the near lane.
+- Side-loading (inserting from the side) fills only the near lane. Use a splitter or two facing inserters to balance both lanes.
+- An uncompressed belt (gaps between items) delivers less than rated throughput downstream — compress belts early by feeding them fully before the consumer.
+
+**Underground belts:**
+- Tile limits are **interior** tiles (not counting the two endpoint tiles): yellow = 4 gap, red = 6 gap, blue = 8 gap.
+- Different underground belt tiers can be "braided" through the same tile column without mixing — each tier only connects to its own type.
+
+**Splitter balancing:**
+- A 4-belt → 4-belt balancer ensures all four output belts receive equal throughput from any combination of active inputs. Essential for city-block and megabase bus designs.
+- Splitters have a **priority** setting (one input or output prioritized) and a **filter** setting (one item type directed to one output) — independent of each other.
+
+### Inserter Throughput
+**Wiki:** https://wiki.factorio.com/Inserters
+
+**Inserter types (base game + Space Age):**
+
+| Inserter | Speed | Hand size (base) | Notes |
+|----------|-------|-----------------|-------|
+| Burner inserter | Slowest | 1 | Fuel-powered only |
+| Inserter | ~0.83 items/s | 1 | Standard electric |
+| Long-handed inserter | ~0.83 items/s | 1 | 2-tile reach |
+| Fast inserter | ~2.31 items/s | 1 | 3× faster than standard |
+| Bulk inserter | ~2.31 items/s | 1–12 | Same speed as fast, moves stacks |
+| Stack inserter (Space Age) | ~2.31 items/s | 1–12 | Same speed, can stack on belt |
+
+**Bulk/stack inserter with hand size research:**
+- "Inserter capacity bonus" research (7 levels) increases the bulk/stack inserter hand size from 1 up to 12.
+- At max research, a bulk inserter moves up to 12 items per swing — this is the primary throughput multiplier for loading/unloading trains and chests.
+- Stack inserter (Space Age) functions like bulk inserter but can also **stack items on a belt** (multiple items on one belt slot), enabling higher belt compression.
+
+**Throughput numbers (approximate, chest-to-chest at max research):**
+- Standard inserter: ~0.83 items/s (no hand size research applies)
+- Fast inserter: ~2.31 items/s
+- Bulk inserter at hand size 12: ~28 items/s (12 items × ~2.3 swings/s)
+
+**Circuit-controlled inserters:**
+- Set inserter enable/disable via a circuit condition (e.g., "enable when iron-plate < 100").
+- On bulk/stack inserters: set the **stack size** override signal via circuit network for precise flow control — e.g., reduce stack size to 1 when the destination is nearly full, preventing overfilling.
 
 ### City Blocks
-**Fetch:** Search `site:forums.factorio.com city block design` or
-`site:factorioprints.com city block`
-**When to fetch:** Player asks about block sizing, rail grid alignment,
-whether city blocks are worth it, or how to start one.
-**Claude knows:** Concept and tradeoffs well. Community pattern not on wiki —
-fetch forums for specific sizing discussions (common choices: 100x100,
-128x128, 200x200).
-**Key points Claude should cover without fetching:**
+**See also:** search `site:forums.factorio.com city block design` or `site:factorioprints.com city block` for sizing blueprints.
+
+**Key points:**
 - Each block is self-contained: inputs/outputs via train
 - Block size tradeoff: bigger = more flexible, smaller = more modular
-- Rail grid must be consistent across all blocks
+- Common sizes: 100×100, 128×128, 200×200 tiles — rail grid must be consistent
 - Best suited for megabase scale, overkill for early game
 
 ### Spaghetti / Organic Growth
-**Fetch:** Rarely needed — Claude knows this well.
-**When to fetch:** Only if player wants specific teardown/reorganization advice.
+Claude knows this well. Only look up specific teardown/reorganization advice if asked.
 
 ### Ribbon Base
-**Fetch:** Search `site:forums.factorio.com ribbon base`
-**When to fetch:** Player asks about ribbon world maps or horizontal-only designs.
+**See also:** search `site:forums.factorio.com ribbon base`
+Player asks about ribbon world maps or horizontal-only designs.
 
 ### Hybrid (Bus → Train → City Block progression)
-**Fetch:** Search `site:forums.factorio.com bus to train city block transition`
-**When to fetch:** Player asks about when to transition between strategies
-or how to evolve their factory over the course of a playthrough.
-**Note:** Prefer official forums over Steam discussions — Steam threads are
-often 1.x era and may not reflect 2.0 changes.
+**See also:** search `site:forums.factorio.com bus to train city block transition`
+
+Prefer official forums over Steam discussions — Steam threads are often 1.x era.
 
 ---
 
 ## Train Networks
 
-### Basic Train Setup
-**Fetch:** https://wiki.factorio.com/Tutorial:Train_network
-**When to fetch:** Player asks about signaling, deadlocks, or station setup.
+**Wiki:** https://wiki.factorio.com/Railway
 
-### Train Limits & Circuit Logic
-**Fetch:** https://wiki.factorio.com/Circuit_network_cookbook
-**When to fetch:** Player asks about dynamic train dispatch, stack limits,
-or avoiding congestion.
+### Infrastructure basics
+
+- Rails are placed on a **2-tile grid** — you cannot shift a rail by 1 tile.
+- Train stops must be on the **right-hand side** of the track (from the forward-facing locomotive's perspective).
+- For two-way track, rail signals must be placed **opposite each other** — hover one to confirm it highlights its pair.
+- A **rail chain signal** shows blue when at least one forward path is blocked but not all; use at junctions to prevent deadlock.
+
+**Elevated rails (Space Age):** New building type — rail ramps + rail supports. Required to
+bridge Fulgora's oil ocean, Vulcanus lava rivers, and Gleba's water. Press **G** while using
+the rail planner to switch levels; hold **SHIFT** + target a rail on the other level to auto-place
+ramps. Supports are required every **16 straight tiles**. Players cannot walk on elevated rail.
+Buildings too tall for elevated rail: big electric pole, roboport, oil refinery, rocket silo,
+cargo landing pad, agricultural tower, cargo bay, lightning rod/collector.
+
+### Signals and deadlock prevention
+
+- Signals split the network into **blocks** — only one train per block at a time.
+- Rail signal: green = block free, yellow = reserved, red = occupied.
+- Chain signal: same as rail signal + blue = at least one path blocked (not all).
+- **Deadlock rule:** Never create a loop where every block can fill simultaneously.
+  The standard fix is making one segment one-way, or adding a bypass/passing loop.
+- Manual driving **ignores all signals** — automatic trains will not yield to a player driving manually.
+
+### Train schedule and wait conditions
+
+The locomotive GUI lets you set a schedule (ordered list of stops + wait conditions).
+There are 15 wait condition types; the most useful:
+
+| Condition | Use case |
+|-----------|---------|
+| **Full cargo** | Leave loading station when full |
+| **Empty cargo** | Leave unloading station when empty |
+| **Inactivity** | Leave when inserters stop moving (N seconds of no change) |
+| **Item count** | Leave when specific item count threshold is met |
+| **Circuit condition** | Dynamic dispatch via circuit network |
+| **Station is full / not full** | Queue management with train limits |
+| **Time passed** | Simple fixed-time stop |
+
+Multiple conditions can be combined with AND / OR. Logic is evaluated as **disjunctive normal
+form** (DNF): each OR group is evaluated as a unit, first group that is fully true wins.
+
+### Train groups (2.0)
+
+Assign trains to a named group — editing one train's schedule changes **all trains in the group**.
+Essential for managing fleets of identical ore/plate haulers.
+
+### Schedule interrupts (2.0)
+
+Interrupts let a train **override its schedule** when a condition is met — e.g., divert to a
+refueling station when fuel is low, then resume the original schedule automatically.
+
+**Wildcard interrupts:** Special signals (Item, Fuel, Fluid, Signal) that match against the
+train's actual cargo. A wildcard interrupt can route a train to a station whose name contains
+an icon matching the cargo — enabling a single generic train to self-route to the right unloader.
+
+### Troubleshooting "no path"
+
+1. Can the train reach the stop driving **forwards only**? (Automatic trains cannot reverse unless
+   a second locomotive faces the other direction.)
+2. Is the stop on the **right-hand side** of the track?
+3. Are signals blocking forward travel in the correct direction?
+4. CTRL + hover on tracks in map view highlights the planned path — follow it until it disappears
+   to locate the break or signal error.
+
+### Train Limits & Circuit Dispatch
+**Wiki:** https://wiki.factorio.com/Circuit_network_cookbook
+
+Set a **train limit** on a station to prevent trains queuing at a full station. Combine with
+circuit conditions to dynamically enable/disable stations based on chest contents — the standard
+pattern for decentralised ore pickup (station enables itself when ore > threshold, disables when empty).
 
 ### Megabase Train Design
-**Fetch:** https://forums.factorio.com/viewtopic.php?t=78544
-**When to fetch:** Player planning 1000+ SPM factory with train-based logistics.
+**See also:** https://forums.factorio.com/viewtopic.php?t=78544
+
+For 1000+ SPM: consistent train size matters more than which size you pick (1-4, 2-4, and 1-8
+are all common). All stations for the same resource must accommodate the same train length.
+Stacker loops before busy stations prevent trains blocking the main line while waiting.
 
 ---
 
 ## Megabase Planning
 
 ### General Megabase Advice
-**Fetch:** Search `site:forums.factorio.com megabase planning 2.0`
-**When to fetch:** Player asks about SPM targets, module planning, UPS
+**See also:** Search `site:forums.factorio.com megabase planning 2.0`
+**When relevant:** Player asks about SPM targets, module planning, UPS
 optimization, or where to start a megabase.
 **Key points without fetching:**
 - Pick SPM target first, use calculator to work backward
@@ -128,10 +280,22 @@ optimization, or where to start a megabase.
 - Move smelting to mine mouth first — it's the easiest decentralization step
 
 ### UPS Optimization
-**Fetch:** Search `site:forums.factorio.com UPS optimization megabase`
-**When to fetch:** Player complains about lag or asks about performance.
+**See also:** Search `site:forums.factorio.com UPS optimization megabase`
+**When relevant:** Player complains about lag or asks about performance.
 **Key points:** Fewer entities = better UPS. Prefer direct insertion over
 belts where possible at megabase scale. Beacon coverage matters.
+
+### Beacons
+**Wiki:** https://wiki.factorio.com/Beacon
+
+- **What beacons do:** Transmit module effects to nearby machines (non-burner only). Each machine inside the beacon's area receives the module effects, but at reduced **distribution effectivity** (50% for normal quality beacons).
+- **Coverage area:** 9×9 tiles centered on the beacon. Any machine with module slots whose footprint overlaps this area is affected.
+- **Distribution effectivity:** normal quality = 1.5 (not 0.5 — the tooltip shows the effectivity, not the penalty). Two speed-3 modules in a beacon at normal quality apply +50% × 1.5 = +75% total speed (vs. +100% if placed in the machine directly). The CLAUDE.md formula: `beacon_speed = BEACON_EFFECTIVITY[quality] × sqrt(count) × 2 × SPEED_MODULE_BONUS[tier] × MODULE_QUALITY_MULT[module_quality]`.
+- **Productivity modules cannot go in beacons** — only speed modules and efficiency modules are permitted. This is a hard game rule.
+- **Standard layout for assembler-3:** offset rows of assembler-3s and beacons so each machine is covered by **8 beacons** (each with 2 speed-3 modules). This gives maximum speed boost in the most common array layout.
+- **Diminishing returns:** the transmission strength per beacon decreases as more beacons overlap the same machine. Surrounding machines around beacons (not beacons around machines) is more efficient. The wiki's multi-row array math gives optimum row count for large production blocks.
+- **Don't over-beacon without productivity:** beacon speed increases machine rate, which increases raw material consumption proportionally. Only beacon machines that also run productivity modules (in the machine itself) — otherwise you're just spending more resources faster.
+- **Space Age quality stacking:** beacon housing quality raises distribution effectivity (1.5→1.7→1.9→2.1→2.5 for normal→legendary). Machine quality raises crafting speed (+30%/+60%/+90%/+150%). Both stack multiplicatively with module bonuses.
 
 ---
 
@@ -152,7 +316,7 @@ Claude can explain what's in it conceptually but cannot decode the binary
 format without tooling.
 
 ### Notable Blueprint Collections (fetch page for current links)
-**Fetch:** https://factorioprints.com when player asks for specific blueprint books.
+**See also:** https://factorioprints.com — for specific blueprint books.
 - Nilaus's city block book — widely used reference
 - Megabase Modular Train Grid (2.0): https://factorioprints.com/view/-NVIYNeGyxfJfkfz3MGF
   (note: minimal Space Age updates per author)
@@ -162,9 +326,14 @@ format without tooling.
 ## Space Age Strategies
 
 ### General Space Age Progression
-**Fetch:** https://wiki.factorio.com/Space_Age
+**Wiki:** https://wiki.factorio.com/Space_Age
 **When to fetch:** Player asks about planet order, what to prioritize, or
 how Space Age changes the endgame.
+
+**What Space Age adds:** 4 new planets, space platforms, 5 new science packs, 22 new buildings, 5 new weapons, 2 new enemy types, 30 new intermediate products, 8 hours of original music. End goal: build a space platform capable of reaching the solar system edge (not just launching a rocket).
+
+Space Age is actually three mods bundled together: Space Age (planets/platforms), Quality (item quality tiers + recycler), and Elevated Rails. Quality and Elevated Rails can be enabled separately without Space Age.
+
 **Recommended planet order (community consensus):**
 1. Vulcanus — easiest, great for bootstrapping production
 2. Fulgora — harder but holmium unlocks key recipes
@@ -172,18 +341,101 @@ how Space Age changes the endgame.
 4. Aquilo — last, requires most infrastructure
 
 ### Vulcanus (Foundry / Tungsten)
-**Fetch:** https://wiki.factorio.com/Vulcanus
+**Wiki:** https://wiki.factorio.com/Vulcanus
 **Key points:** Foundry is 4× speed — move all smelting here eventually.
 Demolishers patrol but have fixed paths. Calcite + lava = free smelting.
 
+**Planet stats:**
+- Solar power: **400%** — solar panels are 4× as effective; excellent for cheap power
+- Day/night cycle: **1.5 minutes** — nights are very short, accumulators drain minimally
+- No pollution
+
+**Terrain — three biomes:**
+- **Ashlands**: dry plateaus with coal patches, sparse vegetation. Best building terrain — relatively flat, no lava rivers.
+- **Lava basins**: winding lava rivers; tungsten ore deposits here (requires big mining drill).
+- **Mountains**: large volcanoes with lava pools, sulfuric acid geysers, and calcite patches.
+
+**Resources:**
+- Tungsten ore: Vulcanus-exclusive, requires big mining drill. Only minable tungsten source in the game.
+- Lava: pumped from lava lakes via offshore pumps. Processed into molten iron or molten copper in a foundry.
+- Calcite: mined from mountain patches (also obtainable from advanced oxide asteroid crushing on platforms).
+- Coal: mineable from ashland patches.
+- No crude oil — use simple coal liquefaction (coal + calcite + sulfuric acid → heavy oil) for oil products.
+- Water: no natural water. Obtained via acid neutralisation (sulfuric acid + calcite → water + stone) or steam condensation.
+- Iron ore / copper ore: very limited (volcanic rock only) — get plates from lava processing instead.
+- Stone: byproduct of lava → molten iron/copper processing.
+
+**Demolisher territories:**
+- Each territory belongs to exactly one demolisher. Territories are Voronoi-like, tightly packed, non-overlapping.
+- Territory boundaries shown as opaque red lines on map; interior marked with translucent diagonal red lines.
+- Demolishers do NOT respawn — killing one permanently frees its territory. Only the starting area is demolisher-free at game start.
+- If you build inside a territory, the demolisher will beeline toward your buildings.
+
+**Power options:**
+- Solar at 400% output is strong and cheap — go solar early.
+- Acid neutralisation generates 500°C steam for turbines — free power from sulfuric acid. Note: steam turbines require nuclear power or heating tower research (done on Nauvis/Gleba first); steam engines can be used as a temporary workaround.
+
+**Unlocks exclusive to Vulcanus:**
+Metallurgic science pack, Foundry, Big mining drill, Turbo belts (all tiers), Acid neutralisation recipe. Also unlocks (can craft elsewhere): Artillery turret/wagon/shells, Simple coal liquefaction, Coal liquefaction, Speed module 3, Asteroid reprocessing (research).
+
 ### Fulgora (Scrap Recycling / Holmium)
-**Fetch:** https://wiki.factorio.com/Fulgora
+**Wiki:** https://wiki.factorio.com/Fulgora
 **Key points:** No water, lightning power only. Scrap recycling is
 probabilistic — design for averages not exact ratios. Electromagnetic
 plant has 5 module slots.
 
+**Planet stats:**
+- Solar power: **20%** (orbit: 120%) — solar is weak; lightning is the primary power source
+- Day/night cycle: **3 minutes**
+- No pollution
+
+**Scrap recycling output probabilities (per recycler cycle):**
+
+| Item | Probability |
+|------|------------|
+| Iron gear wheel | 20% |
+| Solid fuel | 7% |
+| Concrete | 6% |
+| Ice | 5% |
+| Steel plate | 4% |
+| Battery | 4% |
+| Stone | 4% |
+| Copper cable | 3% |
+| Advanced circuit | 3% |
+| Processing unit | 2% |
+| Low-density structure | 1% |
+| Holmium ore | 1% |
+
+**Additional scrap facts:**
+- Scrap **stack size: 200**. Mining yield per scrap entity: 1 scrap per deposit.
+- Recycler cycle time for scrap: **0.2 seconds** at crafting speed 1 (the recycler runs fast — scrap throughput is limited by belt speed, not recycler count).
+- Each probability is rolled **independently** — a single scrap cycle can produce more than one output item simultaneously.
+- Total output probability adds up to **60%** — recycling a full belt of scrap produces a belt that is only ~60% full on average.
+- **Quality does NOT affect scrap recycling output probabilities** — the chances listed above are fixed regardless of recycler quality. Higher quality recyclers only run faster (same speed bonus as other machines).
+- Further recycling the primary outputs (gears, circuits, etc.) can yield additional resources: iron plate, copper plate, plastic, and more — but chemistry products (crude oil, lubricant, coal, sulfur) cannot be recovered from scrap via recycling.
+
+Design for throughput averages — the probabilistic output means you need buffers before
+each consumer. Holmium is rare (1%) so many recyclers are needed; running recyclers at
+full throughput is always better than throttling.
+
+**Terrain:**
+- **Plateaus** (islands): only place where factories can be built. Split into small (resource-rich, cramped), medium (moderate resources, moderate space), and large (no resources, most room). Islands can overlap to form larger buildable areas.
+- **Oilsands** (lowlands between islands): cannot build anything except rail supports. Offshore pumps on the oilsand shore produce **unlimited heavy oil** — this is Fulgora's only native fluid resource.
+- Islands too far apart for roboport coverage or big electric poles — each island needs its own logistic and power networks until foundation is researched.
+- Alien ruins are scattered on islands. **Fulgoran lightning attractors** (ruins) protect nearby buildings from lightning before you build your own rods — useful on first landing.
+
+**Lightning priority:** Lightning collector (10,000) >> Lightning rod (1,000) >> alien ruins (~91–95) >> other metal entities (priority 1). Lightning strikes the highest-priority entity in range. Wooden chests, walls, rail pieces, and trains are immune to lightning.
+
+**Resources unique to Fulgora:** Scrap (only minable resource), Heavy oil (unlimited from oilsand offshore pump).
+**No water on-planet.** Ice can come from scrap recycling (5% chance) — usable for water via melting.
+
+**Electromagnetic plant:** Speed 2, 5 module slots (more than assembler-3's 4).
+Use productivity modules to amplify holmium plate output. Handles `electronics`,
+`electromagnetics`, `electronics-or-assembling`, and `electronics-with-fluid` recipe categories.
+
 ### Gleba (Agriculture / Spoilage)
-**Fetch:** https://wiki.factorio.com/Gleba and https://forums.factorio.com/viewtopic.php?t=120218
+**Wiki:** https://wiki.factorio.com/Gleba
+**See also:** https://forums.factorio.com/viewtopic.php?t=120218
 **When to fetch:** Player asks about Gleba logistics, spoilage, or combat.
 
 **Key production points:**
@@ -191,6 +443,87 @@ plant has 5 module slots.
 - Biochamber for agricultural recipes, nutrients are the key input
 - Pentapod eggs are a key ingredient for Biochambers — but they spoil and
   hatch into enemies if left too long. Automate carefully.
+
+**Spoilage timings (normal quality, longer = more forgiving to buffer):**
+
+| Item | Spoilage time | Notes |
+|------|--------------|-------|
+| Yumako | 1 hour | Harvested from yumako trees |
+| Jellynut | 1 hour | Harvested from jellystem |
+| Bioflux | 2 hours | Most shelf-stable biological item |
+| Pentapod egg | 15 minutes | ⚠️ Spoiled eggs hatch into enemies |
+| Nutrients | 5 minutes | Very short — keep flow moving |
+| Yumako mash | 3 minutes | Process yumako quickly after crushing |
+| Jelly | 4 minutes | Process jellynut quickly after crushing |
+
+**Spoilage mechanics (how it works):**
+- Every spoilable item has a fixed spoil time — a countdown from 100% freshness to 0%. Items spoil everywhere: in chests, machine input/output slots, inserter hands, and belts. Nothing stops the timer except items still inside a captive biter spawner (eggs don't count down until removed).
+- **Stacking averages freshness:** when inserters combine items into a stack, the resulting freshness is the weighted average. A large stack of 80%-fresh items mixed with 100%-fresh items ends up somewhere between — plan for this in fast-throughput loops.
+- **Freshness transfers through recipes:** if a recipe consumes a spoilable input to produce a spoilable output, the output inherits the input's freshness percentage. Multiple spoilable inputs → average freshness is used.
+- **Agricultural science packs are doubly affected:** lower freshness = the lab consumes the pack faster without producing more science. A 50% fresh pack gives half the science value. Keep ag-packs fresh, ship them quickly, and keep Gleba→Nauvis transit time short.
+- **Machine trash slots:** any machine handling spoilable items gains internal trash slots. If an input or output stack spoils, items move to trash slots — the machine can stall if trash slots fill. Any output inserter can take from trash slots; use filter inserters to route spoilage separately from products.
+- **Biter/pentapod egg spoiling is dangerous:** spoiled biter eggs spawn big biters; spoiled pentapod eggs spawn wrigglers. Never let these items sit in open storage.
+
+Design rule: process items before they spoil. Yumako/jellynut buffers (1 hour) are fine;
+nutrients/mash/jelly buffers (3–5 min) are dangerous. Build short loops, not long belts.
+
+**Biochamber stats:**
+- Crafting speed: **2** (normal quality), up to 5 at legendary
+- Module slots: **4**
+- Fuel: **nutrients only** (2 MJ per nutrient = 4 seconds per nutrient at 500 kW)
+- Built-in **50% productivity bonus** — one of the few machines with a base prod bonus
+- **Negative pollution** — absorbs pollution from the environment rather than producing it;
+  a large biochamber array actually reduces your pollution cloud and attack frequency
+- Size: 3×3 tiles
+- Handles recipe categories: `organic`, `organic-or-assembling`, pressing, and more
+
+**Nutrients production chain:**
+
+| Recipe | Inputs | Outputs | Time | Notes |
+|--------|--------|---------|------|-------|
+| From yumako mash | 4 mash | 6 nutrients | 4s | Primary loop |
+| From spoilage | 10 spoilage | 1 nutrients | 2s | Waste-to-nutrients |
+| From bioflux | 5 bioflux | 40 nutrients | 2s | Efficient but wastes bioflux |
+| From biter egg | 1 egg | 20 nutrients | 2s | Automatable |
+| From raw fish | 1 fish | 20 nutrients | 2s | Not automatable |
+
+The yumako mash route is the primary sustainable loop. Feed nutrients back into biochambers
+as fuel; the cycle is self-sustaining once primed.
+
+**Pentapod egg mechanics:**
+- Spoilage: 15 minutes → spawns a **Big premature wriggler** (enemy) when it spoils
+- Sources: natural egg rafts on-planet, stompers drop them, or biochamber can breed them
+  (recipe: 30 nutrients + 1 egg + 60 water → 2 eggs, 15s — net +1 per cycle)
+- Stack size: 20. ⚠️ Never let eggs sit in chests — automate processing or use immediately
+- Required for: agricultural science pack (1 egg + 1 bioflux = 1 pack, 4s in biochamber)
+
+**Captive biter spawner:**
+- How to get: fire a capture bot rocket at a wild biter spawner on Nauvis; can also craft
+  after reaching Aquilo and researching the unlock
+- Output: biter eggs at **0.5/s** (5 eggs per 10 seconds), max 100 in output slot
+- Fuel: bioflux only (6 MJ per bioflux = 1 minute per bioflux at 100 kW)
+- Module slots: **0** — cannot be boosted by modules or beacons
+- Quality of spawner does NOT affect egg quality — eggs are always normal quality
+
+**Agricultural science pack recipe:**
+- 1× bioflux + 1× pentapod egg → 1× agricultural science pack (4s, biochamber)
+- ⚠️ The pack itself spoils — ship to Nauvis promptly; run a dedicated fast platform
+
+**Terrain and nest control:**
+- Pentapod nests can only form on **shallow water tiles** — midlands and highlands act as natural expansion barriers.
+- Landfilling shallow water prevents pentapod nest expansion — a viable active defense strategy.
+- Marshland biomes (red/green) are where Jellystem and Yumako trees grow; also contain iron/copper stromatolites.
+
+**Resources (no crude oil):**
+- Iron ore: grown via iron bacteria cultivation in biochambers; copper ore same via copper bacteria.
+- Coal: synthesised via coal synthesis recipe in biochambers.
+- No crude oil. Bio-substitutes available: bioplastic → plastic bars, biosulfur → sulfur, biolubricant → lubricant, rocket fuel from jelly recipe. For flamethrower turrets, heavy oil must be imported (or coal liquefaction if calcite is shipped in from platforms/Vulcanus).
+- Stone: mined normally from surface patches.
+- Water: readily available via offshore pumps.
+
+**Power:** Heating tower (burner device) generates 500°C heat for heat exchangers + turbines. Gleba renewably generates rocket fuel, making it self-sufficient for burner power. Traditional boilers also work. Solar at 50% output is usable.
+
+**Space routes:** Gleba connects to Nauvis (15,000 km), Vulcanus (15,000 km), Fulgora (15,000 km), and Aquilo (30,000 km — longest route, double distance).
 
 **⚠️ Gleba enemies — widely considered the hardest combat in Space Age:**
 - Enemies are **pentapods** (not biters) — three types: Wrigglers, Strafers, Stompers
@@ -216,17 +549,73 @@ plant has 5 module slots.
 - Artillery (once available) is highly effective for pushing back nest perimeter
 
 ### Aquilo (Cryogenics)
-**Fetch:** https://wiki.factorio.com/Aquilo
+**Wiki:** https://wiki.factorio.com/Aquilo
+**When to fetch:** Player asks about Aquilo logistics, heating, carbon fiber, or production chains.
 **Key points:** Everything freezes without heating. Ammonia + ice + lithium
 are key resources. Carbon fibre unlocks late recipes. Hardest planet.
+
+**⚠️ Heating mechanics — the defining constraint of Aquilo:**
+Almost every building freezes and stops working unless it is adjacent (orthogonally or
+diagonally within 1 tile) to a heat source above 30°C. Heat sources: nuclear reactor,
+heating tower (unlocked on Gleba), and heat pipes. Heat pipes distribute heat without
+loss but only to adjacent entities.
+
+**Heat consumption per building type (approximate):**
+- Transport belts (yellow/red/blue/turbo): **10 kW each**
+- Underground belts: **50–200 kW** (higher tiers cost more)
+- Splitters: **40 kW**
+- Pipes: **1 kW**; Pipes-to-ground: **150 kW**
+- Pumps: **30 kW**
+- Storage tanks: **100 kW**
+- Inserters: **30–50 kW**
+- Assembling machines / chemical plants / labs: **100 kW**
+- Oil refineries / artillery turrets: **200 kW**
+- Beacons: **400 kW**
+
+Buildings that do NOT need heating: burner machines, offshore pumps, chests, electric
+poles, solar panels, accumulators, lamps, combinators, robots, vehicles, trains, and
+rail infrastructure.
+
+**Planet stats:**
+- Solar power: **0.6 kW peak (1% of Nauvis)** — effectively useless, plan for nuclear or fusion
+- Day/night cycle: **20 minutes**
+- Robot energy usage: **500%** — bots drain power fast; factor into power planning
+- No pollution
+
+**Terrain:**
+- Cannot place regular landfill or foundation on ice ocean — use **ice platforms** instead
+- Most buildings on ice require **concrete** (not stone bricks) as flooring
+- Ice platforms are crafted from ammonia + ice (from ammoniacal solution separation)
+
+**Resources available locally:**
+- Ammoniacal solution (offshore pump on ammonia ocean)
+- Lithium brine (pumpjack)
+- Fluorine (pumpjack)
+- Crude oil (pumpjack)
+- Ice (mined from lithium ice formations, or crafted)
+- Lithium (mined or crafted from lithium brine)
+
+**Must import:** Stone, iron ore, copper ore, coal — none are available on-planet.
+
+**Unlock requirements for Aquilo:** Requires research from all three prior planets — rocket turrets + advanced asteroid processing + heating towers (from Gleba), asteroid reprocessing (from Vulcanus), and electromagnetic science pack (from Fulgora). Aquilo is explicitly designed as the last planet.
+
+**Fluid exclusivity:** Ammoniacal solution, fluorine, lithium brine, and ammonia cannot be barrelled and transported off Aquilo. Any recipe consuming these fluids is therefore Aquilo-exclusive. This includes: fluoroketone (hot), lithium, fusion power cells, solid fuel from ammonia, and ammonia rocket fuel.
+
+**Quantum processors** can be crafted on Aquilo OR on space platforms — one of the few Aquilo-unlocked items with this flexibility.
+
+**Exclusive unlocks:** Cryogenic plant, Fusion generator, Fusion reactor (all crafted on Aquilo only), Cryogenic science pack, Quantum processor, Foundation (buildable tile for ice ocean), Railgun turret, Railgun.
+
+**Power recommendation:** Bootstrap with nuclear using imported uranium; transition to
+fusion reactors long-term. Steam can be generated from melted ice via heat exchangers.
+Accumulators charged near inner planets can provide a small buffer.
 
 ---
 
 ## Power
 
 ### Solar + Accumulators
-**Fetch:** https://wiki.factorio.com/Solar_panel for the official per-planet
-multipliers, or https://forums.factorio.com/viewtopic.php?t=119040 for the
+**Wiki:** https://wiki.factorio.com/Solar_panel
+**See also:** https://forums.factorio.com/viewtopic.php?t=119040 for the
 definitive community deep-dive including quality combinations.
 
 **When to fetch:** Player asks about solar on any Space Age planet, or about
@@ -263,7 +652,7 @@ is involved. The ratio changes dramatically per planet.**
   blueprint for everything
 
 ### Nuclear Power
-**Fetch:** https://wiki.factorio.com/Tutorial:Nuclear_power
+**Wiki:** https://wiki.factorio.com/Tutorial:Nuclear_power
 **When to fetch:** Player asks about nuclear ratios, neighbor bonus, water
 supply, steam storage, or fuel efficiency.
 
@@ -335,12 +724,31 @@ blueprint. The cheat sheet commonly shows this layout.
 - Heat pipes still have a thermal throughput limit — run parallel heat pipe
   runs for very large arrays (2×8+)
 - Unlike water pipes, heat pipe distance still matters for heat transfer rate
+- Rough throughput limits: 1 pipe handles ~21 exchangers one side / ~31 both sides.
+  Two parallel pipes: ~29 one side / ~42 both sides. Beyond ~133 tiles from reactor,
+  a single 40 MW path loses efficiency.
+
+**Fuel supply:**
+- Fuel cell recipe: 1× U-235 + 19× U-238 + 10× iron plate → 10 fuel cells. Each cell = 8 GJ.
+- U-235 yield: ~7 U-235 per 10,000 ore processed (0.07%). Expect 1 U-235 per ~1,428 ore.
+- Rule of thumb: ~1 uranium processing centrifuge per reactor for steady U-235 supply.
+- In 2.0, reactors can be **wired directly to read their own heat level** — no steam tank workaround needed to trigger fuel insertion via circuit.
+
+### Kovarex Enrichment Process
+**Wiki:** https://wiki.factorio.com/Kovarex_enrichment_process
+
+- **What it does:** Enriches U-238 into U-235 using existing U-235 as a catalyst. Run in a centrifuge.
+- **Recipe (gross):** 40 U-235 + 5 U-238 → 41 U-235 + 2 U-238. **Net per cycle: +1 U-235, −3 U-238.**
+- **Catalytic recipe:** The 40 U-235 and 2 U-238 are treated as catalysts, not consumed. Productivity bonuses apply only to the net +1 U-235 output — extra production from productivity generates +1 U-235 (not +41).
+- **Bootstrapping is the hard part:** The centrifuge needs 40 U-235 loaded before it can run. Early uranium processing yields ~0.07% U-235, so expect ~570 ore to reach 40 U-235. Patience required before the loop starts.
+- **Once running:** U-235 is no longer the bottleneck — each cycle nets at least 1 U-235 (more with productivity modules). A single centrifuge running Kovarex can supply multiple reactors.
+- **Productivity modules stack very well here** — each productivity module increases the net U-235 yield per cycle. Fill the centrifuge with productivity-3 modules for best return.
+- **Common setup:** Filter inserter configured to keep exactly 40 U-235 in the centrifuge input; a second inserter outputs excess U-235 and the U-238 byproduct to separate storage.
 
 ### Steam (Early Game)
-**Fetch:** Never needed — Claude knows this well.
 
 ### Fusion Power (Space Age)
-**Fetch:** https://wiki.factorio.com/Fusion_reactor and https://wiki.factorio.com/Fusion_generator
+**Wiki:** https://wiki.factorio.com/Fusion_reactor and https://wiki.factorio.com/Fusion_generator
 **When to fetch:** Player asks about fusion setup, generator ratios, fluoroketone
 loop, neighbor bonuses, or fusion vs nuclear.
 
@@ -374,6 +782,7 @@ Generators per reactor = 2 × (1 + neighbor_count)
 - Generators produce hot fluoroketone as a byproduct — must be piped
   to a cryogenic plant to cool back to fluoroketone (cold) and recirculate.
   If hot fluoroketone backs up, generators stop producing power
+- Each reactor consumes at most **4 cold fluoroketone/second**. Rule of thumb: **1 cryogenic plant per reactor** is sufficient to keep the coolant loop flowing (no modules).
 - Do not build more generators than the ratio supports — excess generators
   deplete stored plasma and cause others to show "no fluid input"
 - Higher quality reactors give more power per tile but worse fuel
@@ -390,16 +799,18 @@ Generators per reactor = 2 × (1 + neighbor_count)
 ---
 
 ### Lightning Rods & Collectors (Fulgora only)
-**Fetch:** https://wiki.factorio.com/Lightning_rod and https://wiki.factorio.com/Lightning_collector
+**Wiki:** https://wiki.factorio.com/Lightning_rod and https://wiki.factorio.com/Lightning_collector
 **When to fetch:** Player asks about Fulgora power setup, accumulator sizing,
 rod vs collector choice, or island power management.
 
 **Two buildings:**
 
-| Building | Unlock | Protection radius | Energy efficiency | Recipe cost |
+| Building | Unlock | Range (normal quality) | Energy efficiency | Recipe cost |
 |---|---|---|---|---|
-| Lightning rod | On arrival | Small | ~25% normal, 50% legendary | Cheap (steel + copper + brick) |
-| Lightning collector | After EM science | Large (~3× area) | ~50% normal, 100% legendary | Expensive (holmium + batteries) |
+| Lightning rod | On arrival | 15 tiles | 20% normal → 50% legendary | Cheap (steel + copper + brick) |
+| Lightning collector | After EM science | 25 tiles | 40% normal → 100% legendary | Expensive (holmium + batteries) |
+
+Both buildings cannot be crafted on any planet other than Fulgora (other planets lack the required magnetic field strength).
 
 **How lightning power works:**
 - Lightning rods protect an area from strikes — any lightning in their
@@ -457,7 +868,7 @@ rod vs collector choice, or island power management.
 ## Combat & Defense
 
 ### New Space Age Turrets Overview
-**Fetch:** https://wiki.factorio.com/Turret for the full list.
+**Wiki:** https://wiki.factorio.com/Turret for the full list.
 **When to fetch:** Player asks which turret to use, where to unlock them,
 or how they compare.
 
@@ -492,7 +903,7 @@ or how they compare.
 ---
 
 ### Nauvis (Biters)
-**Fetch:** https://wiki.factorio.com/Enemies
+**Wiki:** https://wiki.factorio.com/Enemies
 **When to fetch:** Player asks about pollution spread, biter evolution, or
 expansion behavior.
 **Key points:**
@@ -503,7 +914,7 @@ expansion behavior.
 - Setting laser turrets to prioritize spitters reduces damage taken in large attacks
 
 ### Vulcanus (Demolishers)
-**Fetch:** https://wiki.factorio.com/Demolisher
+**Wiki:** https://wiki.factorio.com/Enemies (Demolisher section)
 **When to fetch:** Player asks how to deal with Demolishers or expand on Vulcanus.
 **Key points:**
 - Demolishers patrol fixed paths — scout before building
@@ -515,7 +926,7 @@ expansion behavior.
   is safer than Nauvis once paths are mapped
 
 ### Gleba (Pentapods)
-**Fetch:** https://wiki.factorio.com/Pentapod and https://wiki.factorio.com/Stomper
+**Wiki:** https://wiki.factorio.com/Enemies (Pentapod section — Stomper info is on the Enemies page, no separate Stomper article)
 **When to fetch:** Player struggles with Gleba defense or asks about pentapod types.
 **Key points:**
 - Three enemy types: Wrigglers (small), Strafers (ranged), Stompers (massive)
@@ -529,7 +940,7 @@ expansion behavior.
   and don't let them sit in chests
 
 ### Aquilo (Mites / Coldsnap)
-**Fetch:** https://wiki.factorio.com/Aquilo
+**Wiki:** https://wiki.factorio.com/Aquilo
 **When to fetch:** Player asks about Aquilo enemies or defense.
 **Key points:**
 - Enemies are Mites — less aggressive than other planets but the environment
@@ -539,7 +950,7 @@ expansion behavior.
 - Defense is less of a concern than keeping the factory from freezing
 
 ### Space Platforms (Asteroids)
-**Fetch:** https://wiki.factorio.com/Space_platform
+**Wiki:** https://wiki.factorio.com/Space_platform
 **When to fetch:** Player asks about platform defense or asteroid management.
 **Key points:**
 - Asteroids are the only threat — no enemy units
@@ -551,7 +962,7 @@ expansion behavior.
 - Ice-heavy asteroid zones (near Aquilo) can starve metal production — plan for mixed asteroid chunk collection
 
 ### Turret Creep
-**Fetch:** Search `site:forums.factorio.com turret creep`
+**See also:** Search `site:forums.factorio.com turret creep`
 **When to fetch:** Player asks about pushing back biters aggressively.
 **Key points:**
 - Place turrets just outside biter attack range, let them clear nests,
@@ -561,28 +972,222 @@ expansion behavior.
 
 ---
 
+## Logistic Network (Robots)
+
+**Wiki:** https://wiki.factorio.com/Logistic_network
+
+### Roboport stats (Factorio 2.0.7+)
+
+| Stat | Value |
+|------|-------|
+| Logistic area (orange) | 50×50 tiles |
+| Construction area (green) | 110×110 tiles |
+| Charging slots | 4 |
+| Charge rate per slot | **500 kW** (reduced from 1 MW in patch 2.0.7) |
+| Time to charge one bot | **3 seconds** (1.5 MJ ÷ 500 kW) |
+| Bots charged per minute | ~80 per roboport |
+| Internal battery | 100 MJ |
+| Robot storage slots | 7 × 50 bots each (+ 7 repair pack slots) |
+| Built-in radar | 2 chunks (added in 2.0.7) |
+
+**⚠️ Quality does NOT affect coverage area size** — a legendary roboport still covers 50×50/110×110.
+Higher quality roboports charge robots more quickly (quicker per charge slot cycle).
+
+**Connecting roboports:** Two roboports form one network when their orange zones touch (yellow dashed line appears).
+Robots never migrate between separate networks. Keep coverage contiguous.
+
+### Robot stats
+
+| Stat | Logistic bot | Construction bot |
+|------|-------------|-----------------|
+| Energy stored | 1.5 MJ | 1.5 MJ |
+| Constant power draw | 3 kW | 3 kW |
+| Energy per tile | 5 kJ | 5 kJ |
+| Base speed | 3 tiles/s | 3.6 tiles/s |
+| Max range (base, no research) | **250 tiles** | **257 tiles** |
+| Cargo (base) | 1 item | — |
+| Cargo (max, fully researched) | **4 items** | — |
+
+Max range formula: `1500 ÷ (3 × speed + 5)`
+
+Robots recharge when at 20% energy. When out of power they fly at 20% speed.
+In 2.0.7+ robots consider charger queue length before choosing a roboport,
+and can now be assigned multiple tasks simultaneously (not just one at a time).
+
+### Chest types
+
+| Chest | Behaviour |
+|-------|-----------|
+| **Active provider** | Pushes all stored items into the network immediately — bots come to empty it |
+| **Passive provider** | Makes items available on request — bots only come when someone requests them |
+| **Storage chest** | Accepts overflow items not wanted elsewhere; can be filtered to one type |
+| **Requester chest** | Pulls specific items from the network until configured quantity is reached |
+| **Buffer chest** | Hybrid: requests items like a requester AND provides them like a passive provider |
+
+**Robot pickup priority (highest first):** active provider > storage/buffer chests > passive provider > cargo landing pads
+
+### Throughput and charger bottleneck
+
+The primary bottleneck in a busy robot network is charger throughput, not robot count.
+At ~80 bots/min per roboport, a dense factory needs **one roboport per ~80 active bots**.
+Symptoms of charger starvation: bots queue floating in the air, delivery times balloon.
+
+**Fix:** Add more roboports within the same logistic area (overlap orange zones — they
+share robots). A cluster of 4 roboports in one spot quadruples local charging throughput
+and is the standard pattern for high-throughput areas (science labs, train stations).
+
+### Bots vs belts
+
+| Use bots when... | Use belts when... |
+|-----------------|------------------|
+| Short-range point-to-point delivery | Long-distance bulk transport |
+| Many different items going many places | Few item types, high sustained throughput |
+| Train station loading/unloading | Items move in one direction continuously |
+| Personal logistics (armor/Spidertron requests) | UPS-critical megabases |
+| Construction and repair | — |
+
+Robots are ideal for assembler input/output because items go many places in small batches.
+Belts are ideal for ore/plate/circuit highways where one item floods one direction.
+
+### Key design tips
+
+- **Active vs passive provider:** Use active provider at machine outputs (empties immediately,
+  prevents machines backing up). Use passive provider only when you want manual control over
+  when items enter the network.
+- **Buffer chests:** Excellent for pre-staging ingredients at a production cluster —
+  request items into buffer chests near machines, then passive-provide locally. Reduces
+  cross-network travel distance for bots.
+- **Negative numbers in the logistic GUI** are not a bug — they mean bots have reserved
+  items in advance. A bot reserves its full carry capacity even if fewer items exist.
+- **Logistics groups** (named sets of requests) are global — the same group name in two
+  different chests uses exactly the same request list. Changes to one update all.
+- **Personal logistics (armor slot):** Once logistic robotics is researched the player can
+  set item requests in their own inventory. Bots will deliver requested items and take
+  away trash automatically when the player is inside a logistic network.
+- **Cargo size research** (worker robot cargo size): increases bot carry capacity from 1 to 4.
+  Fully researching this multiplies bot network throughput 4×. Prioritise this research.
+
+### Space Age additions
+
+- **Cargo landing pad**: places items at the logistic network's disposal; also requests items
+  from space platforms in orbit (two-way logistics between planet and platform)
+- **Rocket silo**: in Space Age, can automatically request items from the logistic network
+  based on platform requests — no manual silo loading needed
+- Personal logistic requests work on space platforms (player requests satisfied by platform inventory)
+
+---
+
+## Fluid System (2.0)
+
+**Wiki:** https://wiki.factorio.com/Fluid_system
+
+### How Pipes Work in 2.0
+
+- **Pressure simulation was removed in 2.0.** A continuous pipeline (not split by pumps) transfers fluid **instantly** with no flow restriction, regardless of distance — as long as the segment is not too long (max ~320×320 tiles / 10×10 chunk area). Pipe length is the only practical constraint.
+- **Maximum segment length:** if a pipeline spans more than ~320×320 tiles without a pump, fluid stops flowing and the pipe overlay turns red. Break long runs with a pump to reset the limit.
+- **Connection throughput limit:** each individual pipe input/output connection has a practical cap of ~4,200 fluid/second (theoretical max 6,000). This is per connection, not per machine — a machine with two output sockets for the same fluid gets ~8,400/s practical throughput.
+- **Underground pipes** still have a maximum gap distance (like underground belts) and only connect in two opposite directions. They can cross other underground pipes without mixing.
+
+### Pumps
+
+- Pumps use electricity to push fluid in one direction and block backflow — they "pressurize" the downstream segment, keeping it as full as possible.
+- Pumps are **not needed for pressure** in 2.0 (pressure is gone). Use pumps for: splitting long pipelines to stay within the segment length limit, preventing backflow, and circuit-controlled fluid switching.
+- Pumps can be disabled by the circuit network, stopping all fluid flow through them — the standard pattern for circuit-controlled fluid routing.
+- **The old advice about placing pumps every N tiles to combat pressure loss is obsolete in 2.0.** This was a 1.x mechanic.
+
+### Fluid Mixing
+
+- A pipe segment can only contain **one fluid type**. If two different fluids are routed into the same segment, the game will delete one of them. This is irreversible — the lower-quantity fluid is destroyed.
+- The game prevents most accidental mixing when placing pipes (it won't let you connect a water pipe to a crude oil pipe directly), but complex layouts can still cause it. Watch for it when sharing pipe infrastructure.
+
+### Storage Tanks & Circuit Control
+
+- Storage tanks behave like large pipes — they connect to adjacent pipes and attempt to equalize fluid levels with the connected network.
+- Tanks can be connected to the **circuit network** to read their fluid level (as a signal) or to receive enable/disable conditions. Use a decider combinator + pump for level-triggered fluid control.
+
 ## Circuits & Automation
 
 ### Circuit Network Basics
-**Fetch:** https://wiki.factorio.com/Circuit_network
-**When to fetch:** Player is new to circuits and asks how to get started.
+**Wiki:** https://wiki.factorio.com/Circuit_network
+**When to fetch:** Player is new to circuits or asks about connecting/reading signals.
 
-### Combinator Logic
-**Fetch:** https://wiki.factorio.com/Arithmetic_combinator and
-https://wiki.factorio.com/Decider_combinator
+The circuit network lets entities communicate via integer signals. Two wire colors exist — **red** and **green** — and each forms a completely separate network. Both can coexist on the same power pole or entity without merging. Signals from a red network and a green network on the same entity are summed together when read.
+
+**Connecting wires:**
+- Click one entity, then another to connect them. Wire length is limited per span (stretches further when routed through poles).
+- Wires can run pole-to-pole across any distance — run wires from device to pole base.
+- Removing a connection: place the same color wire over an existing connection to erase it.
+- Shift-click a pole to remove all its connections (first click removes power, second removes circuit wires).
+- When connecting to a combinator, attach to the correct input or output side — use "Show details" mode to see orientation.
+
+**What entities can connect:**
+Inserters, belts, splitters (2.0.67+), chests, train stops, mining drills, pumpjacks, pumps, offshore pumps, lamps, power switches, storage tanks, roboports, turrets, assembling machines, chemical plants, oil refineries, centrifuges, furnaces (2.0.35+), radars, agricultural towers, programmable speakers, and combinators.
+
+**Signals:** Each signal is a named integer channel — any item, fluid, or virtual signal. Virtual signals include numbers, letters, arrows, planet icons, and 177–241 total options (241 in Space Age). Three special logic signals (Everything, Anything, Each) apply bulk operations.
+
+### Combinators
+**Wiki:** https://wiki.factorio.com/Arithmetic_combinator and https://wiki.factorio.com/Decider_combinator
 **When to fetch:** Player asks about specific combinator setups.
 
-### Common Circuit Recipes
-**Fetch:** https://wiki.factorio.com/Circuit_network_cookbook
-**When to fetch:** Player asks for a specific automation pattern
-(e.g. smart train dispatch, auto-balancing storage, kill-switch for machines).
+**Constant combinator:**
+- Emits up to 20 fixed signals continuously. Acts as an on/off switch (right-click → enable/disable).
+- Cannot distinguish which wire color it outputs to — use two constant combinators if you need red vs green separation.
+- Two slots with the same signal channel sum their values.
+
+**Arithmetic combinator:**
+- Inputs from one side (left/input terminals), outputs from the other (right/output terminals).
+- Supported operations: `+`, `−`, `×`, `÷`, `%` (modulo), `^` (power), `<<` (left shift), `>>` (right shift), `AND`, `OR`, `XOR`.
+- Can use the **Each** signal for both input and output — applies the operation to every non-zero input channel individually and broadcasts all results on the output side.
+- Input and output are separate networks — feeding output back into input creates a feedback loop (e.g., incrementing a counter). Rate of increment = one tick per game update.
+- Can join both red and green networks on the input side; their signals are summed.
+
+**Decider combinator:**
+- Tests a condition (e.g., iron-plate > 1000) and outputs signals only when the condition is true.
+- Since 2.0.7: supports multiple conditions and multiple outputs in a single combinator.
+- Output options: output the **input value** of the matching signal, or output a fixed **1**.
+- "Output input count" mode: when the condition is true, passes through the actual count of the input signal rather than always outputting 1.
+- Special logic signals:
+  - **Everything**: condition is true only if it holds for ALL input signals (universal).
+  - **Anything**: condition is true if it holds for AT LEAST ONE signal (existential).
+  - **Each**: applies condition per-signal; outputs each matching signal.
+- Right-hand side of a comparison can be a signal (not just a constant) — when using Everything/Anything, the comparison signal is implicitly excluded from checking itself.
+
+**Selector combinator (Space Age, 2.0.7+):**
+Six operating modes:
+- **Select input** — sorts input signals by value and outputs one: sort descending (highest), sort ascending (lowest non-zero), or by index position.
+- **Count inputs** — outputs the count of unique non-zero input signals on a chosen output channel.
+- **Random input** — passes through a random input signal every N game ticks (default: every tick).
+- **Stack size** — outputs the stack size of each input item signal. Ignores fluids and virtual signals. Useful for train loading logic: "insert until wagon has N stacks".
+- **Rocket capacity** — outputs how many of each item fit in one rocket cargo section. Useful for automating rocket launches: trigger when buffer holds exactly one rocket's worth. Does not output fluids, virtual signals, or items too heavy for a rocket (atomic bomb, rocket silo).
+- **Quality filter** (Space Age) — passes through only signals whose item quality meets a condition (greater than, less than, equal to, etc. a chosen quality tier). The key tool for quality recycling loops: filter legendary items to keep, route lower tiers back to the recycler.
+- **Quality transfer** (Space Age) — attaches a specific quality grade to a target signal, either directly or by copying the quality from another input signal. Used for quality-aware routing and sorting.
+
+### Common Circuit Patterns
+**Wiki:** https://wiki.factorio.com/Circuit_network_cookbook
+**See also:** https://wiki.factorio.com/Tutorial:Combinator_tutorial
+**When to fetch:** Player asks for a specific automation pattern.
+
+**Smart chest limits (most common beginner pattern):**
+Connect a passive provider chest or storage chest to an inserter. Set the inserter to only operate when the signal for the chest's item is below a threshold — stops filling when full, preventing overflow.
+
+**Train dispatch (station enable/disable):**
+Connect a train stop to a chest or belt reader. Set the stop to disable when item count drops below a threshold — trains only visit when there's cargo to pick up. Combine with train limits (set limit to 1 when enabled, 0 when disabled) to prevent queuing.
+
+**Reactor fuel control:**
+Read the reactor's temperature via circuit. Insert a fuel cell only when temperature falls below ~900°C. Prevents fuel waste when the reactor is already hot. Use a decider combinator to convert temperature to an inserter enable signal.
+
+**Buffer/overflow circuit:**
+Arithmetic combinator computing `current_stock − target_stock` → if result is negative, enable production (inserter on). Keeps a machine running only until a target buffer is reached.
+
+**Clock/timer:**
+Arithmetic combinator in feedback loop: `[clock] + 1 → [clock]`. Decider combinator resets it when clock reaches the desired interval. Output a pulse signal on each reset to trigger periodic actions.
 
 ---
 
 ## Equipment & Vehicles (Space Age Changes)
 
 ### Armor Progression
-**Fetch:** https://wiki.factorio.com/Mech_armor
+**Wiki:** https://wiki.factorio.com/Mech_armor
 **When to fetch:** Player asks about mech armor abilities, unlock requirements,
 or quality grid scaling.
 
@@ -604,7 +1209,7 @@ or quality grid scaling.
   matters a lot here
 
 ### Personal Equipment Changes in 2.0 + Space Age
-**Fetch:** https://wiki.factorio.com/Portable_fusion_reactor and
+**Wiki:** https://wiki.factorio.com/Portable_fusion_reactor and
 https://wiki.factorio.com/Portable_fission_reactor
 **When to fetch:** Player asks about the portable fusion vs fission confusion,
 or power budgets for armor setups.
@@ -637,7 +1242,7 @@ shield Mk2, 2–4× exoskeleton, 4–6× personal laser defense, 1–2× persona
 roboport (swap for more shields in active combat zones)
 
 ### Vehicles (2.0 Changes)
-**Fetch:** https://wiki.factorio.com/Spidertron
+**Wiki:** https://wiki.factorio.com/Spidertron
 **When to fetch:** Player asks about Spidertron recipe, vehicle grids, or
 tank remote control.
 
@@ -655,7 +1260,7 @@ tank remote control.
 
 ## Space Platforms
 
-**Fetch:** https://wiki.factorio.com/Space_platform
+**Wiki:** https://wiki.factorio.com/Space_platform
 **When to fetch:** Player asks about platform design, asteroid processing,
 thruster fuel, defense, or interplanetary logistics.
 
@@ -671,9 +1276,10 @@ a safe environment to learn the mechanics before committing to travel.
   needed anywhere**
 - No robots/roboports, no railway entities, no chests, no burner devices
   on platforms
-- Rockets have a **1-ton payload cap** — foundation (steel + copper) is
-  cheap but heavy. Expect 5–10 rockets of foundation for a full platform.
-  Cargo bays do not add weight, only foundation does
+- Rockets have a **1-ton payload cap** — each foundation tile weighs 0.2 tons; the hub itself weighs 20 tons (pre-placed, not rocketted). Cargo bays do not add weight, only foundation tiles do.
+- Maximum platform size: **200 tiles north** from the center of the hub.
+- If the **hub is destroyed**, the entire platform and all contents are permanently lost. The hub cannot be removed.
+- **Player travel:** a player traveling to a platform occupies the entire rocket — no inventory items allowed except equipped armor/weapons. Ship everything else separately.
 
 ### Shape Matters — Go Narrow
 Platform width determines drag. Narrower platforms move significantly
@@ -759,6 +1365,77 @@ If you have quality components anywhere in your game, use them here first.
 
 ---
 
+## Quality Mechanics
+
+**Wiki:** https://wiki.factorio.com/Quality and https://wiki.factorio.com/Quality_module
+**When to fetch:** Player asks about quality tiers, how to produce quality items, or how to set up quality recycling loops.
+
+**Quality module base chances (at normal module quality):**
+
+| Module tier | Quality chance | Speed penalty |
+|-------------|---------------|---------------|
+| Quality module 1 | +1% | −5% |
+| Quality module 2 | +2% | −5% |
+| Quality module 3 | +2.5% | −5% |
+
+Quality modules themselves can be higher quality — the chance bonus is multiplied by the
+module's quality tier (same MODULE_QUALITY_MULT as other modules: ×1.3 uncommon, ×1.6 rare,
+×1.9 epic, ×2.5 legendary). Example: legendary quality-3 module gives +6.25% per slot.
+
+**Quality tiers:** normal (0) → uncommon (1) → rare (2) → epic (3) → legendary (**5**). Note: legendary is a 2-tier jump over epic — quality attributes scale with tier strength, so legendary items have 2.5× the bonus of uncommon (not 1.25×).
+
+**Unlock requirements:**
+- Uncommon + Rare: Quality module research (needs production science)
+- Epic: Epic quality research (needs utility + space science + agricultural science from Gleba)
+- Legendary: Legendary quality research (needs all science packs including Fulgora, Gleba, Aquilo, and Vulcanus)
+
+A machine with quality modules rolls each cycle; if it succeeds, the output is one tier higher (up to legendary).
+
+**Quality recycling loop (endgame):**
+To push items to legendary: produce quality items in a machine with quality modules →
+recycle non-target-quality outputs in a recycler (also with quality modules) → feed
+recyclates back. The recycler preserves quality tier of outputs, and quality modules
+in the recycler can upgrade products further. The loop is:
+1. Machine with quality modules → produces mix of quality tiers
+2. Filter inserters separate legendary (keep) from lower tiers (recycle)
+3. Recycler with quality modules → recycled outputs can roll higher tier
+4. Loop until legendary fraction accumulates
+
+**Key constraint:** This is item/output intensive — design with buffers. Recyclers
+output 25% of the input item's ingredient value, so the loop is intentionally lossy.
+Only run quality loops for high-value items where legendary stats matter (equipment,
+modules, beacons, key machines). Do not run quality loops on bulk intermediates.
+
+**Machine quality:** Higher-quality machines craft faster (+30%/+60%/+90%/+150%
+speed for uncommon/rare/epic/legendary). Upgrading machines before modules often
+gives better throughput returns. The CLI `--machine-quality` flag models this.
+
+---
+
+## Space Age Science Packs
+
+Key ingredients are listed below. For full recipes and research costs, see each planet's wiki page.
+
+Each Space Age planet unlocks one science pack; these are produced on-planet and
+shipped back to Nauvis for research. Planet order affects which packs are available.
+
+| Science pack | Planet | Key ingredients (approximate) |
+|---|---|---|
+| Metallurgic science pack | Vulcanus | Tungsten plate, foundry product (big drill / carbide), calcite |
+| Electromagnetic science pack | Fulgora | Superconductor, holmium plate, EM plant product |
+| Agricultural science pack | Gleba | Bioflux, nutrients, biochamber product |
+| Cryogenic science pack | Aquilo | Quantum processor, lithium plate, cryogenic plant product |
+| Promethium science pack | Space (Aquilo route) | Promethium shard (collected from asteroids near Aquilo) |
+
+**⚠️ Exact recipes change with patches — always fetch the wiki page or run the CLI
+(`--dataset space-age --item metallurgic-science-pack`) for current accurate values.**
+
+**Logistics note:** Science packs spoil (agricultural pack especially — short timer).
+Gleba packs must be shipped quickly after production; dedicate a fast platform to
+the Gleba→Nauvis route or use a very short hop with full-speed thrusters.
+
+---
+
 ## Where to Find More Guides & Resources
 
 **When to use:** Player asks where to learn more, which YouTubers to watch,
@@ -818,13 +1495,14 @@ major creators did dedicated planet guides at launch.
 
 ---
 
-## Fetch Guidelines
+## Reference Guidelines
 
-- **Always fetch Space Age wiki pages** — newer content, less in training data
-- **Fetch forums/Steam discussions** for city blocks and megabase topics —
-  these are community patterns not covered by the wiki
-- **Don't fetch** for basic mechanics (belts, inserters, furnaces), vanilla
-  recipes, or early-game advice — Claude knows these well
-- **Fetch factorioprints.com** only when player wants an actual blueprint,
-  not for general discussion
-- When fetching, read the page and synthesize — don't quote large blocks
+- **Wiki URLs** in this file are passive references. Open them if the player asks
+  for a detail not covered here or wants to read the full article themselves.
+- **See also** entries (forums, community searches, factorioprints.com) cannot be
+  pre-crawled — surface them to players when the topic comes up.
+- **Cheat sheet** (factoriocheatsheet.com) content is fetchable via the GitHub raw
+  HTML files listed in the section above — do so when the player needs specific
+  build ratios or module tables not embedded here.
+- **Maintenance:** Every 30 days, run the strategy-topics.md wiki maintenance
+  workflow documented in `CLAUDE.md` to re-crawl recently changed pages.

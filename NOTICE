@@ -13,3 +13,10 @@ licensed under the Apache License, Version 2.0:
 
 The source code of this project (cli.py, test_cli.py) is separately licensed
 under the MIT License; see the LICENSE file for details.
+
+The file 10x-factorio-engineer/references/strategy-topics.md contains factual
+information derived from the Factorio Wiki (https://wiki.factorio.com), which is
+licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0
+Unported License (CC BY-NC-SA 3.0):
+
+  https://creativecommons.org/licenses/by-nc-sa/3.0/

@@ -25,3 +25,4 @@ dev/preview.tmp.html
 dist/
 build/
 *.egg-info/
+/.crawl-output
