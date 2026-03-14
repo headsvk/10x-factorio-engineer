@@ -27,10 +27,11 @@ def setUpModule() -> None:
     for ds in ("vanilla", "space-age"):
         data = cli.load_data(ds)
         _DATA[ds] = {
-            "data":          data,
-            "raw_set":       cli.build_raw_set(data),
-            "recipe_idx":    cli.build_recipe_index(data),
-            "resource_info": cli.build_resource_info(data),
+            "data":                data,
+            "raw_set":             cli.build_raw_set(data),
+            "recipe_idx":          cli.build_recipe_index(data),
+            "resource_info":       cli.build_resource_info(data),
+            "machine_module_slots": cli.build_machine_module_slots(data),
         }
 
 
@@ -44,6 +45,7 @@ def _solver(dataset: str = "vanilla", **kwargs) -> cli.Solver:
         furnace_type             = kwargs.get("furnace_type",             "electric"),
         module_configs           = kwargs.get("module_configs",           None),
         beacon_configs           = kwargs.get("beacon_configs",           None),
+        machine_module_slots     = kwargs.get("machine_module_slots",     d["machine_module_slots"]),
         machine_quality          = kwargs.get("machine_quality",          "normal"),
         beacon_quality           = kwargs.get("beacon_quality",           "normal"),
         recipe_overrides         = kwargs.get("recipe_overrides",         None),
@@ -758,19 +760,20 @@ def _solver_new(dataset: str = "vanilla", **kwargs) -> cli.Solver:
     """Convenience factory using the new Solver API."""
     d = _DATA[dataset]
     return cli.Solver(
-        recipe_idx             = kwargs.get("recipe_idx",             d["recipe_idx"]),
-        raw_set                = kwargs.get("raw_set",                d["raw_set"]),
-        assembler_level        = kwargs.get("assembler_level",        3),
-        furnace_type           = kwargs.get("furnace_type",           "electric"),
-        module_configs         = kwargs.get("module_configs",         None),
-        beacon_configs         = kwargs.get("beacon_configs",         None),
-        machine_quality        = kwargs.get("machine_quality",        "normal"),
-        beacon_quality         = kwargs.get("beacon_quality",         "normal"),
-        recipe_overrides       = kwargs.get("recipe_overrides",       None),
+        recipe_idx               = kwargs.get("recipe_idx",               d["recipe_idx"]),
+        raw_set                  = kwargs.get("raw_set",                  d["raw_set"]),
+        assembler_level          = kwargs.get("assembler_level",          3),
+        furnace_type             = kwargs.get("furnace_type",             "electric"),
+        module_configs           = kwargs.get("module_configs",           None),
+        beacon_configs           = kwargs.get("beacon_configs",           None),
+        machine_module_slots     = kwargs.get("machine_module_slots",     d["machine_module_slots"]),
+        machine_quality          = kwargs.get("machine_quality",          "normal"),
+        beacon_quality           = kwargs.get("beacon_quality",           "normal"),
+        recipe_overrides         = kwargs.get("recipe_overrides",         None),
         recipe_machine_overrides = kwargs.get("recipe_machine_overrides", None),
         recipe_module_overrides  = kwargs.get("recipe_module_overrides",  None),
         recipe_beacon_overrides  = kwargs.get("recipe_beacon_overrides",  None),
-        bus_items              = kwargs.get("bus_items",              None),
+        bus_items                = kwargs.get("bus_items",                None),
     )
 
 

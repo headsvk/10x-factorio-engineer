@@ -300,29 +300,7 @@ MODULE_EFFICIENCY_REDUCTION: dict[int, Fraction] = {
     3: Fraction(1, 2),
 }
 
-# Module slots per machine (not stored in dataset -- hardcoded from game data).
-# Machines with 0 slots effectively get no productivity bonus regardless of tier.
-MACHINE_MODULE_SLOTS: dict[str, int] = {
-    # Vanilla ---------------------------------------------------------------
-    "assembling-machine-1":  0,
-    "assembling-machine-2":  2,
-    "assembling-machine-3":  4,
-    "stone-furnace":         0,
-    "steel-furnace":         0,
-    "electric-furnace":      2,
-    "chemical-plant":        3,
-    "oil-refinery":          3,
-    "centrifuge":            2,
-    "rocket-silo":           4,
-    # Space Age -------------------------------------------------------------
-    "cryogenic-plant":       4,
-    "biochamber":            4,
-    "electromagnetic-plant": 5,
-    "foundry":               4,
-    "crusher":               2,
-    "agricultural-tower":    0,
-    "captive-spawner":       0,
-}
+
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +437,27 @@ def build_machine_power_w(data: dict) -> dict[str, int]:
             watts = m.get("energy_usage", 0)
             if key and watts:
                 result[key] = int(watts)
+    return result
+
+
+def build_machine_module_slots(data: dict) -> dict[str, int]:
+    """
+    Return {machine_key: module_slot_count} for all machines in the dataset.
+    Scans: crafting_machines, agricultural_tower, rocket_silo, mining_drills.
+    Machines missing the 'module_slots' key silently default to 0.
+    """
+    result: dict[str, int] = {}
+    sources: list[list] = [
+        data.get("crafting_machines", []),
+        data.get("agricultural_tower", []),
+        data.get("rocket_silo", []),
+        data.get("mining_drills", []),
+    ]
+    for machine_list in sources:
+        for m in machine_list:
+            key = m.get("key", "")
+            if key:
+                result[key] = int(m.get("module_slots", 0))
     return result
 
 
@@ -763,6 +762,7 @@ class Solver:
         furnace_type: str,
         module_configs: dict | None = None,
         beacon_configs: dict | None = None,
+        machine_module_slots: dict | None = None,
         machine_quality: str = "normal",
         beacon_quality: str = "normal",
         recipe_overrides: dict | None = None,
@@ -775,8 +775,9 @@ class Solver:
         self.raw_set         = raw_set
         self.assembler_level = assembler_level
         self.furnace_type    = furnace_type
-        self.module_configs:  dict = module_configs  or {}
-        self.beacon_configs:  dict = beacon_configs  or {}
+        self.module_configs:        dict = module_configs        or {}
+        self.beacon_configs:        dict = beacon_configs        or {}
+        self.machine_module_slots:  dict = machine_module_slots  or {}
         self.machine_quality: str  = machine_quality
         self.beacon_quality:  str  = beacon_quality
         self.recipe_overrides:         dict = recipe_overrides         or {}
@@ -821,7 +822,7 @@ class Solver:
         """
         if not specs:
             return Fraction(0), Fraction(0)
-        slots = MACHINE_MODULE_SLOTS.get(machine_key, 0)
+        slots = self.machine_module_slots.get(machine_key, 0)
         if slots == 0:
             return Fraction(0), Fraction(0)
         total_requested = sum(s["count"] for s in specs)
@@ -1124,6 +1125,10 @@ def compute_miners(
     resource_info: dict,
     miner_type: str,
     machine_power_w: dict | None = None,
+    module_configs: dict | None = None,
+    machine_module_slots: dict | None = None,
+    beacon_configs: dict | None = None,
+    beacon_quality: str = "normal",
 ) -> dict:
     if machine_power_w is None:
         machine_power_w = {}
@@ -1162,8 +1167,44 @@ def compute_miners(
                 "rate_per_min":       round(float(rate), 4),
             }
         else:
-            machine   = drill_key
-            rate_each = (MINER_SPEED[drill_key] / info["mining_time"]) * info["yield"] * 60
+            machine = drill_key
+
+            # Module bonuses (miners allow productivity)
+            module_specs = (module_configs or {}).get(drill_key, [])
+            slots = (machine_module_slots or {}).get(drill_key, 0)
+            speed_bonus = Fraction(0)
+            prod_bonus  = Fraction(0)
+            if module_specs and slots > 0:
+                total_requested = sum(s["count"] for s in module_specs)
+                if total_requested > 0:
+                    scale = Fraction(min(slots, total_requested), total_requested)
+                    for spec in module_specs:
+                        eff_count = Fraction(spec["count"]) * scale
+                        qual_mult = MODULE_QUALITY_MULT[spec["quality"]]
+                        if spec["type"] == "prod":
+                            prod_bonus  += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
+                        elif spec["type"] == "speed":
+                            speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
+
+            # Beacon speed bonus (same diminishing-returns formula as crafting machines)
+            beacon_spec = (beacon_configs or {}).get(drill_key)
+            beacon_speed_bonus = 0.0
+            if beacon_spec and beacon_spec.get("count", 0) > 0:
+                effectivity  = BEACON_EFFECTIVITY[beacon_quality]
+                module_bonus = (
+                    SPEED_MODULE_BONUS[beacon_spec["tier"]]
+                    * MODULE_QUALITY_MULT[beacon_spec["quality"]]
+                )
+                beacon_speed_bonus = (
+                    float(effectivity)
+                    * math.sqrt(beacon_spec["count"])
+                    * BEACON_SLOTS
+                    * float(module_bonus)
+                )
+
+            base_speed    = MINER_SPEED[drill_key] * (Fraction(1) + speed_bonus)
+            eff_speed     = float(base_speed) * (1.0 + beacon_speed_bonus)
+            rate_each     = (Fraction(str(round(eff_speed, 12))) / info["mining_time"]) * info["yield"] * (Fraction(1) + prod_bonus) * 60
             count = rate / rate_each
             entry = {
                 "machine":            machine,
@@ -1171,6 +1212,8 @@ def compute_miners(
                 "machine_count_ceil": math.ceil(count),
                 "rate_per_min":       round(float(rate), 4),
             }
+            if module_specs:
+                entry["module_specs"] = module_specs
             base_w = machine_power_w.get(machine, 0)
             if base_w:
                 entry["power_kw"] = round(float(count * Fraction(base_w, 1000)), 4)
@@ -1242,6 +1285,10 @@ def format_output(
     miners = compute_miners(
         solver.raw_resources, resource_info, args.miner,
         machine_power_w=machine_power_w,
+        module_configs=solver.module_configs or None,
+        machine_module_slots=solver.machine_module_slots or None,
+        beacon_configs=solver.beacon_configs or None,
+        beacon_quality=solver.beacon_quality,
     )
 
     out: dict = {
@@ -1541,13 +1588,15 @@ def main() -> None:
     recipe_idx      = build_recipe_index(data)
     resource_info   = build_resource_info(data)
     fluid_set       = build_fluid_set(data)
-    machine_power_w = build_machine_power_w(data)
+    machine_power_w      = build_machine_power_w(data)
+    machine_module_slots = build_machine_module_slots(data)
 
     solver = Solver(
         recipe_idx, raw_set,
         args.assembler, args.furnace,
         module_configs=module_configs or None,
         beacon_configs=beacon_configs or None,
+        machine_module_slots=machine_module_slots,
         machine_quality=args.machine_quality,
         beacon_quality=args.beacon_quality,
         recipe_overrides=recipe_overrides or None,

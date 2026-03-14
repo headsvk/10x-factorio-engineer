@@ -79,6 +79,15 @@ python assets/cli.py --item processing-unit --rate 10 --modules assembling-machi
 # Assembler-3 with 8× legendary tier-3 beacons
 python assets/cli.py --item electronic-circuit --rate 60 --beacon assembling-machine-3=8:3:legendary
 
+# Space Age holmium plates with big drill + prod modules
+python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big \
+  --modules "big-mining-drill=4:prod:3:normal"
+
+# Electric mining drills with speed modules and beacons
+python assets/cli.py --item iron-plate --rate 100 \
+  --modules "electric-mining-drill=3:speed:3:normal" \
+  --beacon "electric-mining-drill=4:3:normal"
+
 # Space Age holmium plates
 python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
 
@@ -118,7 +127,7 @@ The CLI emits JSON to stdout. Example:
   "raw_resources": { "crude-oil": 487.18, "iron-ore": 120.0 },
   "miners_needed": {
     "crude-oil": { "machine": "pumpjack", "required_yield_pct": 81.2, "rate_per_min": 487.18 },
-    "iron-ore": { "machine": "electric-mining-drill", "machine_count": 4.0, "machine_count_ceil": 4, "rate_per_min": 120.0, "power_kw": 360.0 }
+    "iron-ore": { "machine": "electric-mining-drill", "machine_count": 4.0, "machine_count_ceil": 4, "rate_per_min": 120.0, "power_kw": 360.0, "module_specs": [{"count": 3, "type": "speed", "tier": 3, "quality": "normal"}] }
   },
   "total_power_mw": 10.8525,
   "total_power_mw_ceil": 11.04,
@@ -137,7 +146,7 @@ The CLI emits JSON to stdout. Example:
 |-----|------------------|
 | `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw` |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
-| `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw` |
+| `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw`; `module_specs` present when modules applied to the drill |
 | `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |
 | `total_power_mw_ceil` | Same using ceiled machine counts |
 | `belt` + `belts_needed` | Present when `--belt` is set and item is solid; `belts_needed` = `rate / belt_throughput` |
@@ -198,11 +207,14 @@ working context and update it after every player message.
   "beacon_quality": "normal",         // beacon housing quality (same enum)
 
   // Module/beacon configs — each entry becomes --modules/--beacon MACHINE=... on every CLI call
+  // Valid for both crafting machines AND mining drills (electric-mining-drill, big-mining-drill)
   "module_configs": {
     // e.g. "assembling-machine-3": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]
+    // e.g. "electric-mining-drill": [{"count": 3, "type": "speed", "tier": 3, "quality": "normal"}]
   },
   "beacon_configs": {
     // e.g. "assembling-machine-3": {"count": 8, "tier": 3, "quality": "normal"}
+    // e.g. "electric-mining-drill": {"count": 4, "tier": 3, "quality": "normal"}
   },
 
   // Persisted CLI overrides — applied as flags on every cli.py invocation
@@ -277,8 +289,9 @@ When a player says something like:
 - *"I use blue belts"* → set `preferred_belt: "blue"`.
 - *"I have 2 blocks of iron smelters, 2 red belts each"* → create two `iron-plate` lines, each with `target_rate: 3600` (2 × 1800/min) and labels like `"Iron Smelting Block 1"` / `"Iron Smelting Block 2"`. Multiple lines with the same `item` are valid — one per physical block.
 - *"I use 4 prod-3 modules in all assemblers"* → set `module_configs["assembling-machine-3"] = [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines.
+- *"I use 3 speed-3 modules in my mining drills"* → set `module_configs["electric-mining-drill"] = [{"count": 3, "type": "speed", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines (the drill count in `miners_needed` will reflect the speed bonus).
 - *"I have 8 legendary beacons on each assembler-3"* → set `beacon_configs["assembling-machine-3"] = {"count": 8, "tier": 3, "quality": "normal"}`, re-run CLI for all affected lines.
-- *"I have N red belts of iron plate on the bus"* → add/update `bus_items` entry: `{ "item": "iron-plate", "rate": N × 1800 }`. Belt throughputs: yellow=900, red=1800, blue=2700, turbo=4500 items/min. For new lines that draw iron-plate from the bus, add `--bus-item iron-plate` to the CLI call so `bus_inputs` is populated in the cli_result. If the player says a block has its own supply for an item that's also on the bus, run WITHOUT `--bus-item` for that item — the item appears in `raw_resources` instead and Bus Balance is unaffected.
+- *"I have N red belts of iron plate on the bus"* → add/update `bus_items` entry: `{ "item": "iron-plate", "rate": N × 1800 }`. Belt throughputs: yellow=900, red=1800, blue=2700, turbo=3600 items/min. For new lines that draw iron-plate from the bus, add `--bus-item iron-plate` to the CLI call so `bus_inputs` is populated in the cli_result. If the player says a block has its own supply for an item that's also on the bus, run WITHOUT `--bus-item` for that item — the item appears in `raw_resources` instead and Bus Balance is unaffected.
 - When adding any new line where bus_items exist: apply `--bus-item ITEM` for ingredients the player says come from the bus. Mention the assumption once: *"I'll assume X, Y come from the bus since they're declared as bus items — let me know if any have their own miners/supply."*
 - When a new **production line** is added for a manufactured intermediate (plates, circuits, plastic, etc.), automatically add it to `bus_items` with the line's `effective_rate` as the rate. Exception: science packs and other end-product lines are not added to the bus.
 
