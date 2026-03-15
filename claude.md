@@ -25,8 +25,8 @@ to output a `FACTORY_STATE` for import into the dashboard. The dashboard is a
 published `application/vnd.ant.html` artifact — a single vanilla HTML file with
 no build dependencies. State is encoded as base64 and stored in `window.storage`
 (Anthropic server-side, cross-device) with `localStorage` fallback. An in-artifact
-chat panel is powered by `window.claude.complete()`. A strategy reference
-(`10x-factorio-engineer/references/strategy-topics.md`) is loaded on demand.
+chat panel is powered by `window.claude.complete()`. Strategy references
+in `10x-factorio-engineer/references/` are loaded on demand per topic.
 
 ---
 
@@ -44,7 +44,7 @@ chat panel is powered by `window.claude.complete()`. A strategy reference
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
 | Before spawning a subagent to implement CLI or dashboard changes | Include in the subagent prompt: (1) an instruction to read and follow all maintenance rules in `CLAUDE.md` before finishing, and (2) an explicit end-of-task checklist derived from those rules — e.g. "grep SKILL.md for every new JSON field added to cli.py output and confirm each appears in both the example block and the field table in §2". Subagents do not automatically load `CLAUDE.md`. |
-| Every 30 days | Run the strategy-topics.md wiki maintenance workflow (see below). The MediaWiki RecentChanges API only goes back 30 days — running less frequently means changes fall out of the window undetected. |
+| Every 30 days | Run the wiki maintenance workflow (see below) to update the split reference files in `10x-factorio-engineer/references/`. The MediaWiki RecentChanges API only goes back 30 days — running less frequently means changes fall out of the window undetected. |
 
 The goal is that `claude.md` always accurately describes the codebase.
 
@@ -52,8 +52,8 @@ The goal is that `claude.md` always accurately describes the codebase.
 
 ## Strategy Reference Maintenance (Every 30 Days)
 
-`10x-factorio-engineer/references/strategy-topics.md` embeds facts crawled from the Factorio
-wiki, and `dev/wiki/` holds the full per-page corpus (417 pages, gitignored).
+The split reference files in `10x-factorio-engineer/references/` embed facts crawled from the
+Factorio wiki, and `dev/wiki/` holds the full per-page corpus (417 pages, gitignored).
 The wiki is actively updated — run this workflow monthly to pick up changes.
 
 ### Workflow
@@ -69,7 +69,7 @@ translations (`/zh`, `/ru`, `/de`, etc.) and non-article pages (`Special:`, `Fil
 Our 417-page list is in `dev/wiki_crawl_urls.json`. Check which recently-changed wiki pages
 appear in that list — those are the ones to re-crawl.
 
-Also check `findings.md` for pages embedded in `strategy-topics.md` — if any of those changed,
+Also check which split reference files embed facts from those changed pages — if any of those changed,
 update the embedded summaries too (Step 4).
 
 **Step 3 — Re-crawl changed pages using `dev/wiki.py`:**
@@ -85,8 +85,8 @@ Credentials come from env vars `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`.
 > All pages are returned as "completed" regardless of whether they changed. Use the
 > MediaWiki RecentChanges API (Step 1) to determine what actually changed.
 
-**Step 4 — Update strategy-topics.md for changed embedded pages:**
-Compare newly crawled content against what's embedded in `strategy-topics.md`.
+**Step 4 — Update the relevant split reference file(s) for changed embedded pages:**
+Compare newly crawled content against what's embedded in the split reference files in `10x-factorio-engineer/references/`.
 Update any facts that changed. Focus on **mechanics, strategic constraints, and planning guidance** — not raw stats or recipe ingredients (the CLI provides those on demand). Prioritise: spoilage timers, planet-specific constraints, combat mechanics, circuit patterns, and infrastructure ratios (solar/nuclear/fusion) that the CLI doesn't model.
 
 **Step 5 — Also check for new high-value pages:**
@@ -111,7 +111,7 @@ and run `python dev/wiki.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
 | `10x-factorio-engineer/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
 | `10x-factorio-engineer/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
-| `10x-factorio-engineer/references/strategy-topics.md` | On-demand strategy reference: early-game progression, layouts, trains, megabases, Space Age, power, combat |
+| `10x-factorio-engineer/references/` | Split strategy reference files (11 topic files): early-game, factory-layouts, trains, megabase, planets, space-platforms, power, combat-defense, logistics-circuits, quality, resources |
 | `dev/dashboard.html` | Dashboard source — single vanilla HTML file, no build dependencies |
 | `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
 | `dev/preview.py` | Opens `dev/dashboard.html` in browser with `dev/sample-state.b64` pre-loaded into localStorage; writes `dev/preview.tmp.html` |
@@ -459,9 +459,9 @@ Factorio gameplay assistant. It defines three responsibilities:
 2. **Conversational factory tracking** — parse freeform player updates ("just
    placed 12 electric furnaces on copper"), maintain a structured factory-state
    JSON in context, detect bottlenecks, and suggest next steps.
-3. **Strategy guidance** — load `10x-factorio-engineer/references/strategy-topics.md` on demand
-   to answer questions about layouts, trains, megabases, Space Age planets,
-   power, combat, and more.
+3. **Strategy guidance** — load the relevant file from `10x-factorio-engineer/references/` on demand
+   (see SKILL.md §10 routing table) to answer questions about layouts, trains, megabases,
+   Space Age planets, power, combat, and more.
 
 ### Factory State JSON Schema
 

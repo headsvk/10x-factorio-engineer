@@ -20,7 +20,7 @@ A Factorio factory co-pilot built on two components:
     vanilla-2.0.55.json     # KirkMcDonald dataset — base game
     space-age-2.0.55.json   # KirkMcDonald dataset — Space Age DLC
   references/
-    strategy-topics.md      # On-demand strategy reference
+    *.md                    # Split strategy reference files (11 topics: early-game, factory-layouts, trains, megabase, planets, space-platforms, power, combat-defense, logistics-circuits, quality, resources)
 dev/
   dashboard.html            # Dashboard source — single vanilla HTML, no build deps
   build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html

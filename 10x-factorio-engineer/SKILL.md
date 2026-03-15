@@ -507,34 +507,32 @@ The CLI uses Factorio's internal item IDs. Map common player shorthand:
 When the player asks about anything beyond production math — factory layout
 strategies, train networks, megabase planning, Space Age planet strategies,
 power setups, combat and defense, circuit networks, equipment, or space
-platforms — read `references/strategy-topics.md` and synthesize the
+platforms — read the relevant file from `references/` and synthesize the
 relevant section(s).
 
-**Load on demand only.** The file is large. Don't preload it at session start —
-only read it when a strategy question actually comes up.
+**Load on demand only.** Read only the file(s) relevant to the question.
+Do not preload at session start. Each file is self-contained.
 
-**Topics covered** (read the file when the player asks about any of these):
+**Topic → file routing:**
 
-| Topic | Covered in file |
-|-------|----------------|
-| Early-game progression: science pack milestones, bottlenecks | Yes |
-| Factory layouts: main bus, city blocks, ribbon, spaghetti | Yes |
-| Train networks and signaling | Yes |
-| Megabase planning and UPS optimization | Yes |
-| Blueprints — where to find them, decoding strings | Yes |
-| Space Age: Vulcanus, Fulgora, Gleba, Aquilo strategies | Yes |
-| Space Age science packs (what each planet produces) | Yes |
-| Quality modules, quality tiers, quality recycling loops | Yes |
-| Solar, nuclear, fusion, lightning power | Yes |
-| Combat: biters, demolishers, pentapods, asteroids | Yes |
-| All turret types (vanilla + Space Age) | Yes |
-| Circuit network and combinator logic | Yes |
-| Armor, equipment, vehicles (2.0 changes) | Yes |
-| Space platforms: design, asteroid processing, defense | Yes |
-| Where to find guides, YouTubers, community resources | Yes |
+| Player asks about… | Read this file |
+|--------------------|----------------|
+| Early-game progression, science pack milestones, spaghetti start, blueprints, blueprint strings, factorioprints | `references/early-game.md` |
+| Factory layout: main bus, belts, balancers, inserters, city blocks, spaghetti, ribbon base, hybrid bus→train→city-block | `references/factory-layouts.md` |
+| Train networks, signals, deadlock, schedules, train groups, interrupts, stackers, elevated rails | `references/trains.md` |
+| Megabase planning, SPM targets, UPS optimization, beacons, direct insertion | `references/megabase.md` |
+| Space Age planets: Vulcanus, Fulgora, Gleba, Aquilo, planet order, demolishers, scrap recycling, pentapods, heating, Space Age science packs | `references/planets.md` |
+| Space platforms, asteroids, thruster fuel, platform defense, interplanetary logistics | `references/space-platforms.md` |
+| Power: solar, nuclear, Kovarex, steam, fusion, lightning rods/collectors | `references/power.md` |
+| Combat, defense, turrets (all types), biters, demolishers, pentapods, turret creep, damage types | `references/combat-defense.md` |
+| Logistic robots, roboports, chests, fluid system, circuit network, combinators, equipment, armor, vehicles | `references/logistics-circuits.md` |
+| Quality modules, quality tiers, quality recycling loops, upcycling math | `references/quality.md` |
+| Community guides, YouTube channels, reference tools, wiki, where to learn more | `references/resources.md` |
 
-**How to use it:** Read the section(s) relevant to the question, then synthesize
-a focused answer.
+**Multiple topics in one question:** Read multiple files if the question spans
+topics (e.g. "how do I defend my Gleba factory" → `combat-defense.md` + `planets.md`).
+
+**How to use it:** Read the relevant file(s), then synthesize a focused answer.
 
 ---
 
