@@ -53,7 +53,8 @@ The goal is that `claude.md` always accurately describes the codebase.
 ## Strategy Reference Maintenance (Every 30 Days)
 
 `10x-factorio-engineer/references/strategy-topics.md` embeds facts crawled from the Factorio
-wiki. The wiki is actively updated — run this workflow monthly to pick up changes.
+wiki, and `dev/wiki/` holds the full per-page corpus (417 pages, gitignored).
+The wiki is actively updated — run this workflow monthly to pick up changes.
 
 ### Workflow
 
@@ -64,34 +65,41 @@ https://wiki.factorio.com/api.php?action=query&list=recentchanges&rcnamespace=0&
 This returns all English main-namespace pages edited in the last 30 days. Filter out
 translations (`/zh`, `/ru`, `/de`, etc.) and non-article pages (`Special:`, `File:`, etc.).
 
-**Step 2 — Cross-reference against already-embedded pages:**
-The pages we have content from in strategy-topics.md are listed in `findings.md` under
-"Inventory of all Fetch instructions". Check which recently-changed pages overlap.
+**Step 2 — Cross-reference against our crawled page list:**
+Our 417-page list is in `dev/wiki_crawl_urls.json`. Check which recently-changed wiki pages
+appear in that list — those are the ones to re-crawl.
 
-**Step 3 — Re-crawl changed pages using cf-crawl:**
-For each changed page that overlaps with our embedded content, crawl it with:
+Also check `findings.md` for pages embedded in `strategy-topics.md` — if any of those changed,
+update the embedded summaries too (Step 4).
+
+**Step 3 — Re-crawl changed pages using `dev/wiki.py`:**
 ```bash
-curl -X POST 'https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/browser-rendering/crawl' \
-  -H 'Authorization: Bearer {API_TOKEN}' \
-  -H 'Content-Type: application/json' \
-  -d '{"url": "https://wiki.factorio.com/PAGE", "limit": 1, "render": false, "formats": ["markdown"]}'
+python dev/wiki.py update [--days 30] [--dry-run]
 ```
-Credentials are in `~/.env` as `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
-Use `render: false` for wiki pages (static HTML). Each page = 1 crawl job.
+This automates Steps 1–3: queries RecentChanges, cross-references against
+`wiki_crawl_urls.json`, deletes stale files, and re-crawls via Cloudflare.
+Credentials come from env vars `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`.
 
-**Step 4 — Diff and update strategy-topics.md:**
-Compare the newly crawled content against what's embedded. Update any facts that changed.
-Focus on numbers (stats, ratios, percentages) and mechanics — those are most likely to drift.
+> **Note:** Do NOT use Cloudflare's `modifiedSince` parameter for this — tested and confirmed
+> that the Factorio wiki does not serve `Last-Modified` headers that Cloudflare can use.
+> All pages are returned as "completed" regardless of whether they changed. Use the
+> MediaWiki RecentChanges API (Step 1) to determine what actually changed.
+
+**Step 4 — Update strategy-topics.md for changed embedded pages:**
+Compare newly crawled content against what's embedded in `strategy-topics.md`.
+Update any facts that changed. Focus on **mechanics, strategic constraints, and planning guidance** — not raw stats or recipe ingredients (the CLI provides those on demand). Prioritise: spoilage timers, planet-specific constraints, combat mechanics, circuit patterns, and infrastructure ratios (solar/nuclear/fusion) that the CLI doesn't model.
 
 **Step 5 — Also check for new high-value pages:**
-Filter the full RecentChanges list for pages not yet embedded but relevant to players
-(new buildings, mechanics, Space Age content). Crawl and add as new sections if warranted.
+Filter the full RecentChanges list for pages not yet in `wiki_crawl_urls.json` but relevant
+to players (new buildings, mechanics, Space Age content). Add them to `wiki_crawl_urls.json`
+and run `python dev/wiki.py crawl` to fetch them.
 
 ### Notes
 - The 30-day window is a hard limit of the MediaWiki API — do not skip months
 - `render: false` crawls won't follow links between unrelated pages — crawl each target URL directly
-- `findings.md` in the repo root tracks all crawl history and page inventory
-- Cloudflare paid plan: no daily job limit, 600 req/min REST API
+- `findings.md` in the repo root tracks crawl history
+- Cloudflare paid plan: no daily job limit, 600 req/min REST API; use 30 workers
+- `dev/wiki/` is gitignored — regenerate with `python dev/wiki.py crawl` (~15 min)
 
 ---
 
@@ -103,7 +111,7 @@ Filter the full RecentChanges list for pages not yet embedded but relevant to pl
 | `10x-factorio-engineer/assets/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
 | `10x-factorio-engineer/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
 | `10x-factorio-engineer/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
-| `10x-factorio-engineer/references/strategy-topics.md` | On-demand strategy reference: layouts, trains, megabases, Space Age, power, combat |
+| `10x-factorio-engineer/references/strategy-topics.md` | On-demand strategy reference: early-game progression, layouts, trains, megabases, Space Age, power, combat |
 | `dev/dashboard.html` | Dashboard source — single vanilla HTML file, no build dependencies |
 | `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
 | `dev/preview.py` | Opens `dev/dashboard.html` in browser with `dev/sample-state.b64` pre-loaded into localStorage; writes `dev/preview.tmp.html` |
@@ -111,6 +119,9 @@ Filter the full RecentChanges list for pages not yet embedded but relevant to pl
 | `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
 | `dev/sample-state.json` | Source JSON for the sample state — edit this, then run `python dev/gen_sample_state.py` to rebuild `sample-state.b64` |
 | `dev/gen_sample_state.py` | Encodes `dev/sample-state.json` → `dev/sample-state.b64` (minified JSON → UTF-8 → base64) |
+| `dev/wiki_crawl_urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
+| `dev/wiki.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
+| `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki.py crawl` (~15 min) |
 | `dev/test_cli.py` | `unittest` suite (125 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |

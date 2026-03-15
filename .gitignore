@@ -25,4 +25,6 @@ dev/preview.tmp.html
 dist/
 build/
 *.egg-info/
-/.crawl-output
+
+# Wiki corpus — regeneratable via `python dev/wiki.py crawl` (~30MB, ~15 min)
+dev/wiki/*.md

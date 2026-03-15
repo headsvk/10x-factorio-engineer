@@ -513,10 +513,11 @@ relevant section(s).
 **Load on demand only.** The file is large. Don't preload it at session start —
 only read it when a strategy question actually comes up.
 
-**Topics covered** (fetch the file when the player asks about any of these):
+**Topics covered** (read the file when the player asks about any of these):
 
 | Topic | Covered in file |
 |-------|----------------|
+| Early-game progression: science pack milestones, bottlenecks | Yes |
 | Factory layouts: main bus, city blocks, ribbon, spaghetti | Yes |
 | Train networks and signaling | Yes |
 | Megabase planning and UPS optimization | Yes |
@@ -533,8 +534,7 @@ only read it when a strategy question actually comes up.
 | Where to find guides, YouTubers, community resources | Yes |
 
 **How to use it:** Read the section(s) relevant to the question, then synthesize
-a focused answer. The file also tells you when to fetch external URLs (wiki
-pages, forum threads) for more detail or current blueprints.
+a focused answer.
 
 ---
 
