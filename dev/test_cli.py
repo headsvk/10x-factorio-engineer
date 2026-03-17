@@ -1965,6 +1965,53 @@ class TestPowerConsumption(unittest.TestCase):
         self.assertGreater(entry["power_kw"], 0.0)
         self.assertAlmostEqual(entry["power_kw"], 180.0, places=2)
 
+    def test_miner_efficiency_reduces_power(self):
+        # 1× eff-3-normal in electric-mining-drill (4 slots):
+        # MODULE_EFFICIENCY_REDUCTION[3] = 0.5, qual_mult = 1.0
+        # energy_bonus = -(1 × 0.5 × 1.0) = -0.5
+        # power_factor = 0.5  →  2 drills × 90 kW × 0.5 = 90.0 kW (vs 180.0 baseline)
+        out = _fmt_power("vanilla", "iron-plate", 60,
+                         module_configs={"electric-mining-drill": [_mspec(1, "efficiency", 3)]})
+        entry = out["miners_needed"]["iron-ore"]
+        self.assertIn("power_kw", entry)
+        self.assertAlmostEqual(entry["power_kw"], 90.0, places=2)
+
+    def test_miner_efficiency_quality_scaled(self):
+        # 1× eff-3-legendary: MODULE_EFFICIENCY_REDUCTION[3]=0.5, qual_mult=2.5
+        # energy_bonus = -(1 × 0.5 × 2.5) = -1.25 → clamped to -0.8
+        # power_factor = 0.2  →  2 × 90 × 0.2 = 36.0 kW
+        # 1× eff-3-normal gives 90.0 kW — legendary must be strictly less
+        out_normal = _fmt_power("vanilla", "iron-plate", 60,
+                                module_configs={"electric-mining-drill": [_mspec(1, "efficiency", 3, "normal")]})
+        out_legend = _fmt_power("vanilla", "iron-plate", 60,
+                                module_configs={"electric-mining-drill": [_mspec(1, "efficiency", 3, "legendary")]})
+        entry_n = out_normal["miners_needed"]["iron-ore"]
+        entry_l = out_legend["miners_needed"]["iron-ore"]
+        self.assertLess(entry_l["power_kw"], entry_n["power_kw"])
+        self.assertAlmostEqual(entry_l["power_kw"], 36.0, places=2)
+
+    def test_miner_efficiency_floor_80pct(self):
+        # 4× eff-3-normal: energy_bonus = -(4 × 0.5 × 1.0) = -2.0 → clamped to -0.8
+        # power_factor = 0.2  →  2 × 90 × 0.2 = 36.0 kW (same as legendary above)
+        out = _fmt_power("vanilla", "iron-plate", 60,
+                         module_configs={"electric-mining-drill": [_mspec(4, "efficiency", 3)]})
+        entry = out["miners_needed"]["iron-ore"]
+        self.assertAlmostEqual(entry["power_kw"], 36.0, places=2)
+
+    def test_miner_beacon_power_kw(self):
+        # electric-mining-drill is 3×3 (≤4-tile) → sharing factor = 4
+        # beacon config: 4 beacons, tier 3, normal (480 kW each)
+        # iron-plate @ 60/min → 2 drills; beacons boost speed so count < 2
+        # physical beacons = ceil(count) × 4 / 4 = ceil(count) × 1
+        # beacon_power_kw = ceil(count) × 480
+        out_no_beacon = _fmt_power("vanilla", "iron-plate", 60)
+        out_beacon    = _fmt_power("vanilla", "iron-plate", 60,
+                                   beacon_configs={"electric-mining-drill": _bspec(4, 3)})
+        entry = out_beacon["miners_needed"]["iron-ore"]
+        self.assertIn("beacon_power_kw", entry)
+        self.assertGreater(entry["beacon_power_kw"], 0.0)
+        # total_power_mw must include beacon power — must exceed the no-beacon total
+        self.assertGreater(out_beacon["total_power_mw"], out_no_beacon["total_power_mw"])
 
 
 # ---------------------------------------------------------------------------

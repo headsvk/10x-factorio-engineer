@@ -28,7 +28,7 @@ dev/
   gen_sample_state.py       # Encodes sample-state.json → sample-state.b64
   sample-state.json         # Sample factory state source JSON
   sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
-  test_cli.py               # unittest suite (125 tests, stdlib only)
+  test_cli.py               # unittest suite (132 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite
   artifact-api.md           # Field research doc for claude.ai artifact APIs
 ```
@@ -80,7 +80,7 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 python -m unittest dev.test_cli -v
 ```
 
-125 tests, stdlib only.
+132 tests, stdlib only.
 
 ---
 

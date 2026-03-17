@@ -1176,8 +1176,9 @@ def compute_miners(
             # Module bonuses (miners allow productivity)
             module_specs = (module_configs or {}).get(drill_key, [])
             slots = (machine_module_slots or {}).get(drill_key, 0)
-            speed_bonus = Fraction(0)
-            prod_bonus  = Fraction(0)
+            speed_bonus  = Fraction(0)
+            prod_bonus   = Fraction(0)
+            energy_bonus = Fraction(0)
             if module_specs and slots > 0:
                 total_requested = sum(s["count"] for s in module_specs)
                 if total_requested > 0:
@@ -1186,9 +1187,14 @@ def compute_miners(
                         eff_count = Fraction(spec["count"]) * scale
                         qual_mult = MODULE_QUALITY_MULT[spec["quality"]]
                         if spec["type"] == "prod":
-                            prod_bonus  += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
+                            prod_bonus   += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
+                            energy_bonus += eff_count * MODULE_CONSUMPTION_PENALTY["prod"][spec["tier"]]
                         elif spec["type"] == "speed":
-                            speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
+                            speed_bonus  += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
+                            energy_bonus += eff_count * MODULE_CONSUMPTION_PENALTY["speed"][spec["tier"]]
+                        elif spec["type"] == "efficiency":
+                            energy_bonus -= eff_count * MODULE_EFFICIENCY_REDUCTION[spec["tier"]] * qual_mult
+            energy_bonus = max(energy_bonus, Fraction(-4, 5))
 
             # Beacon speed bonus (same diminishing-returns formula as crafting machines)
             beacon_spec = (beacon_configs or {}).get(drill_key)
@@ -1220,7 +1226,12 @@ def compute_miners(
                 entry["module_specs"] = module_specs
             base_w = machine_power_w.get(machine, 0)
             if base_w:
-                entry["power_kw"] = round(float(count * Fraction(base_w, 1000)), 4)
+                power_factor = Fraction(1) + energy_bonus
+                entry["power_kw"] = round(float(count * Fraction(base_w, 1000) * power_factor), 4)
+            if beacon_spec and beacon_spec.get("count", 0) > 0:
+                sharing  = _beacon_sharing_factor(machine)
+                physical = math.ceil(float(count)) * beacon_spec["count"] / sharing
+                entry["beacon_power_kw"] = round(physical * BEACON_POWER_KW[beacon_quality], 4)
             result[item] = entry
 
     return result
@@ -1327,9 +1338,9 @@ def format_output(
     total_step_pwr      = sum(s["power_kw"] + s["beacon_power_kw"] for s in steps_list)
     total_step_pwr_ceil = sum(s["power_kw_ceil"] + s["beacon_power_kw"] for s in steps_list)
     miner_pwr = sum(
-        v["power_kw"]
+        v.get("power_kw", 0) + v.get("beacon_power_kw", 0)
         for v in miners.values()
-        if isinstance(v, dict) and "power_kw" in v
+        if isinstance(v, dict)
     )
 
     out["production_steps"]    = steps_list

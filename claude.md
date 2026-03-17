@@ -122,7 +122,7 @@ and run `python dev/wiki.py crawl` to fetch them.
 | `dev/wiki_crawl_urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
 | `dev/wiki.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki.py crawl` (~15 min) |
-| `dev/test_cli.py` | `unittest` suite (128 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (132 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -376,7 +376,7 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 128 tests covering:
+`dev/test_cli.py` contains 132 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -402,7 +402,7 @@ python -m unittest dev.test_cli -v
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
 | `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
 | `TestMachinesFlag` | `rate_for_machines` round-trips integer/fractional machine counts; Fraction return type without beacons; prod-module and beacon round-trips; raises on raw resource; assembler level respected |
-| `TestPowerConsumption` | Electric machines have `power_kw > 0`; burner machines give 0; efficiency modules reduce power (quality-scaled); speed/prod penalty not quality-scaled; efficiency floor at −80%; beacon sharing (3×3 = ÷4, 5×5 = ÷2); `total_power_mw` in output; miner `power_kw` present |
+| `TestPowerConsumption` | Electric machines have `power_kw > 0`; burner machines give 0; efficiency modules reduce power (quality-scaled); speed/prod penalty not quality-scaled; efficiency floor at −80%; beacon sharing (3×3 = ÷4, 5×5 = ÷2); `total_power_mw` in output; miner `power_kw` present; miner efficiency reduces power (quality-scaled, −80% floor); miner `beacon_power_kw` emitted and included in `total_power_mw` |
 | `TestProbabilisticOutputs` | `uranium-processing` U-238 output reflects 0.993 probability; U-235 reflects 0.007 probability; `rate_for_machines` returns correct probability-weighted rates for both isotopes; ratio U-235/U-238 machine count ≈ 141× |
 
 ---
