@@ -878,7 +878,8 @@ class Solver:
         result_amount = Fraction(1)
         for res in recipe.get("results", []):
             if res["name"] == item_key:
-                result_amount = Fraction(str(res.get("amount", 1)))
+                prob = Fraction(str(res.get("probability", 1)))
+                result_amount = Fraction(str(res.get("amount", 1))) * prob
                 break
 
         energy_req = Fraction(str(recipe.get("energy_required", "0.5")))
@@ -963,10 +964,12 @@ class Solver:
         new_chain = _chain | {recipe_key}
 
         # Output amount per craft cycle for the requested item
+        # (probability-weighted: effective_amount = amount × probability)
         result_amount = Fraction(1)
         for res in recipe.get("results", []):
             if res["name"] == item_key:
-                result_amount = Fraction(str(res.get("amount", 1)))
+                prob = Fraction(str(res.get("probability", 1)))
+                result_amount = Fraction(str(res.get("amount", 1))) * prob
                 break
 
         energy_req = Fraction(str(recipe.get("energy_required", "0.5")))
@@ -1011,12 +1014,13 @@ class Solver:
                 "beacon_speed_bonus": beacon_speed_bonus,
             }
 
-        # Credit co-products as surplus (productivity applies to them too)
+        # Credit co-products as surplus (probability and productivity both apply)
         for res in recipe.get("results", []):
             co = res["name"]
             if co == item_key:
                 continue
-            co_amt = Fraction(str(res.get("amount", 1)))
+            prob   = Fraction(str(res.get("probability", 1)))
+            co_amt = Fraction(str(res.get("amount", 1))) * prob
             if prod_bonus > 0:
                 co_amt = co_amt * (Fraction(1) + prod_bonus)
             self.surplus[co] += cycles_per_min * co_amt

@@ -1,5 +1,5 @@
 {
-  "save_name": "Sample Factory",
+  "save_name": "Mid-Game Factory",
   "dataset": "vanilla",
   "assembler": 2,
   "furnace": "electric",
@@ -11,81 +11,28 @@
   "machine_overrides": {},
   "preferred_belt": "red",
   "bus_items": [
-    { "item": "iron-plate",          "rate": 7200, "label": "Iron Bus — 4 red belts" },
-    { "item": "copper-plate",        "rate": 3600, "label": "Copper Bus — 2 red belts" },
-    { "item": "electronic-circuit",  "rate": 1800, "label": "Green Circuit Bus — 1 red belt" },
-    { "item": "plastic-bar",         "rate": 2400, "label": "Plastic Bus — ~1.3 red belts" },
-    { "item": "advanced-circuit",    "rate": 300,  "label": "Red Circuit Bus — ~0.17 red belts" }
+    { "item": "copper-plate",       "rate": 10800 },
+    { "item": "iron-plate",         "rate": 7200  },
+    { "item": "steel-plate",        "rate": 1800  },
+    { "item": "stone-brick",        "rate": 1800  },
+    { "item": "plastic-bar",        "rate": 2400  },
+    { "item": "electronic-circuit", "rate": 3600  },
+    { "item": "sulfur",             "rate": 1680  },
+    { "item": "petroleum-gas",      "rate": 18720, "fluid": true },
+    { "item": "sulfuric-acid",      "rate": 12000, "fluid": true }
   ],
-  "targets": {
-    "automation-science-pack": 90,
-    "logistic-science-pack": 90
-  },
+  "targets": {},
   "lines": [
     {
-      "item": "iron-plate",
-      "label": "Iron Smelting Block 1",
-      "target_rate": 3600,
-      "effective_rate": 3600,
-      "actual_machines": { "electric-furnace": 96 },
-      "player_notes": "2 red belts output",
-      "cli_result": {
-        "item": "iron-plate",
-        "rate_per_min": 3600.0,
-        "dataset": "vanilla",
-        "assembler": 2,
-        "furnace": "electric",
-        "miner": "electric",
-        "machine_quality": "normal",
-        "beacon_quality": "normal",
-        "production_steps": [
-          { "recipe": "iron-plate", "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 3600.0, "beacon_speed_bonus": 0.0 }
-        ],
-        "raw_resources": { "iron-ore": 3600.0 },
-        "miners_needed": {
-          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0 }
-        },
-        "belt": "red",
-        "belts_needed": 2.0
-      }
-    },
-    {
-      "item": "iron-plate",
-      "label": "Iron Smelting Block 2",
-      "target_rate": 3600,
-      "effective_rate": 3600,
-      "actual_machines": { "electric-furnace": 96 },
-      "player_notes": "2 red belts output",
-      "cli_result": {
-        "item": "iron-plate",
-        "rate_per_min": 3600.0,
-        "dataset": "vanilla",
-        "assembler": 2,
-        "furnace": "electric",
-        "miner": "electric",
-        "machine_quality": "normal",
-        "beacon_quality": "normal",
-        "production_steps": [
-          { "recipe": "iron-plate", "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 3600.0, "beacon_speed_bonus": 0.0 }
-        ],
-        "raw_resources": { "iron-ore": 3600.0 },
-        "miners_needed": {
-          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0 }
-        },
-        "belt": "red",
-        "belts_needed": 2.0
-      }
-    },
-    {
       "item": "copper-plate",
-      "label": "Copper Smelting Block 1",
-      "target_rate": 3600,
-      "effective_rate": 3600,
-      "actual_machines": { "electric-furnace": 96 },
-      "player_notes": "2 red belts output",
+      "label": "Copper Smelting",
+      "target_rate": 10800,
+      "effective_rate": 10800,
+      "actual_machines": { "electric-furnace": 288 },
+      "player_notes": "6 red belts output",
       "cli_result": {
         "item": "copper-plate",
-        "rate_per_min": 3600.0,
+        "rate_per_min": 10800.0,
         "dataset": "vanilla",
         "assembler": 2,
         "furnace": "electric",
@@ -93,25 +40,116 @@
         "machine_quality": "normal",
         "beacon_quality": "normal",
         "production_steps": [
-          { "recipe": "copper-plate", "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 3600.0, "beacon_speed_bonus": 0.0 }
+          { "recipe": "copper-plate", "machine": "electric-furnace", "machine_count": 288.0, "machine_count_ceil": 288, "rate_per_min": 10800.0, "beacon_speed_bonus": 0.0, "power_kw": 51840.0, "power_kw_ceil": 51840.0, "beacon_power_kw": 0.0 }
         ],
-        "raw_resources": { "copper-ore": 3600.0 },
+        "raw_resources": { "copper-ore": 10800.0 },
         "miners_needed": {
-          "copper-ore": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0 }
+          "copper-ore": { "machine": "electric-mining-drill", "machine_count": 360.0, "machine_count_ceil": 360, "rate_per_min": 10800.0, "power_kw": 32400.0 }
         },
+        "total_power_mw": 84.24,
+        "total_power_mw_ceil": 84.24,
         "belt": "red",
-        "belts_needed": 2.0
+        "belts_needed": 6.0
       }
     },
     {
-      "item": "electronic-circuit",
-      "label": "Green Circuit Line",
+      "item": "iron-plate",
+      "label": "Iron Smelting",
+      "target_rate": 7200,
+      "effective_rate": 7200,
+      "actual_machines": { "electric-furnace": 192 },
+      "player_notes": "4 red belts output",
+      "cli_result": {
+        "item": "iron-plate",
+        "rate_per_min": 7200.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "iron-plate", "machine": "electric-furnace", "machine_count": 192.0, "machine_count_ceil": 192, "rate_per_min": 7200.0, "beacon_speed_bonus": 0.0, "power_kw": 34560.0, "power_kw_ceil": 34560.0, "beacon_power_kw": 0.0 }
+        ],
+        "raw_resources": { "iron-ore": 7200.0 },
+        "miners_needed": {
+          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 240.0, "machine_count_ceil": 240, "rate_per_min": 7200.0, "power_kw": 21600.0 }
+        },
+        "total_power_mw": 56.16,
+        "total_power_mw_ceil": 56.16,
+        "belt": "red",
+        "belts_needed": 4.0
+      }
+    },
+    {
+      "item": "steel-plate",
+      "label": "Steel Block A",
+      "target_rate": 720,
+      "effective_rate": 720,
+      "actual_machines": { "electric-furnace": 192 },
+      "player_notes": "0.4 red belts output",
+      "cli_result": {
+        "item": "steel-plate",
+        "rate_per_min": 720.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "iron-plate",  "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 3600.0, "beacon_speed_bonus": 0.0, "power_kw": 17280.0, "power_kw_ceil": 17280.0, "beacon_power_kw": 0.0 },
+          { "recipe": "steel-plate", "machine": "electric-furnace", "machine_count": 96.0, "machine_count_ceil": 96, "rate_per_min": 720.0,  "beacon_speed_bonus": 0.0, "power_kw": 17280.0, "power_kw_ceil": 17280.0, "beacon_power_kw": 0.0 }
+        ],
+        "raw_resources": { "iron-ore": 3600.0 },
+        "miners_needed": {
+          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0, "power_kw": 10800.0 }
+        },
+        "total_power_mw": 45.36,
+        "total_power_mw_ceil": 45.36,
+        "belt": "red",
+        "belts_needed": 0.4
+      }
+    },
+    {
+      "item": "steel-plate",
+      "label": "Steel Block B",
+      "target_rate": 1080,
+      "effective_rate": 1080,
+      "actual_machines": { "electric-furnace": 288 },
+      "player_notes": "0.6 red belts output",
+      "cli_result": {
+        "item": "steel-plate",
+        "rate_per_min": 1080.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "iron-plate",  "machine": "electric-furnace", "machine_count": 144.0, "machine_count_ceil": 144, "rate_per_min": 5400.0, "beacon_speed_bonus": 0.0, "power_kw": 25920.0, "power_kw_ceil": 25920.0, "beacon_power_kw": 0.0 },
+          { "recipe": "steel-plate", "machine": "electric-furnace", "machine_count": 144.0, "machine_count_ceil": 144, "rate_per_min": 1080.0, "beacon_speed_bonus": 0.0, "power_kw": 25920.0, "power_kw_ceil": 25920.0, "beacon_power_kw": 0.0 }
+        ],
+        "raw_resources": { "iron-ore": 5400.0 },
+        "miners_needed": {
+          "iron-ore": { "machine": "electric-mining-drill", "machine_count": 180.0, "machine_count_ceil": 180, "rate_per_min": 5400.0, "power_kw": 16200.0 }
+        },
+        "total_power_mw": 68.04,
+        "total_power_mw_ceil": 68.04,
+        "belt": "red",
+        "belts_needed": 0.6
+      }
+    },
+    {
+      "item": "stone-brick",
+      "label": "Stone Brick Smelting",
       "target_rate": 1800,
       "effective_rate": 1800,
-      "actual_machines": { "assembling-machine-2": 20 },
-      "player_notes": "1 red belt output, pulling iron and copper from bus",
+      "actual_machines": { "electric-furnace": 48 },
+      "player_notes": "1 red belt output",
       "cli_result": {
-        "item": "electronic-circuit",
+        "item": "stone-brick",
         "rate_per_min": 1800.0,
         "dataset": "vanilla",
         "assembler": 2,
@@ -120,70 +158,16 @@
         "machine_quality": "normal",
         "beacon_quality": "normal",
         "production_steps": [
-          { "recipe": "copper-cable", "machine": "assembling-machine-2", "machine_count": 30.0, "machine_count_ceil": 30, "rate_per_min": 5400.0, "beacon_speed_bonus": 0.0 },
-          { "recipe": "electronic-circuit", "machine": "assembling-machine-2", "machine_count": 20.0, "machine_count_ceil": 20, "rate_per_min": 1800.0, "beacon_speed_bonus": 0.0 }
+          { "recipe": "stone-brick", "machine": "electric-furnace", "machine_count": 48.0, "machine_count_ceil": 48, "rate_per_min": 1800.0, "beacon_speed_bonus": 0.0, "power_kw": 8640.0, "power_kw_ceil": 8640.0, "beacon_power_kw": 0.0 }
         ],
-        "raw_resources": {},
-        "miners_needed": {},
-        "bus_inputs": { "copper-plate": 2700.0, "iron-plate": 1800.0 },
+        "raw_resources": { "stone": 3600.0 },
+        "miners_needed": {
+          "stone": { "machine": "electric-mining-drill", "machine_count": 120.0, "machine_count_ceil": 120, "rate_per_min": 3600.0, "power_kw": 10800.0 }
+        },
+        "total_power_mw": 19.44,
+        "total_power_mw_ceil": 19.44,
         "belt": "red",
-        "belts_needed": 1.0
-      }
-    },
-    {
-      "item": "automation-science-pack",
-      "label": "Red Science Line",
-      "target_rate": 90,
-      "effective_rate": 90,
-      "actual_machines": { "assembling-machine-2": 10 },
-      "player_notes": "10 AM2s, pulling iron and copper from bus",
-      "cli_result": {
-        "item": "automation-science-pack",
-        "rate_per_min": 90.0,
-        "dataset": "vanilla",
-        "assembler": 2,
-        "furnace": "electric",
-        "miner": "electric",
-        "machine_quality": "normal",
-        "beacon_quality": "normal",
-        "production_steps": [
-          { "recipe": "automation-science-pack", "machine": "assembling-machine-2", "machine_count": 10.0, "machine_count_ceil": 10, "rate_per_min": 90.0, "beacon_speed_bonus": 0.0 },
-          { "recipe": "iron-gear-wheel",         "machine": "assembling-machine-2", "machine_count": 1.0,  "machine_count_ceil": 1,  "rate_per_min": 90.0, "beacon_speed_bonus": 0.0 }
-        ],
-        "raw_resources": {},
-        "miners_needed": {},
-        "bus_inputs": { "iron-plate": 180.0, "copper-plate": 90.0 },
-        "belt": "red",
-        "belts_needed": 0.05
-      }
-    },
-    {
-      "item": "logistic-science-pack",
-      "label": "Green Science Line",
-      "target_rate": 90,
-      "effective_rate": 90,
-      "actual_machines": { "assembling-machine-2": 16 },
-      "player_notes": "12 packs + 2 gear + 1 inserter + 1 belt AM2s, pulling iron and green circuits from bus",
-      "cli_result": {
-        "item": "logistic-science-pack",
-        "rate_per_min": 90.0,
-        "dataset": "vanilla",
-        "assembler": 2,
-        "furnace": "electric",
-        "miner": "electric",
-        "machine_quality": "normal",
-        "beacon_quality": "normal",
-        "production_steps": [
-          { "recipe": "iron-gear-wheel",       "machine": "assembling-machine-2", "machine_count": 1.5,  "machine_count_ceil": 2,  "rate_per_min": 135.0, "beacon_speed_bonus": 0.0 },
-          { "recipe": "logistic-science-pack", "machine": "assembling-machine-2", "machine_count": 12.0, "machine_count_ceil": 12, "rate_per_min": 90.0,  "beacon_speed_bonus": 0.0 },
-          { "recipe": "inserter",              "machine": "assembling-machine-2", "machine_count": 1.0,  "machine_count_ceil": 1,  "rate_per_min": 90.0,  "beacon_speed_bonus": 0.0 },
-          { "recipe": "transport-belt",        "machine": "assembling-machine-2", "machine_count": 0.5,  "machine_count_ceil": 1,  "rate_per_min": 90.0,  "beacon_speed_bonus": 0.0 }
-        ],
-        "raw_resources": {},
-        "miners_needed": {},
-        "bus_inputs": { "iron-plate": 405.0, "electronic-circuit": 90.0 },
-        "belt": "red",
-        "belts_needed": 0.05
+        "belts_needed": 2.0
       }
     },
     {
@@ -191,8 +175,8 @@
       "label": "Plastic Line",
       "target_rate": 2400,
       "effective_rate": 2400,
-      "actual_machines": { "chemical-plant": 20, "oil-refinery": 21, "chemical-plant (cracking)": 24 },
-      "player_notes": "own oil supply — 21 refineries + cracking",
+      "actual_machines": { "chemical-plant": 20, "oil-refinery": 21, "chemical-plant (cracking)": 23 },
+      "player_notes": "20 plastic + 21 refineries + cracking, own oil supply",
       "cli_result": {
         "item": "plastic-bar",
         "rate_per_min": 2400.0,
@@ -203,33 +187,38 @@
         "machine_quality": "normal",
         "beacon_quality": "normal",
         "production_steps": [
-          { "recipe": "advanced-oil-processing", "machine": "oil-refinery",     "machine_count": 20.5128, "machine_count_ceil": 21, "rate_per_min": 13538.4615, "beacon_speed_bonus": 0.0 },
-          { "recipe": "light-oil-cracking",      "machine": "chemical-plant",   "machine_count": 17.4359, "machine_count_ceil": 18, "rate_per_min": 10461.5385, "beacon_speed_bonus": 0.0 },
-          { "recipe": "heavy-oil-cracking",      "machine": "chemical-plant",   "machine_count": 5.1282,  "machine_count_ceil": 6,  "rate_per_min": 4615.3846,  "beacon_speed_bonus": 0.0 },
-          { "recipe": "plastic-bar",             "machine": "chemical-plant",   "machine_count": 20.0,    "machine_count_ceil": 20, "rate_per_min": 2400.0,     "beacon_speed_bonus": 0.0 }
+          { "recipe": "advanced-oil-processing", "machine": "oil-refinery",   "machine_count": 20.5128, "machine_count_ceil": 21, "rate_per_min": 13538.4615, "beacon_speed_bonus": 0.0, "power_kw": 8615.3846, "power_kw_ceil": 8820.0,  "beacon_power_kw": 0.0 },
+          { "recipe": "light-oil-cracking",      "machine": "chemical-plant", "machine_count": 17.4359, "machine_count_ceil": 18, "rate_per_min": 10461.5385, "beacon_speed_bonus": 0.0, "power_kw": 3661.5385, "power_kw_ceil": 3780.0,  "beacon_power_kw": 0.0 },
+          { "recipe": "heavy-oil-cracking",      "machine": "chemical-plant", "machine_count": 5.1282,  "machine_count_ceil": 6,  "rate_per_min": 4615.3846,  "beacon_speed_bonus": 0.0, "power_kw": 1076.9231, "power_kw_ceil": 1260.0,  "beacon_power_kw": 0.0 },
+          { "recipe": "plastic-bar",             "machine": "chemical-plant", "machine_count": 20.0,    "machine_count_ceil": 20, "rate_per_min": 2400.0,     "beacon_speed_bonus": 0.0, "power_kw": 4200.0,    "power_kw_ceil": 4200.0,  "beacon_power_kw": 0.0 }
         ],
         "raw_resources": {
           "water":     32615.3846,
           "crude-oil": 24615.3846,
-          "coal":       1200.0
+          "coal":      1200.0
         },
         "miners_needed": {
-          "coal":      { "machine": "electric-mining-drill", "machine_count": 40.0,     "machine_count_ceil": 40, "rate_per_min": 1200.0 },
-          "water":     { "machine": "offshore-pump",         "machine_count": 27.1795,  "machine_count_ceil": 28, "rate_per_min": 32615.3846 },
-          "crude-oil": { "machine": "pumpjack",              "required_yield_pct": 4102.56,                        "rate_per_min": 24615.3846 }
-        }
+          "coal":      { "machine": "electric-mining-drill", "machine_count": 40.0,    "machine_count_ceil": 40, "rate_per_min": 1200.0,    "power_kw": 3600.0 },
+          "water":     { "machine": "offshore-pump",         "machine_count": 27.1795, "machine_count_ceil": 28, "rate_per_min": 32615.3846 },
+          "crude-oil": { "machine": "pumpjack",              "required_yield_pct": 4102.56,                       "rate_per_min": 24615.3846 }
+        },
+        "total_power_mw": 21.1538,
+        "total_power_mw_ceil": 21.66,
+        "belt": "red",
+        "belts_needed": 1.333333
       }
     },
     {
-      "item": "advanced-circuit",
-      "label": "Red Circuit Line",
-      "target_rate": 300,
-      "effective_rate": 300,
-      "actual_machines": { "assembling-machine-2": 47 },
-      "player_notes": "40 AM2s + 7 cable, pulling circuits, plastic, copper from bus",
+      "item": "petroleum-gas",
+      "fluid": true,
+      "label": "Oil Refinery Complex",
+      "target_rate": 18720,
+      "effective_rate": 18720,
+      "actual_machines": { "oil-refinery": 16 },
+      "player_notes": "16 refineries, cracking all heavy and light oil to petroleum gas",
       "cli_result": {
-        "item": "advanced-circuit",
-        "rate_per_min": 300.0,
+        "item": "petroleum-gas",
+        "rate_per_min": 18720.0,
         "dataset": "vanilla",
         "assembler": 2,
         "furnace": "electric",
@@ -237,23 +226,150 @@
         "machine_quality": "normal",
         "beacon_quality": "normal",
         "production_steps": [
-          { "recipe": "copper-cable",     "machine": "assembling-machine-2", "machine_count": 6.6667, "machine_count_ceil": 7,  "rate_per_min": 1200.0, "beacon_speed_bonus": 0.0 },
-          { "recipe": "advanced-circuit", "machine": "assembling-machine-2", "machine_count": 40.0,   "machine_count_ceil": 40, "rate_per_min": 300.0,  "beacon_speed_bonus": 0.0 }
+          { "recipe": "advanced-oil-processing", "machine": "oil-refinery",   "machine_count": 16.0, "machine_count_ceil": 16, "rate_per_min": 10560.0, "beacon_speed_bonus": 0.0, "power_kw": 6720.0, "power_kw_ceil": 6720.0, "beacon_power_kw": 0.0 },
+          { "recipe": "light-oil-cracking",      "machine": "chemical-plant", "machine_count": 13.6, "machine_count_ceil": 14, "rate_per_min": 8160.0,  "beacon_speed_bonus": 0.0, "power_kw": 2856.0, "power_kw_ceil": 2940.0, "beacon_power_kw": 0.0 },
+          { "recipe": "heavy-oil-cracking",      "machine": "chemical-plant", "machine_count": 4.0,  "machine_count_ceil": 4,  "rate_per_min": 3600.0,  "beacon_speed_bonus": 0.0, "power_kw": 840.0,  "power_kw_ceil": 840.0,  "beacon_power_kw": 0.0 }
+        ],
+        "raw_resources": {
+          "water":     25440.0,
+          "crude-oil": 19200.0
+        },
+        "miners_needed": {
+          "water":     { "machine": "offshore-pump", "machine_count": 21.2, "machine_count_ceil": 22, "rate_per_min": 25440.0 },
+          "crude-oil": { "machine": "pumpjack",      "required_yield_pct": 3200.0,                    "rate_per_min": 19200.0 }
+        },
+        "total_power_mw": 10.416,
+        "total_power_mw_ceil": 10.5
+      }
+    },
+    {
+      "item": "uranium-238",
+      "label": "Uranium Processing",
+      "target_rate": 42.8976,
+      "effective_rate": 42.8976,
+      "actual_machines": { "centrifuge": 8 },
+      "co_products": { "uranium-235": 0.3024 },
+      "player_notes": "8 centrifuges with 2× productivity-1 modules; U-235 at 0.7% probability (0.30/min); enough for ~1 reactor. Kovarex enrichment needed to scale U-235 supply.",
+      "cli_result": {
+        "item": "uranium-238",
+        "rate_per_min": 42.8976,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "module_configs": {
+          "centrifuge": [ { "count": 2, "type": "prod", "tier": 1, "quality": "normal" } ]
+        },
+        "production_steps": [
+          { "recipe": "uranium-processing", "machine": "centrifuge", "machine_count": 8.0, "machine_count_ceil": 8, "rate_per_min": 42.8976, "beacon_speed_bonus": 0.0, "power_kw": 5040.0, "power_kw_ceil": 5040.0, "beacon_power_kw": 0.0 }
+        ],
+        "raw_resources": { "uranium-ore": 400.0 },
+        "miners_needed": {
+          "uranium-ore": { "machine": "electric-mining-drill", "machine_count": 26.6667, "machine_count_ceil": 27, "rate_per_min": 400.0, "power_kw": 2400.0 }
+        },
+        "total_power_mw": 7.44,
+        "total_power_mw_ceil": 7.44
+      }
+    },
+    {
+      "item": "electronic-circuit",
+      "label": "Green Circuit Line",
+      "target_rate": 3600,
+      "effective_rate": 3600,
+      "actual_machines": { "assembling-machine-2": 100 },
+      "player_notes": "2 red belts output, pulling iron and copper from bus",
+      "cli_result": {
+        "item": "electronic-circuit",
+        "rate_per_min": 3600.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "copper-cable",      "machine": "assembling-machine-2", "machine_count": 60.0, "machine_count_ceil": 60, "rate_per_min": 10800.0, "beacon_speed_bonus": 0.0, "power_kw": 9000.0, "power_kw_ceil": 9000.0, "beacon_power_kw": 0.0 },
+          { "recipe": "electronic-circuit","machine": "assembling-machine-2", "machine_count": 40.0, "machine_count_ceil": 40, "rate_per_min": 3600.0,  "beacon_speed_bonus": 0.0, "power_kw": 6000.0, "power_kw_ceil": 6000.0, "beacon_power_kw": 0.0 }
         ],
         "raw_resources": {},
         "miners_needed": {},
-        "bus_inputs": { "electronic-circuit": 600.0, "plastic-bar": 600.0, "copper-plate": 600.0 }
+        "total_power_mw": 15.0,
+        "total_power_mw_ceil": 15.0,
+        "bus_inputs": { "copper-plate": 5400.0, "iron-plate": 3600.0 },
+        "belt": "red",
+        "belts_needed": 2.0
+      }
+    },
+    {
+      "item": "sulfur",
+      "label": "Sulfur Line",
+      "target_rate": 1680,
+      "effective_rate": 1680,
+      "actual_machines": { "chemical-plant": 14 },
+      "player_notes": "14 chem plants, pulling petroleum from bus",
+      "cli_result": {
+        "item": "sulfur",
+        "rate_per_min": 1680.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "sulfur", "machine": "chemical-plant", "machine_count": 14.0, "machine_count_ceil": 14, "rate_per_min": 1680.0, "beacon_speed_bonus": 0.0, "power_kw": 2940.0, "power_kw_ceil": 2940.0, "beacon_power_kw": 0.0 }
+        ],
+        "raw_resources": { "water": 25200.0 },
+        "miners_needed": {
+          "water": { "machine": "offshore-pump", "machine_count": 21.0, "machine_count_ceil": 21, "rate_per_min": 25200.0 }
+        },
+        "total_power_mw": 2.94,
+        "total_power_mw_ceil": 2.94,
+        "bus_inputs": { "petroleum-gas": 25200.0 },
+        "belt": "red",
+        "belts_needed": 0.933333
+      }
+    },
+    {
+      "item": "sulfuric-acid",
+      "fluid": true,
+      "label": "Sulfuric Acid Line",
+      "target_rate": 12000,
+      "effective_rate": 12000,
+      "actual_machines": { "chemical-plant": 4 },
+      "player_notes": "4 chem plants, pulling sulfur and iron plate from bus",
+      "cli_result": {
+        "item": "sulfuric-acid",
+        "rate_per_min": 12000.0,
+        "dataset": "vanilla",
+        "assembler": 2,
+        "furnace": "electric",
+        "miner": "electric",
+        "machine_quality": "normal",
+        "beacon_quality": "normal",
+        "production_steps": [
+          { "recipe": "sulfuric-acid", "machine": "chemical-plant", "machine_count": 4.0, "machine_count_ceil": 4, "rate_per_min": 12000.0, "beacon_speed_bonus": 0.0, "power_kw": 840.0, "power_kw_ceil": 840.0, "beacon_power_kw": 0.0 }
+        ],
+        "raw_resources": { "water": 24000.0 },
+        "miners_needed": {
+          "water": { "machine": "offshore-pump", "machine_count": 20.0, "machine_count_ceil": 20, "rate_per_min": 24000.0 }
+        },
+        "total_power_mw": 0.84,
+        "total_power_mw_ceil": 0.84,
+        "bus_inputs": { "sulfur": 1200.0, "iron-plate": 240.0 }
       }
     }
   ],
   "bottlenecks": [],
   "next_steps": [],
   "chat_log": [
-    { "from": "player", "text": "I have 2 blocks of iron smelters producing 2 red belts of plates each" },
-    { "from": "claude", "text": "Logged. Each block: 96 electric furnaces → 3600 iron plates/min (2 red belts). Total: 7200/min, consuming 3600 iron-ore/min per block." },
-    { "from": "player", "text": "1 copper smelting block, 2 red belts" },
-    { "from": "claude", "text": "Logged. 96 electric furnaces → 3600 copper plates/min (2 red belts)." },
-    { "from": "player", "text": "add a line for 1 red belt of green circuits, pulling iron and copper from the bus" },
-    { "from": "claude", "text": "20 Assembler 2s for 1800 green circuits/min (1 red belt). Pulls 1800 iron-plate/min and 2700 copper-plate/min from bus. Bus balance: iron +5400/min surplus, copper +900/min surplus — copper is the tight resource." }
+    { "from": "player", "text": "I have copper smelting producing 6 red belts, and iron at 4 red belts" },
+    { "from": "claude", "text": "Logged. Copper: 288 electric furnaces → 10800/min (6 red belts). Iron: 192 furnaces → 7200/min (4 red belts)." },
+    { "from": "player", "text": "three steel blocks: 0.4 belt, 0.6 belt, and 0.6 belt" },
+    { "from": "claude", "text": "Logged. Steel A (0.4 belt): 96+96 furnaces → 720/min. Steel B+C (0.6 belt each): 144+144 furnaces each → 1080/min. Total steel output: 2880/min (1.6 red belts)." },
+    { "from": "player", "text": "16 refineries in a separate block feeding petroleum bus; plastic has its own 21 refineries" },
+    { "from": "claude", "text": "Logged. Refinery complex: 16 oil-refineries → 10560 petroleum-gas/min on the bus. Plastic line: self-contained — 21 AOP refineries + cracking → 2400 plastic-bars/min, own crude-oil supply. Sulfur line: 14 chem plants → 1680 sulfur/min, pulls from petroleum bus (25200/min). Petroleum bus: 10560 supply vs 25200 demand from sulfur alone — consider expanding." }
   ]
 }

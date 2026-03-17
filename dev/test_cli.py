@@ -1966,5 +1966,54 @@ class TestPowerConsumption(unittest.TestCase):
         self.assertAlmostEqual(entry["power_kw"], 180.0, places=2)
 
 
+
+# ---------------------------------------------------------------------------
+# Probabilistic outputs (uranium-processing)
+# ---------------------------------------------------------------------------
+
+class TestProbabilisticOutputs(unittest.TestCase):
+    """Uranium-processing has U-238 at probability 0.993 and U-235 at 0.007.
+    The solver must multiply result amounts by probability so the two outputs
+    come out at very different rates rather than the same rate."""
+
+    def test_u238_rate_reflects_probability(self):
+        # 8 centrifuges, no modules → base cycles/min = 8 × (60/12) = 40
+        # U-238 output = 40 × 0.993 = 39.72/min
+        d = _DATA["vanilla"]
+        solver = _solver("vanilla")
+        solver.solve("uranium-238", Fraction(39.72))
+        step = solver.steps.get("uranium-processing")
+        assert step is not None
+        self.assertAlmostEqual(float(step["machine_count"]), 8.0, places=3)
+
+    def test_u235_rate_much_lower_than_u238(self):
+        # Same 8 centrifuges → U-235 = 40 × 0.007 = 0.28/min
+        # U-238 would be 40 × 0.993 = 39.72/min — ratio ≈ 141.86×
+        d = _DATA["vanilla"]
+        solver_238 = _solver("vanilla")
+        solver_238.solve("uranium-238", Fraction(1))
+        rate_238 = solver_238.steps["uranium-processing"]["rate_per_min"]
+
+        solver_235 = _solver("vanilla")
+        solver_235.solve("uranium-235", Fraction(1))
+        rate_235 = solver_235.steps["uranium-processing"]["rate_per_min"]
+
+        # rate_per_min for uranium-238 should be 1.0, for uranium-235 also 1.0
+        # but machine_count for U-238 should be far fewer than for U-235
+        mc_238 = float(solver_238.steps["uranium-processing"]["machine_count"])
+        mc_235 = float(solver_235.steps["uranium-processing"]["machine_count"])
+        # To produce 1/min U-238 needs ~1/39.72 machines; U-235 needs ~1/0.28 machines
+        ratio = mc_235 / mc_238
+        self.assertGreater(ratio, 100)   # U-235 needs ~141× more machines
+
+    def test_u235_and_u238_rates_from_machines_flag(self):
+        # --machines 8 with no modules: cycles/min = 8 × (60/12) = 40
+        # U-238 = 40 × 0.993 = 39.72; U-235 = 40 × 0.007 = 0.28
+        for item, expected in [("uranium-238", 39.72), ("uranium-235", 0.28)]:
+            solver = _solver("vanilla")
+            result = solver.rate_for_machines(item, 8)
+            self.assertAlmostEqual(float(result), expected, places=4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

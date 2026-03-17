@@ -182,8 +182,16 @@ font-variant-numeric: tabular-nums; width: 40px; text-align: right; }
 .mini-bar-fill { height: 100%; border-radius: 2px; transition: width .5s; }
 /* ── Bus balance ── */
 .bus-section { margin-bottom: 16px; }
+.bus-group { margin-bottom: 10px; }
+.bus-group:last-child { margin-bottom: 0; }
+.bus-group-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800;
+text-transform: uppercase; letter-spacing: .12em; margin-bottom: 5px;
+padding-left: 10px; }
+.bus-group-label--belt { color: var(--accent); opacity: .7; }
+.bus-group-label--pipe { color: #5b9fd4; opacity: .8; }
 .bus-row { padding: 9px 12px; border-radius: 4px; border: 1px solid var(--border-sub);
 background: var(--bg-card); margin-bottom: 4px; }
+.bus-row--fluid { border-left: 2px solid #3a7ab8; }
 .bus-row:last-child { margin-bottom: 0; }
 .bus-row-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px; }
 .bus-name { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 14px;
@@ -215,11 +223,34 @@ font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
 padding: 10px 16px; cursor: pointer; user-select: none;
 background: var(--bg-card); transition: background .12s; }
 .card-header:hover { background: var(--bg-input); }
-.card-header-left  { display: flex; align-items: center; gap: 8px; }
+.card-header-left  { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card-title-group  { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.card-subtitle     { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600;
+text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); opacity: .7; }
 .card-chevron      { color: var(--text-dim); font-size: 10px; width: 12px; }
 .card-title        { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px;
 letter-spacing: .02em; color: var(--text); }
-.card-header-right { display: flex; align-items: center; gap: 12px; }
+.card-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.rate-num  { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted);
+font-variant-numeric: tabular-nums; }
+.rate-unit { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
+font-variant-numeric: tabular-nums; }
+.item-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600;
+text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
+.power-badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
+opacity: .7; white-space: nowrap; }
+.power-overview { display: flex; align-items: center; justify-content: space-between;
+background: var(--bg-card); border: 1px solid var(--border-sub);
+border-left: 3px solid #c8a840; border-radius: 4px;
+padding: 10px 14px; margin-bottom: 10px; }
+.power-overview-label { font-family: 'Barlow Condensed', sans-serif; font-size: 13px;
+font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+color: #c8a840; }
+.power-overview-values { display: flex; align-items: baseline; gap: 6px; }
+.power-exact { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+color: var(--text); }
+.power-ceil-note { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+color: var(--text-dim); }
 .ext-link { color: var(--text-dim); font-size: 11px; text-decoration: none; line-height: 1; }
 .ext-link:hover { color: var(--text-muted); }
 .card-progress      { height: 4px; background: var(--bg-input); }
@@ -399,6 +430,12 @@ const MACHINE_NAMES = {
 };
 const BELT_COLORS = { yellow:'#d4a817', red:'#c84040', blue:'#4060c8', turbo:'#40c8b8' };
 const BELT_THROUGHPUT = { yellow: 900, red: 1800, blue: 2700, turbo: 3600 };
+const PUMP_THROUGHPUT = { normal: 72000, uncommon: 93600, rare: 115200, epic: 136800, legendary: 180000 };
+const FLUID_ITEM_IDS = new Set([
+'crude-oil','petroleum-gas','light-oil','heavy-oil','water','steam',
+'sulfuric-acid','lubricant','heavy-water','fluorine','ammonia',
+'holmium-solution','calcium-chloride','brine','lava',
+]);
 const SYSTEM_PROMPT = `You are a Factorio factory co-pilot embedded in a dashboard artifact.
 IMPORTANT: If the player reports a factory change, output the COMPLETE updated FACTORY_STATE as a JSON block at the END of your response:
 \`\`\`json
@@ -435,11 +472,37 @@ return ia - ib;
 function esc(s) {
 return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+function fmtN(n) {
+const v = Number.isInteger(n) ? n : +n.toFixed(1);
+return v.toLocaleString('en-US');
+}
 function fmtRB(rate, beltName) {
 const n = +rate;
-const rateStr = (Number.isInteger(n) ? n : +n.toFixed(1)) + '/min';
 const tp = BELT_THROUGHPUT[beltName] ?? 1800;
-return `${rateStr} <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} ${beltName} belt)</span>`;
+return `${fmtN(n)}/min <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} ${beltName} belt)</span>`;
+}
+function fmtFluid(rate) {
+const n = +rate;
+const tp = PUMP_THROUGHPUT[STATE.machine_quality] ?? 72000;
+return `${fmtN(n)}/min <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} pump)</span>`;
+}
+function fmtRateOnly(rate) {
+return fmtN(+rate) + '/min';
+}
+function fmtUnitOnly(rate, beltName) {
+const n = +rate;
+const tp = BELT_THROUGHPUT[beltName] ?? 1800;
+return `${(n/tp).toFixed(2)} ${beltName} belt`;
+}
+function fmtFluidUnitOnly(rate) {
+const n = +rate;
+const tp = PUMP_THROUGHPUT[STATE.machine_quality] ?? 72000;
+return `${(n/tp).toFixed(2)} pump`;
+}
+function fmtPower(kw) {
+if (kw == null || kw === 0) return null;
+if (kw < 1000) return `${+kw.toFixed(1)} kW`;
+return `${+(kw / 1000).toFixed(2)} MW`;
 }
 // ── State ────────────────────────────────────────────────────────────────────
 let STATE = { ...DEFAULT_STATE };
@@ -584,22 +647,29 @@ const busItems = [...new Set([...Object.keys(supply), ...Object.keys(demand)])];
 if (!busItems.length) return '';
 const belt = STATE.preferred_belt;
 const beltTp = BELT_THROUGHPUT[belt] ?? 1800;
-const rows = busItems.map(item => {
+const pumpTp = PUMP_THROUGHPUT[STATE.machine_quality] ?? 72000;
+const renderRow = (item) => {
 const s = supply[item] ?? 0;
 const d = demand[item] ?? 0;
 const net = s - d;
 const usedPct = s > 0 ? Math.min(100, (d / s) * 100) : 100;
-const netBelts = (net / beltTp).toFixed(2);
 const netCol = net >= 0 ? 'var(--ok)' : 'var(--bad)';
 const sign = net >= 0 ? '+' : '';
 const rowLabel = busItemMap[item]?.label ?? label(item);
+const isFluid = !!(busItemMap[item]?.fluid);
+const netDisplay = isFluid
+? `${sign}${(Math.abs(net) / pumpTp).toFixed(2)}`
+: `${sign}${(net / beltTp).toFixed(2)}`;
+const unitTag = isFluid ? 'pump' : `${belt} belt`;
+const metaConsumed = isFluid ? `${fmtFluid(d)} consumed` : `${fmtRB(d, belt)} consumed`;
+const metaSupply   = isFluid ? `${fmtFluid(s)} supply`   : `${fmtRB(s, belt)} supply`;
 return `
-<div class="bus-row">
+<div class="bus-row${isFluid ? ' bus-row--fluid' : ''}">
 <div class="bus-row-header">
 <span class="bus-name">${esc(rowLabel)}</span>
 <div class="bus-net-group">
-<span class="bus-net" style="color:${netCol}">${sign}${netBelts}</span>
-<span class="bus-belt-tag">${belt} belt</span>
+<span class="bus-net" style="color:${netCol}">${netDisplay}</span>
+<span class="bus-belt-tag">${unitTag}</span>
 </div>
 </div>
 <div class="bus-bar-track">
@@ -607,15 +677,28 @@ return `
 <div class="bus-bar-free" style="background:${usedPct>=100?'var(--bad-bg)':usedPct>=80?'var(--warn)':'var(--ok)'}"></div>
 </div>
 <div class="bus-meta">
-<span>${fmtRB(d, belt)} consumed</span>
-<span>${fmtRB(s, belt)} supply</span>
+<span>${metaConsumed}</span>
+<span>${metaSupply}</span>
 </div>
 </div>`;
-}).join('');
+};
+const solids  = busItems.filter(i => !(busItemMap[i]?.fluid));
+const fluids  = busItems.filter(i =>  !!(busItemMap[i]?.fluid));
+const hasBoth = solids.length > 0 && fluids.length > 0;
+const solidGroup = solids.length ? `
+<div class="bus-group">
+${hasBoth ? `<div class="bus-group-label bus-group-label--belt">Belt Bus</div>` : ''}
+${solids.map(renderRow).join('')}
+</div>` : '';
+const fluidGroup = fluids.length ? `
+<div class="bus-group">
+${hasBoth ? `<div class="bus-group-label bus-group-label--pipe">Pipe Network</div>` : ''}
+${fluids.map(renderRow).join('')}
+</div>` : '';
 return `
 <div class="bus-section">
 <div class="section-label">Bus Balance</div>
-${rows}
+${solidGroup}${fluidGroup}
 </div>`;
 }
 function renderTabs() {
@@ -635,11 +718,6 @@ const CIRCUIT_ITEMS     = new Set(['electronic-circuit','advanced-circuit','proc
 const SCIENCE_ITEM_SET  = new Set(SCIENCE_ORDER);
 function renderOverview() {
 const sciSection = renderScience();
-if (!sciSection) return `
-<div class="empty-state">
-<p>No science targets set yet.</p>
-<p>Ask Claude to set targets in the Chat tab.</p>
-</div>`;
 const steps = STATE.next_steps.length ? `
 <div class="next-steps">
 <div class="section-label">Next Steps</div>
@@ -649,7 +727,22 @@ ${STATE.next_steps.map(s => `
 <span>${esc(humanizeText(s))}</span>
 </div>`).join('')}
 </div>` : '';
-return sciSection + steps;
+const totalPowCeilMw = STATE.lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
+const totalPowMw     = STATE.lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
+const powerSection = totalPowCeilMw > 0 ? `
+<div class="power-overview">
+<div class="power-overview-label">⚡ Factory Power</div>
+<div class="power-overview-values">
+<span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
+<span class="power-ceil-note">/ ${fmtPower(totalPowCeilMw * 1000)} (ceil)</span>
+</div>
+</div>` : '';
+if (!sciSection) return powerSection + `
+<div class="empty-state">
+<p>No science targets set yet.</p>
+<p>Ask Claude to set targets in the Chat tab.</p>
+</div>`;
+return powerSection + sciSection + steps;
 }
 function renderLinesTab() {
 if (!STATE.lines.length) return `
@@ -686,21 +779,32 @@ const belt       = line.cli_result?.belt;
 const beltsNeeded = line.cli_result?.belts_needed;
 const raw    = line.cli_result?.raw_resources ?? {};
 const miners = line.cli_result?.miners_needed ?? {};
+const isFluid = !!(line.fluid) || FLUID_ITEM_IDS.has(line.item);
+const fmtRate = (rate, beltName) => isFluid ? fmtFluid(rate) : fmtRB(rate, beltName);
 let body = '';
 if (isOpen) {
 const machineRows = steps.map(s => {
+const stepPow = fmtPower(s.power_kw);
+const beaconPow = s.beacon_power_kw > 0 ? fmtPower(s.beacon_power_kw) : null;
+const powCell = stepPow
+? (beaconPow ? `${stepPow} <span style="color:var(--text-dim)">+${beaconPow} beacon</span>` : stepPow)
+: '—';
 return `<tr>
 <td>${esc(label(s.recipe))}</td>
 <td class="name-col">${esc(machineLabel(s.machine))}</td>
 <td class="r">${s.machine_count_ceil}</td>
-<td class="r">${s.rate_per_min != null ? fmtRB(s.rate_per_min, STATE.preferred_belt) : ''}</td>
+<td class="r">${s.rate_per_min != null ? fmtRate(s.rate_per_min, STATE.preferred_belt) : ''}</td>
+<td class="r" style="color:var(--text-dim)">${powCell}</td>
 </tr>`;
 }).join('');
+const totalPow = line.cli_result?.total_power_mw;
+const totalPowCeil = line.cli_result?.total_power_mw_ceil;
+const totalPowStr = totalPowCeil != null ? fmtPower(totalPowCeil * 1000) : null;
 const machineSection = steps.length ? `
 <div class="card-section">
-<div class="section-label">Machines</div>
+<div class="section-label">Machines${totalPowStr ? ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px">⚡ ${totalPowStr} total (ceil)</span>` : ''}</div>
 <table>
-<thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Rate</th></tr></thead>
+<thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Rate</th><th class="r">Power</th></tr></thead>
 <tbody>${machineRows}</tbody>
 </table>
 </div>` : '';
@@ -710,7 +814,8 @@ const busInputSection = Object.keys(busInputs).length ? `
 <div class="section-label">Bus Inputs</div>
 <div class="chips">${Object.entries(busInputs).map(([r, rate]) => {
 const b = STATE.preferred_belt;
-return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmtRB(rate, b)}</span></span>`;
+const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, b);
+return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
 }).join('')}</div>
 </div>` : '';
 const ownRaw = Object.entries(raw);
@@ -718,9 +823,10 @@ const ownMiners = Object.entries(miners);
 const rawSection = ownRaw.length ? `
 <div class="card-section">
 <div class="section-label">Raw Resources</div>
-<div class="chips">${ownRaw.map(([r, rate]) =>
-`<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmtRB(rate, STATE.preferred_belt)}</span></span>`
-).join('')}</div>
+<div class="chips">${ownRaw.map(([r, rate]) => {
+const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
+return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
+}).join('')}</div>
 </div>` : '';
 const minerSection = ownMiners.length ? `
 <div class="card-section">
@@ -729,22 +835,42 @@ const minerSection = ownMiners.length ? `
 const isYield = info.required_yield_pct != null;
 const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${info.machine_count_ceil}×`;
 const countCl = isYield ? 'var(--warn)' : 'var(--text)';
-return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}</span></span>`;
+const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
+return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ⚡${powStr}` : ''}</span></span>`;
 }).join('')}</div>
 </div>` : '';
+const coProds = Object.entries(line.co_products ?? {});
+const primaryRate = line.effective_rate ?? line.target_rate ?? 0;
+const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, STATE.preferred_belt);
+const outputChips = [
+`<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
+...coProds.map(([r, rate]) => {
+const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
+return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
+})
+].join('');
+const coProductSection = `
+<div class="card-section">
+<div class="section-label">Outputs</div>
+<div class="chips">${outputChips}</div>
+</div>`;
 const noteSection = line.player_notes ? `
 <div class="player-notes">${esc(line.player_notes)}</div>` : '';
-body = `<div class="card-body">${machineSection}${busInputSection}${rawSection}${minerSection}${noteSection}</div>`;
+body = `<div class="card-body">${machineSection}${coProductSection}${busInputSection}${rawSection}${minerSection}${noteSection}</div>`;
 }
 return `
 <div class="line-card ${sc}">
 <div class="card-header ${sc}" data-card="${idx}">
 <div class="card-header-left">
 <span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
+<div class="card-title-group">
 <span class="card-title">${esc(line.label ?? label(line.item))}</span>
+<span class="card-subtitle">${esc(label(line.item))}</span>
+</div>
 </div>
 <div class="card-header-right">
-<span class="rate-text">${fmtRB(actual, belt ?? STATE.preferred_belt)}</span>
+<span class="rate-num">${fmtRateOnly(actual)}</span>
+<span class="rate-unit">${isFluid ? fmtFluidUnitOnly(actual) : fmtUnitOnly(actual, belt ?? STATE.preferred_belt)}</span>
 </div>
 </div>
 ${body}
