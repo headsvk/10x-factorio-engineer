@@ -115,6 +115,7 @@ The CLI emits JSON to stdout. Example:
       "machine_count": 7.5,
       "machine_count_ceil": 8,
       "rate_per_min": 10.0,
+      "inputs": { "electronic-circuit": 100.0, "advanced-circuit": 10.0, "sulfuric-acid": 100.0 },
       "beacon_speed_bonus": 10.0,
       "power_kw": 2812.5,
       "power_kw_ceil": 3000.0,
@@ -141,7 +142,7 @@ The CLI emits JSON to stdout. Example:
 |-----|------------------|
 | `item` + `rate_per_min` | Present in single-target output; the requested item and rate |
 | `targets` | Present in multi-target output (2+ `--item` flags); array of `{item, rate_per_min}` objects instead of top-level `item`/`rate_per_min` |
-| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw` |
+| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `inputs` (ingredient consumption rates in items/min), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw` |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw`; `module_specs` present when modules applied to the drill |
 | `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |

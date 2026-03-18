@@ -990,13 +990,24 @@ class Solver:
         if recipe_key in self.steps:
             self.steps[recipe_key]["rate_per_min"]  += rate
             self.steps[recipe_key]["machine_count"] += machines_needed
+            inputs = self.steps[recipe_key]["inputs"]
+            for ing in recipe.get("ingredients", []):
+                ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
+                inputs[ing["name"]] = inputs.get(ing["name"], Fraction(0)) + ing_rate
+                self.solve(ing["name"], ing_rate, new_chain)
         else:
+            step_inputs: dict[str, Fraction] = {}
+            for ing in recipe.get("ingredients", []):
+                ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
+                step_inputs[ing["name"]] = ing_rate
+                self.solve(ing["name"], ing_rate, new_chain)
             self.steps[recipe_key] = {
                 "recipe":             recipe_key,
                 "machine":            machine_key,
                 "machine_count":      machines_needed,
                 "rate_per_min":       rate,
                 "beacon_speed_bonus": beacon_speed_bonus,
+                "inputs":             step_inputs,
             }
 
         # Credit co-products as surplus (probability and productivity both apply)
@@ -1009,11 +1020,6 @@ class Solver:
             if prod_bonus > 0:
                 co_amt = co_amt * (Fraction(1) + prod_bonus)
             self.surplus[co] += cycles_per_min * co_amt
-
-        # Recurse into ingredients
-        for ing in recipe.get("ingredients", []):
-            ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
-            self.solve(ing["name"], ing_rate, new_chain)
 
     def resolve_oil(self, data: dict) -> None:
         """
@@ -1082,9 +1088,20 @@ class Solver:
             ]
             disp_rate = max(oil_outputs) if oil_outputs else cycles
 
+            oil_inputs: dict[str, Fraction] = {}
+            for ing in rcp.get("ingredients", []):
+                ing_name = ing["name"]
+                oil_inputs[ing_name] = (
+                    oil_inputs.get(ing_name, Fraction(0))
+                    + cycles * Fraction(str(ing.get("amount", 1)))
+                )
+
             if rkey in self.steps:
                 self.steps[rkey]["machine_count"] += machines
                 self.steps[rkey]["rate_per_min"]  += disp_rate
+                step_inp = self.steps[rkey]["inputs"]
+                for k, v in oil_inputs.items():
+                    step_inp[k] = step_inp.get(k, Fraction(0)) + v
             else:
                 self.steps[rkey] = {
                     "recipe":             rkey,
@@ -1092,6 +1109,7 @@ class Solver:
                     "machine_count":      machines,
                     "rate_per_min":       disp_rate,
                     "beacon_speed_bonus": 0.0,
+                    "inputs":             oil_inputs,
                 }
 
             # Push oil-recipe ingredients into raw resources
@@ -1267,6 +1285,10 @@ def format_output(
             "machine_count":      _f(machine_count),
             "machine_count_ceil": math.ceil(machine_count),
             "rate_per_min":       _f(s["rate_per_min"]),
+            "inputs": {
+                k: _f(v)
+                for k, v in sorted(s["inputs"].items(), key=lambda x: -x[1])
+            },
             "beacon_speed_bonus": round(s["beacon_speed_bonus"], 6),
             "power_kw":           round(pwr,      4),
             "power_kw_ceil":      round(pwr_ceil, 4),

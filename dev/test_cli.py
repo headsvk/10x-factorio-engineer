@@ -2013,5 +2013,77 @@ class TestMultiTarget(unittest.TestCase):
         self.assertAlmostEqual(out["bus_inputs"]["iron-plate"], 120.0, places=4)
 
 
+class TestStepInputs(unittest.TestCase):
+    """inputs dict present on every production step, values correct."""
+
+    def _ec_step(self, out: dict) -> dict:
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        return steps["electronic-circuit"]
+
+    def test_inputs_present_on_every_step(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        for step in out["production_steps"]:
+            self.assertIn("inputs", step, f"step {step['recipe']} missing 'inputs'")
+
+    def test_electronic_circuit_inputs(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        ec = self._ec_step(out)
+        self.assertAlmostEqual(ec["inputs"]["iron-plate"],   60.0, places=4)
+        self.assertAlmostEqual(ec["inputs"]["copper-cable"], 180.0, places=4)
+
+    def test_inputs_reduced_by_productivity(self):
+        # 4×prod-3 modules → prod_bonus = 0.4 → cycles_per_min = 60/1.4 ≈ 42.857
+        import argparse
+        d = _DATA["vanilla"]
+        s = _solver_new("vanilla", module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]})
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(d["data"])
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60.0], rate=60.0, machines_list=[],
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
+            beacon_configs=None, recipe_machine_overrides=None,
+            recipe_module_overrides=None, recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        ec = self._ec_step(out)
+        self.assertAlmostEqual(ec["inputs"]["iron-plate"],   300 / 7, places=4)
+        self.assertAlmostEqual(ec["inputs"]["copper-cable"], 900 / 7, places=4)
+
+    def test_bus_item_appears_in_inputs(self):
+        # iron-plate on bus; recursion stops, but it still shows in ec step inputs
+        s = _solver_new("vanilla", bus_items=frozenset(["iron-plate"]))
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        out = _fmt_new("vanilla", "electronic-circuit", 60, solver=s)
+        ec = self._ec_step(out)
+        self.assertIn("iron-plate", ec["inputs"])
+        self.assertAlmostEqual(ec["inputs"]["iron-plate"], 60.0, places=4)
+
+    def test_oil_step_has_inputs(self):
+        # processing-unit chain triggers AOP; crude-oil must appear in its inputs
+        out = _fmt_new("vanilla", "processing-unit", 10)
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        aop = steps.get("advanced-oil-processing")
+        assert aop is not None
+        self.assertIn("crude-oil", aop["inputs"])
+        self.assertGreater(aop["inputs"]["crude-oil"], 0)
+
+    def test_multi_target_inputs_accumulate(self):
+        # ec@60 + asp@30 both use iron-plate; iron-plate step inputs show combined iron-ore draw
+        # iron-plate step is shared; its iron-ore input must reflect both demands
+        out = _fmt_multi("vanilla", [
+            ("electronic-circuit", 60),
+            ("automation-science-pack", 30),
+        ])
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        ip = steps.get("iron-plate")
+        assert ip is not None
+        # Combined iron-ore input must be greater than ec-only demand (60)
+        self.assertGreater(ip["inputs"]["iron-ore"], 60.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
