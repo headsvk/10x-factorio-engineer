@@ -34,30 +34,26 @@ involving machine counts, raw resource rates, belt counts, or throughput.
 ### Invocation pattern
 
 ```bash
-python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [OPTIONS]
+python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [--item <item-id2> (--rate <N2> | --machines <N2>) ...] [OPTIONS]
 ```
 
 | Option | Default | Notes |
 |--------|---------|-------|
-| `--item ITEM-ID` | required | Item ID (e.g. `electronic-circuit`) |
-| `--rate N` | _(one required)_ | Target items/minute |
-| `--machines N` | _(one required)_ | Number of machines for the target item; fractional OK (e.g. `0.5`). The CLI derives the effective rate from machine speed, quality, modules, and beacons. Exactly one of `--rate` or `--machines` must be given. |
+| `--item ITEM-ID` | required, repeatable | Item ID (e.g. `electronic-circuit`). Repeat for multi-target. |
+| `--rate N` | _(one required)_ | Target items/minute. Repeatable; pairs with `--item` by position. |
+| `--machines N` | _(one required)_ | Number of machines for the target item; fractional OK. Repeatable; pairs with `--item` by position. Use `--rate` or `--machines`, not both. |
 | `--assembler 1/2/3` | `3` | Assembling machine tier |
 | `--furnace stone/steel/electric` | `electric` | Furnace type |
 | `--miner electric/big` | `electric` | `big` = Space Age big mining drill |
 | `--dataset vanilla/space-age` | `vanilla` | |
 | `--machine-quality QUALITY` | `normal` | Machine quality: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
 | `--beacon-quality QUALITY` | `normal` | Beacon housing quality (same enum) |
-| `--belt TIER` | _(none)_ | Solid output belt tier: `yellow`/`red`/`blue`/`turbo` |
-| `--pump QUALITY` | _(none)_ | Fluid output pump quality (same enum) |
 | `--modules MACHINE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Module config per machine; repeatable |
 | `--beacon MACHINE=COUNT:TIER:QUALITY` | _(none)_ | Beacon config (speed modules) per machine; repeatable |
 | `--recipe ITEM=RECIPE` | _(none)_ | Override recipe; repeatable |
 | `--recipe-machine RECIPE=MACHINE` | _(none)_ | Override machine for a specific recipe; repeatable |
 | `--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Per-recipe module override; repeatable |
 | `--recipe-beacon RECIPE=COUNT:TIER:QUALITY` | _(none)_ | Per-recipe beacon override; repeatable |
-| `--recipe-belt RECIPE=TIER` | _(none)_ | Per-recipe belt tier override; repeatable |
-| `--recipe-pump RECIPE=QUALITY` | _(none)_ | Per-recipe pump quality override; repeatable |
 | `--bus-item ITEM-ID` | _(none)_ | Treat item as a bus input (raw resource); stops recursion at this item; repeatable |
 
 **Module TYPE values:** `prod` / `speed` / `efficiency` (efficiency stored but not used in machine-count math — no speed/productivity effect)
@@ -93,6 +89,9 @@ python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner 
 
 # Force light-oil path for solid fuel
 python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
+
+# Multi-target: solve for two items at once (shared sub-recipes merged)
+python assets/cli.py --item electronic-circuit --rate 60 --item automation-science-pack --rate 30
 ```
 
 ### Reading the output
@@ -109,8 +108,6 @@ The CLI emits JSON to stdout. Example:
   "miner": "electric",
   "machine_quality": "normal",
   "beacon_quality": "normal",
-  "belt": "blue",
-  "belts_needed": 0.0037,
   "production_steps": [
     {
       "recipe": "processing-unit",
@@ -136,29 +133,25 @@ The CLI emits JSON to stdout. Example:
   "recipe_overrides": { "heavy-oil": "coal-liquefaction" },
   "recipe_machine_overrides": { "iron-gear-wheel": "foundry" },
   "recipe_module_overrides": { "iron-gear-wheel": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}] },
-  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "tier": 3, "quality": "normal"} },
-  "recipe_belt_overrides": { "iron-gear-wheel": "red" },
-  "recipe_pump_overrides": { "sulfuric-acid": "legendary" }
+  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "tier": 3, "quality": "normal"} }
 }
 ```
 
 | Key | What it tells you |
 |-----|------------------|
+| `item` + `rate_per_min` | Present in single-target output; the requested item and rate |
+| `targets` | Present in multi-target output (2+ `--item` flags); array of `{item, rate_per_min}` objects instead of top-level `item`/`rate_per_min` |
 | `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw` |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw`; `module_specs` present when modules applied to the drill |
 | `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |
 | `total_power_mw_ceil` | Same using ceiled machine counts |
-| `belt` + `belts_needed` | Present when `--belt` is set and item is solid; `belts_needed` = `rate / belt_throughput` |
-| `pump` + `pumps_needed` | Present when `--pump` is set and item is a fluid |
 | `module_configs` | Present when `--modules` was passed; module specs per machine |
 | `beacon_configs` | Present when `--beacon` was passed; beacon spec per machine |
 | `recipe_overrides` | Present when `--recipe` was passed |
 | `recipe_machine_overrides` | Present when `--recipe-machine` was passed |
 | `recipe_module_overrides` | Present when `--recipe-modules` was passed |
 | `recipe_beacon_overrides` | Present when `--recipe-beacon` was passed |
-| `recipe_belt_overrides` | Present when `--recipe-belt` was passed |
-| `recipe_pump_overrides` | Present when `--recipe-pump` was passed |
 | `bus_inputs` | Present when `--bus-item` was passed; `{item: rate_per_min}` for items sourced from the bus (separate from `raw_resources`, which contains only true raws like ores) |
 
 Notes:

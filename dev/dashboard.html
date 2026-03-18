@@ -1201,6 +1201,10 @@ document.getElementById('import-apply').addEventListener('click', () => {
   await checkStorage();
   const saved = await loadState();
   if (saved) STATE = saved;
+  const params = new URLSearchParams(location.search);
+  const tabParam = params.get('tab');
+  if (tabParam && ['overview','lines','issues','chat'].includes(tabParam)) activeTab = tabParam;
+  if (params.get('expand') === 'all') expandedCards = new Set(STATE.lines.map((_, i) => i));
   render();
 })();
 </script>

@@ -4,22 +4,19 @@ Factorio Production Calculator
 
 Usage:
     python cli.py --item <item-id> (--rate <N> | --machines <N>)
+                  [--item <item-id2> (--rate <N2> | --machines <N2>) ...]
                   [--assembler 1|2|3]
                   [--furnace stone|steel|electric]
                   [--miner electric|big]
                   [--dataset vanilla|space-age]
                   [--machine-quality QUALITY]
                   [--beacon-quality QUALITY]
-                  [--belt yellow|red|blue|turbo]
-                  [--pump QUALITY]
                   [--modules MACHINE=COUNT:TYPE:TIER:QUALITY]   # repeatable
                   [--beacon MACHINE=COUNT:TIER:QUALITY]         # repeatable
                   [--recipe ITEM=RECIPE]                        # repeatable
                   [--recipe-machine RECIPE=MACHINE]             # repeatable
                   [--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY]  # repeatable
                   [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
-                  [--recipe-belt RECIPE=BELT]                   # repeatable
-                  [--recipe-pump RECIPE=QUALITY]                # repeatable
                   [--bus-item ITEM-ID]                          # repeatable
 
 Auto-loads factorio-prefs.json from the current directory if present.
@@ -29,7 +26,6 @@ Outputs clean JSON to stdout:
   - production_steps: machine type + count per recipe in the dependency tree
   - raw_resources:    mining / pumping rates per minute (no recipe)
   - miners_needed:    drill / pumpjack / offshore-pump counts per raw resource
-  - belts_for_output: yellow / red / blue (/ turbo) belt counts for target output
 
 Solver notes
 ------------
@@ -81,17 +77,6 @@ DATA_URLS = {
     )
     for k, v in DATA_FILES.items()
 }
-
-# Belt throughput: items / minute per full belt (both lanes combined)
-# turbo is Space Age only — validated in parse_args / main.
-BELT_THROUGHPUT: dict[str, int] = {
-    "yellow": 900,     # transport-belt          15/s
-    "red":    1800,    # fast-transport-belt      30/s
-    "blue":   2700,    # express-transport-belt   45/s
-    "turbo":  3600,    # turbo-transport-belt     60/s
-}
-BELT_TIERS_VANILLA    = frozenset(["yellow", "red", "blue"])
-BELT_TIERS_SPACE_AGE  = frozenset(["yellow", "red", "blue", "turbo"])
 
 # Miner / extractor speeds (game constants -- not stored in data files)
 MINER_SPEED: dict[str, Fraction] = {
@@ -1249,14 +1234,13 @@ def format_output(
     args: argparse.Namespace,
     solver: "Solver",
     resource_info: dict,
-    fluid_set: frozenset | None = None,
     machine_power_w: dict | None = None,
 ) -> dict:
     """
     Assemble the final JSON output dict from solver results and CLI args.
 
-    Belt output is included only when args.belt is set and the item is solid.
-    Pump output is included only when args.pump is set and the item is a fluid.
+    Single-target output: top-level item + rate_per_min fields.
+    Multi-target output: top-level targets array instead.
     Power fields are included when machine_power_w is provided.
     """
     if machine_power_w is None:
@@ -1306,16 +1290,31 @@ def format_output(
         beacon_quality=solver.beacon_quality,
     )
 
-    out: dict = {
-        "item":            args.item,
-        "rate_per_min":    args.rate,
-        "dataset":         args.dataset,
-        "assembler":       args.assembler,
-        "furnace":         args.furnace,
-        "miner":           args.miner,
-        "machine_quality": args.machine_quality,
-        "beacon_quality":  args.beacon_quality,
-    }
+    is_multi = len(args.items) > 1
+    if is_multi:
+        out: dict = {
+            "targets": [
+                {"item": itm, "rate_per_min": rate}
+                for itm, rate in zip(args.items, args.rates)
+            ],
+            "dataset":         args.dataset,
+            "assembler":       args.assembler,
+            "furnace":         args.furnace,
+            "miner":           args.miner,
+            "machine_quality": args.machine_quality,
+            "beacon_quality":  args.beacon_quality,
+        }
+    else:
+        out = {
+            "item":            args.item,
+            "rate_per_min":    args.rate,
+            "dataset":         args.dataset,
+            "assembler":       args.assembler,
+            "furnace":         args.furnace,
+            "miner":           args.miner,
+            "machine_quality": args.machine_quality,
+            "beacon_quality":  args.beacon_quality,
+        }
 
     # Echo non-empty configs
     if getattr(args, "module_configs", None):
@@ -1354,19 +1353,6 @@ def format_output(
             k: _f(v)
             for k, v in sorted(solver.bus_inputs.items(), key=lambda x: -x[1])
         }
-
-    # Belt / pump output (solid vs fluid item distinction)
-    is_fluid = fluid_set is not None and args.item in fluid_set
-    belt = getattr(args, "belt", None)
-    pump = getattr(args, "pump", None)
-
-    if belt and not is_fluid:
-        out["belt"]         = belt
-        out["belts_needed"] = round(float(Fraction(str(args.rate)) / BELT_THROUGHPUT[belt]), 6)
-
-    if pump and is_fluid:
-        out["pump"]         = pump
-        out["pumps_needed"] = round(args.rate / PUMP_THROUGHPUT[pump], 8)
 
     return out
 
@@ -1430,16 +1416,17 @@ Examples:
       --machine-quality legendary
 """,
     )
-    p.add_argument("--item",     required=True,
-                   help="Item ID (e.g. electronic-circuit).")
-    p.add_argument("--rate",     required=False, default=None, type=float,
-                   help="Target production rate in items / minute.")
-    p.add_argument("--machines", required=False, default=None, type=float,
+    p.add_argument("--item",
+                   action="append", dest="items", default=[],
+                   help="Item ID (e.g. electronic-circuit). Repeatable for multi-target.")
+    p.add_argument("--rate",
+                   action="append", dest="rates", default=[], type=float,
+                   help="Target production rate in items / minute. Repeatable; pairs with --item by position.")
+    p.add_argument("--machines",
+                   action="append", dest="machines_list", default=[], type=float,
                    help=(
-                       "Number of machines for the target item (fractional ok). "
-                       "The CLI derives --rate from this value using the item's "
-                       "recipe, machine speed, and any --modules / --beacon config. "
-                       "Exactly one of --rate or --machines must be supplied."
+                       "Number of machines for the target item (fractional ok). Repeatable; "
+                       "pairs with --item by position. Use --rate or --machines, not both."
                    ))
     p.add_argument("--assembler", default=3, type=int, choices=[1, 2, 3],
                    help="Assembling machine level (default: 3).")
@@ -1456,12 +1443,6 @@ Examples:
     p.add_argument("--beacon-quality", default="normal",
                    choices=list(QUALITY_NAMES), dest="beacon_quality",
                    help="Quality tier of beacons (default: normal).")
-    p.add_argument("--belt", default=None,
-                   choices=list(BELT_THROUGHPUT.keys()),
-                   help="Show belt output for this tier (e.g. blue).")
-    p.add_argument("--pump", default=None,
-                   choices=list(QUALITY_NAMES),
-                   help="Show pump output for this quality (e.g. legendary).")
     p.add_argument(
         "--modules",
         action="append", default=[],
@@ -1512,20 +1493,6 @@ Examples:
         help="Per-recipe beacon override. Repeatable.",
     )
     p.add_argument(
-        "--recipe-belt",
-        action="append", default=[],
-        metavar="RECIPE=BELT",
-        dest="recipe_belt",
-        help="Per-recipe belt tier override (for display only). Repeatable.",
-    )
-    p.add_argument(
-        "--recipe-pump",
-        action="append", default=[],
-        metavar="RECIPE=QUALITY",
-        dest="recipe_pump",
-        help="Per-recipe pump quality override (for display only). Repeatable.",
-    )
-    p.add_argument(
         "--bus-item",
         action="append", default=[],
         metavar="ITEM-ID",
@@ -1540,11 +1507,31 @@ Examples:
         p.set_defaults(**{
             k: v for k, v in prefs.items()
             if k in {"dataset", "assembler", "furnace", "miner",
-                     "machine_quality", "beacon_quality", "belt", "pump"}
+                     "machine_quality", "beacon_quality"}
         })
     args = p.parse_args()
-    if (args.rate is None) == (args.machines is None):
+    if not args.items:
+        p.error("At least one --item must be provided.")
+    has_rate     = len(args.rates) > 0
+    has_machines = len(args.machines_list) > 0
+    if has_rate and has_machines:
+        p.error("Cannot mix --rate and --machines; use one mode across all targets.")
+    if not has_rate and not has_machines:
         p.error("Exactly one of --rate or --machines must be provided.")
+    n = len(args.items)
+    if has_rate and len(args.rates) != n:
+        p.error(
+            f"Got {n} --item(s) but {len(args.rates)} --rate(s); "
+            "each --item needs a matching --rate."
+        )
+    if has_machines and len(args.machines_list) != n:
+        p.error(
+            f"Got {n} --item(s) but {len(args.machines_list)} --machines value(s); "
+            "each --item needs a matching --machines."
+        )
+    # Backwards-compat aliases used by single-target paths
+    args.item = args.items[0]
+    args.rate = args.rates[0] if has_rate else None
     return args
 
 
@@ -1586,23 +1573,12 @@ def main() -> None:
         k, v = _parse_kv(raw, "--recipe-beacon")
         recipe_beacon_overrides[k] = _parse_beacon_spec(v, "--recipe-beacon")
 
-    recipe_belt_overrides: dict[str, str] = {}
-    for raw in args.recipe_belt:
-        k, v = _parse_kv(raw, "--recipe-belt")
-        recipe_belt_overrides[k] = v
-
-    recipe_pump_overrides: dict[str, str] = {}
-    for raw in args.recipe_pump:
-        k, v = _parse_kv(raw, "--recipe-pump")
-        recipe_pump_overrides[k] = v
-
     bus_items: frozenset = frozenset(args.bus_item)
 
     data            = load_data(args.dataset)
     raw_set         = build_raw_set(data)
     recipe_idx      = build_recipe_index(data)
     resource_info   = build_resource_info(data)
-    fluid_set       = build_fluid_set(data)
     machine_power_w      = build_machine_power_w(data)
     machine_module_slots = build_machine_module_slots(data)
 
@@ -1621,13 +1597,23 @@ def main() -> None:
         bus_items=bus_items or None,
     )
 
-    if args.machines is not None:
-        rate = solver.rate_for_machines(args.item, args.machines)
-        args.rate = float(rate)
-    else:
-        rate = Fraction(str(args.rate))
-    solver.solve(args.item, rate)
+    targets: list[tuple[str, Fraction]] = []
+    has_machines = len(args.machines_list) > 0
+    for i, item in enumerate(args.items):
+        if has_machines:
+            rate = solver.rate_for_machines(item, args.machines_list[i])
+        else:
+            rate = Fraction(str(args.rates[i]))
+        targets.append((item, rate))
+
+    for item, rate in targets:
+        solver.solve(item, rate)
     solver.resolve_oil(data)
+
+    if len(targets) == 1:
+        args.rate = float(targets[0][1])
+    else:
+        args.rates = [float(r) for (_, r) in targets]
 
     # Attach parsed configs to args so format_output can echo them
     args.module_configs           = module_configs or None
@@ -1635,12 +1621,10 @@ def main() -> None:
     args.recipe_machine_overrides = recipe_machine_overrides or None
     args.recipe_module_overrides  = recipe_module_overrides  or None
     args.recipe_beacon_overrides  = recipe_beacon_overrides  or None
-    args.recipe_belt_overrides    = recipe_belt_overrides    or None
-    args.recipe_pump_overrides    = recipe_pump_overrides    or None
 
     print(json.dumps(format_output(
         args, solver, resource_info,
-        fluid_set=fluid_set, machine_power_w=machine_power_w,
+        machine_power_w=machine_power_w,
     ), indent=2))
 
 

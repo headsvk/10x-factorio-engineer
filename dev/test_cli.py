@@ -213,20 +213,15 @@ class TestRecipeOverride(unittest.TestCase):
         s = _solver(recipe_overrides=overrides)
         s.solve("solid-fuel", Fraction(10))
         s.resolve_oil(_DATA["vanilla"]["data"])
-        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
-
         args = argparse.Namespace(
-            item="solid-fuel", rate=10, dataset="vanilla",
-            assembler=3, furnace="electric", miner="electric",
+            items=["solid-fuel"], item="solid-fuel", rates=[10], rate=10,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
-            recipe_beacon_overrides=None, recipe_belt_overrides=None,
-            recipe_pump_overrides=None,
+            recipe_beacon_overrides=None,
         )
-        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
-                                fluid_set=fluid_set)
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"])
         self.assertEqual(out["recipe_overrides"], overrides)
 
 
@@ -686,20 +681,6 @@ class TestNutrientsRecipes(unittest.TestCase):
 # Turbo belt (Space Age)
 # ---------------------------------------------------------------------------
 
-class TestSpaceAgeTurboBelt(unittest.TestCase):
-    """Space Age includes a 'turbo' belt tier (3600/min); vanilla does not."""
-
-    def test_turbo_belt_in_space_age(self):
-        out = _fmt_new("space-age", "iron-plate", 60, belt="turbo")
-        self.assertEqual(out["belt"], "turbo")
-        self.assertAlmostEqual(out["belts_needed"], 60 / 3600, places=6)
-
-    def test_blue_belt_in_vanilla(self):
-        out = _fmt_new("vanilla", "iron-plate", 60, belt="blue")
-        self.assertEqual(out["belt"], "blue")
-        self.assertAlmostEqual(out["belts_needed"], 60 / 2700, places=6)
-
-
 # ---------------------------------------------------------------------------
 # Prefs file (factorio-prefs.json)
 # ---------------------------------------------------------------------------
@@ -782,8 +763,6 @@ def _fmt_new(
     item: str,
     rate: float,
     *,
-    belt: str | None = None,
-    pump: str | None = None,
     solver: "cli.Solver | None" = None,
 ) -> dict:
     """
@@ -798,18 +777,15 @@ def _fmt_new(
         s.resolve_oil(d["data"])
     else:
         s = solver
-    fluid_set = cli.build_fluid_set(d["data"])
     args = argparse.Namespace(
-        item=item, rate=rate, dataset=dataset,
-        assembler=3, furnace="electric", miner="electric",
+        items=[item], item=item, rates=[rate], rate=rate,
+        dataset=dataset, assembler=3, furnace="electric", miner="electric",
         machine_quality="normal", beacon_quality="normal",
-        belt=belt, pump=pump,
         module_configs=None, beacon_configs=None,
         recipe_machine_overrides=None, recipe_module_overrides=None,
         recipe_beacon_overrides=None,
-        recipe_belt_overrides=None, recipe_pump_overrides=None,
     )
-    return cli.format_output(args, s, d["resource_info"], fluid_set=fluid_set)
+    return cli.format_output(args, s, d["resource_info"])
 
 
 # ---------------------------------------------------------------------------
@@ -1021,21 +997,18 @@ class TestModuleConfig(unittest.TestCase):
         s = _solver_new(recipe_module_overrides=overrides)
         s.solve("electronic-circuit", Fraction(60))
         s.resolve_oil(_DATA["vanilla"]["data"])
-        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
 
         args = argparse.Namespace(
-            item="electronic-circuit", rate=60, dataset="vanilla",
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60], rate=60, dataset="vanilla",
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None,
             recipe_module_overrides=overrides,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
-        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
-                                fluid_set=fluid_set)
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"])
         self.assertEqual(out["recipe_module_overrides"], overrides)
 
 
@@ -1290,107 +1263,6 @@ class TestMachineQuality(unittest.TestCase):
 # Belt output  (--belt TIER)
 # ---------------------------------------------------------------------------
 
-class TestBeltOutput(unittest.TestCase):
-
-    def test_belt_produces_single_fields(self):
-        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="blue")
-        self.assertIn("belt", out)
-        self.assertIn("belts_needed", out)
-        self.assertNotIn("belts_for_output", out)
-
-    def test_belt_echoes_tier(self):
-        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="blue")
-        self.assertEqual(out["belt"], "blue")
-
-    def test_belt_blue_correct_value(self):
-        # blue belt: 2700/min  →  60/2700 = 1/45
-        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="blue")
-        self.assertAlmostEqual(out["belts_needed"], 60 / 2700, places=6)
-
-    def test_belt_yellow_correct_value(self):
-        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="yellow")
-        self.assertAlmostEqual(out["belts_needed"], 60 / 900, places=6)
-
-    def test_belt_red_correct_value(self):
-        out = _fmt_new("vanilla", "electronic-circuit", 60, belt="red")
-        self.assertAlmostEqual(out["belts_needed"], 60 / 1800, places=6)
-
-    def test_belt_turbo_space_age(self):
-        out = _fmt_new("space-age", "electronic-circuit", 60, belt="turbo")
-        self.assertAlmostEqual(out["belts_needed"], 60 / 3600, places=6)
-
-    def test_no_belt_flag_omits_fields(self):
-        out = _fmt_new("vanilla", "electronic-circuit", 60, belt=None)
-        self.assertNotIn("belt", out)
-        self.assertNotIn("belts_needed", out)
-
-    def test_fluid_item_gets_no_belt_field(self):
-        # lubricant is a fluid — even with --belt set, no belts_needed
-        out = _fmt_new("vanilla", "lubricant", 60, belt="blue")
-        self.assertNotIn("belts_needed", out)
-        self.assertNotIn("belt", out)
-
-
-# ---------------------------------------------------------------------------
-# Pump output  (--pump QUALITY)
-# ---------------------------------------------------------------------------
-#
-# PUMP_THROUGHPUT: normal=72000, uncommon=93600, rare=115200,
-#                  epic=136800, legendary=180000  (fluid/min)
-# ---------------------------------------------------------------------------
-
-class TestPumpOutput(unittest.TestCase):
-
-    def test_pump_produces_single_fields(self):
-        out = _fmt_new("vanilla", "lubricant", 60, pump="normal")
-        self.assertIn("pump", out)
-        self.assertIn("pumps_needed", out)
-        self.assertNotIn("belts_needed", out)
-        self.assertNotIn("belt", out)
-
-    def test_pump_echoes_quality(self):
-        out = _fmt_new("vanilla", "lubricant", 60, pump="legendary")
-        self.assertEqual(out["pump"], "legendary")
-
-    def test_pump_all_quality_throughputs(self):
-        throughputs = {
-            "normal":    72_000,
-            "uncommon":  93_600,
-            "rare":      115_200,
-            "epic":      136_800,
-            "legendary": 180_000,
-        }
-        for quality, tput in throughputs.items():
-            out = _fmt_new("vanilla", "lubricant", 60, pump=quality)
-            self.assertAlmostEqual(
-                out["pumps_needed"], 60 / tput, places=8,
-                msg=f"pump quality={quality}",
-            )
-
-    def test_pump_quality_strictly_fewer(self):
-        # Higher pump quality → higher throughput → fewer pumps needed
-        pumps = {}
-        for q in ("normal", "uncommon", "rare", "epic", "legendary"):
-            out = _fmt_new("vanilla", "lubricant", 60, pump=q)
-            pumps[q] = out["pumps_needed"]
-
-        self.assertGreater(pumps["normal"],    pumps["uncommon"])
-        self.assertGreater(pumps["uncommon"],  pumps["rare"])
-        self.assertGreater(pumps["rare"],      pumps["epic"])
-        self.assertGreater(pumps["epic"],      pumps["legendary"])
-
-    def test_no_pump_flag_omits_fields(self):
-        out = _fmt_new("vanilla", "lubricant", 60, pump=None)
-        self.assertNotIn("pump", out)
-        self.assertNotIn("pumps_needed", out)
-
-    def test_solid_item_gets_no_pump_field(self):
-        # Solid item with --pump set → no pump fields (pump ignored for solids)
-        out = _fmt_new("vanilla", "electronic-circuit", 60, pump="normal")
-        self.assertNotIn("pump", out)
-        self.assertNotIn("pumps_needed", out)
-
-
 # ---------------------------------------------------------------------------
 # Recipe-level overrides  (--recipe-machine, appended to TestMachineOverride)
 # ---------------------------------------------------------------------------
@@ -1442,21 +1314,18 @@ class TestRecipeMachineOverride(unittest.TestCase):
         s = _solver_new(recipe_machine_overrides=rm_overrides)
         s.solve("iron-gear-wheel", Fraction(60))
         s.resolve_oil(_DATA["vanilla"]["data"])
-        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
 
         args = argparse.Namespace(
-            item="iron-gear-wheel", rate=60, dataset="vanilla",
+            items=["iron-gear-wheel"], item="iron-gear-wheel",
+            rates=[60], rate=60, dataset="vanilla",
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=rm_overrides,
             recipe_module_overrides=None,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
-        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
-                                fluid_set=fluid_set)
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"])
         self.assertEqual(out["recipe_machine_overrides"], rm_overrides)
 
 
@@ -1511,19 +1380,16 @@ class TestBusItem(unittest.TestCase):
         s = _solver_new(bus_items=bus)
         s.solve("electronic-circuit", Fraction(60))
         s.resolve_oil(_DATA["vanilla"]["data"])
-        fluid_set = cli.build_fluid_set(_DATA["vanilla"]["data"])
         args = argparse.Namespace(
-            item="electronic-circuit", rate=60, dataset="vanilla",
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60], rate=60, dataset="vanilla",
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
-            recipe_beacon_overrides=None, recipe_belt_overrides=None,
-            recipe_pump_overrides=None,
+            recipe_beacon_overrides=None,
         )
-        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"],
-                                fluid_set=fluid_set)
+        out = cli.format_output(args, s, _DATA["vanilla"]["resource_info"])
         self.assertIn("bus_inputs", out)
         self.assertEqual(set(out["bus_inputs"].keys()), {"copper-plate", "iron-plate"})
         self.assertNotIn("bus_items", out)
@@ -1653,19 +1519,15 @@ def _fmt_power(
         s.resolve_oil(d["data"])
     else:
         s = solver
-    fluid_set = cli.build_fluid_set(d["data"])
     args = argparse.Namespace(
-        item=item, rate=rate, dataset=dataset,
-        assembler=3, furnace="electric", miner="electric",
+        items=[item], item=item, rates=[rate], rate=rate,
+        dataset=dataset, assembler=3, furnace="electric", miner="electric",
         machine_quality="normal", beacon_quality="normal",
-        belt=None, pump=None,
         module_configs=None, beacon_configs=None,
         recipe_machine_overrides=None, recipe_module_overrides=None,
         recipe_beacon_overrides=None,
-        recipe_belt_overrides=None, recipe_pump_overrides=None,
     )
     return cli.format_output(args, s, d["resource_info"],
-                             fluid_set=fluid_set,
                              machine_power_w=machine_power_w)
 
 
@@ -1691,19 +1553,15 @@ class TestPowerConsumption(unittest.TestCase):
         machine_power_w = cli.build_machine_power_w(d["data"])
         s2 = _solver_new(furnace_type="stone")
         s2.solve("iron-plate", Fraction(60))
-        fluid_set = cli.build_fluid_set(d["data"])
         args = argparse.Namespace(
-            item="iron-plate", rate=60, dataset="vanilla",
-            assembler=3, furnace="stone", miner="electric",
+            items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
+            dataset="vanilla", assembler=3, furnace="stone", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
         out = cli.format_output(args, s2, d["resource_info"],
-                                fluid_set=fluid_set,
                                 machine_power_w=machine_power_w)
         step = next(s for s in out["production_steps"] if s["recipe"] == "iron-plate")
         self.assertEqual(step["power_kw"], 0.0)
@@ -1720,20 +1578,16 @@ class TestPowerConsumption(unittest.TestCase):
             module_configs={"electric-furnace": [_mspec(1, "efficiency", 3)]},
         )
         s_eff.solve("iron-plate", Fraction(60))
-        fluid_set = cli.build_fluid_set(d["data"])
         args = argparse.Namespace(
-            item="iron-plate", rate=60, dataset="vanilla",
-            assembler=3, furnace="electric", miner="electric",
+            items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs={"electric-furnace": [_mspec(1, "efficiency", 3)]},
             beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
         out_eff = cli.format_output(args, s_eff, d["resource_info"],
-                                    fluid_set=fluid_set,
                                     machine_power_w=machine_power_w)
 
         out_base = _fmt_power("vanilla", "iron-plate", 60)
@@ -1758,20 +1612,16 @@ class TestPowerConsumption(unittest.TestCase):
                 module_configs={"electric-furnace": [_mspec(1, "efficiency", 3, quality)]},
             )
             s.solve("iron-plate", Fraction(60))
-            fluid_set = cli.build_fluid_set(d["data"])
             args = argparse.Namespace(
-                item="iron-plate", rate=60, dataset="vanilla",
-                assembler=3, furnace="electric", miner="electric",
+                items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
+                dataset="vanilla", assembler=3, furnace="electric", miner="electric",
                 machine_quality="normal", beacon_quality="normal",
-                belt=None, pump=None,
                 module_configs={"electric-furnace": [_mspec(1, "efficiency", 3, quality)]},
                 beacon_configs=None,
                 recipe_machine_overrides=None, recipe_module_overrides=None,
                 recipe_beacon_overrides=None,
-                recipe_belt_overrides=None, recipe_pump_overrides=None,
             )
             return cli.format_output(args, s, d["resource_info"],
-                                     fluid_set=fluid_set,
                                      machine_power_w=machine_power_w)
 
         out_norm = _make("normal")
@@ -1817,20 +1667,17 @@ class TestPowerConsumption(unittest.TestCase):
             "assembling-machine-3": [_mspec(4, "prod", 3)]
         })
         s_prod.solve("electronic-circuit", Fraction(60))
-        fluid_set = cli.build_fluid_set(d["data"])
         args = argparse.Namespace(
-            item="electronic-circuit", rate=60, dataset="vanilla",
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60], rate=60, dataset="vanilla",
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
             beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
         out_prod = cli.format_output(args, s_prod, d["resource_info"],
-                                     fluid_set=fluid_set,
                                      machine_power_w=machine_power_w)
         out_base = _fmt_power("vanilla", "electronic-circuit", 60)
 
@@ -1857,20 +1704,16 @@ class TestPowerConsumption(unittest.TestCase):
             module_configs={"electric-furnace": [_mspec(4, "efficiency", 3)]},
         )
         s.solve("iron-plate", Fraction(60))
-        fluid_set = cli.build_fluid_set(d["data"])
         args = argparse.Namespace(
-            item="iron-plate", rate=60, dataset="vanilla",
-            assembler=3, furnace="electric", miner="electric",
+            items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs={"electric-furnace": [_mspec(4, "efficiency", 3)]},
             beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
         out = cli.format_output(args, s, d["resource_info"],
-                                fluid_set=fluid_set,
                                 machine_power_w=machine_power_w)
         step = next(x for x in out["production_steps"] if x["recipe"] == "iron-plate")
         # Floor at 20% of base (288 kW base)
@@ -1889,20 +1732,17 @@ class TestPowerConsumption(unittest.TestCase):
             "assembling-machine-3": _bspec(4, 3, "normal")
         })
         s.solve("electronic-circuit", Fraction(60))
-        fluid_set = cli.build_fluid_set(d["data"])
         args = argparse.Namespace(
-            item="electronic-circuit", rate=60, dataset="vanilla",
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60], rate=60, dataset="vanilla",
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs=None,
             beacon_configs={"assembling-machine-3": _bspec(4, 3, "normal")},
             recipe_machine_overrides=None, recipe_module_overrides=None,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
         out = cli.format_output(args, s, d["resource_info"],
-                                fluid_set=fluid_set,
                                 machine_power_w=machine_power_w)
         step = next(x for x in out["production_steps"] if x["recipe"] == "electronic-circuit")
         # ceil(machines) = 1, beacon_count=4, sharing=4 → 1 physical beacon × 480 kW
@@ -1919,20 +1759,16 @@ class TestPowerConsumption(unittest.TestCase):
         })
         s.solve("heavy-oil", Fraction(100))
         s.resolve_oil(d["data"])
-        fluid_set = cli.build_fluid_set(d["data"])
         args = argparse.Namespace(
-            item="heavy-oil", rate=100, dataset="vanilla",
-            assembler=3, furnace="electric", miner="electric",
+            items=["heavy-oil"], item="heavy-oil", rates=[100], rate=100,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
-            belt=None, pump=None,
             module_configs=None,
             beacon_configs={"oil-refinery": _bspec(4, 3, "normal")},
             recipe_machine_overrides=None, recipe_module_overrides=None,
             recipe_beacon_overrides=None,
-            recipe_belt_overrides=None, recipe_pump_overrides=None,
         )
         out = cli.format_output(args, s, d["resource_info"],
-                                fluid_set=fluid_set,
                                 machine_power_w=machine_power_w)
         aop_step = next(x for x in out["production_steps"]
                         if x["recipe"] == "advanced-oil-processing")
@@ -2060,6 +1896,121 @@ class TestProbabilisticOutputs(unittest.TestCase):
             solver = _solver("vanilla")
             result = solver.rate_for_machines(item, 8)
             self.assertAlmostEqual(float(result), expected, places=4)
+
+
+# ---------------------------------------------------------------------------
+# Multi-target solve  (--item A --rate X --item B --rate Y ...)
+# ---------------------------------------------------------------------------
+
+def _fmt_multi(
+    dataset: str,
+    targets: list,
+    *,
+    solver: "cli.Solver | None" = None,
+) -> dict:
+    """
+    Run a multi-target solve and return format_output result.
+    targets: list of (item_id, rate_per_min) tuples.
+    """
+    import argparse
+    d = _DATA[dataset]
+    s = solver if solver is not None else _solver_new(dataset)
+    for item, rate in targets:
+        s.solve(item, Fraction(rate))
+    s.resolve_oil(d["data"])
+    items = [t[0] for t in targets]
+    rates = [float(t[1]) for t in targets]
+    args = argparse.Namespace(
+        items=items, item=items[0],
+        rates=rates, rate=rates[0],
+        dataset=dataset, assembler=3, furnace="electric", miner="electric",
+        machine_quality="normal", beacon_quality="normal",
+        module_configs=None, beacon_configs=None,
+        recipe_machine_overrides=None, recipe_module_overrides=None,
+        recipe_beacon_overrides=None,
+    )
+    return cli.format_output(args, s, d["resource_info"])
+
+
+class TestMultiTarget(unittest.TestCase):
+    """
+    Multi-target solve: --item A --rate X --item B --rate Y
+    Shared sub-recipes are merged (counted once); output uses a 'targets'
+    array instead of top-level item/rate_per_min.
+    """
+
+    def test_single_target_still_has_item_field(self):
+        # Single-target output must keep legacy item/rate_per_min keys.
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        self.assertIn("item", out)
+        self.assertIn("rate_per_min", out)
+        self.assertNotIn("targets", out)
+
+    def test_multi_target_has_targets_array(self):
+        # Two targets → targets list, no top-level item/rate_per_min.
+        out = _fmt_multi("vanilla", [
+            ("electronic-circuit", 60),
+            ("automation-science-pack", 30),
+        ])
+        self.assertIn("targets", out)
+        self.assertNotIn("item", out)
+        self.assertNotIn("rate_per_min", out)
+
+    def test_targets_array_contents(self):
+        out = _fmt_multi("vanilla", [
+            ("electronic-circuit", 60),
+            ("automation-science-pack", 30),
+        ])
+        self.assertEqual(len(out["targets"]), 2)
+        self.assertEqual(out["targets"][0], {"item": "electronic-circuit", "rate_per_min": 60.0})
+        self.assertEqual(out["targets"][1], {"item": "automation-science-pack", "rate_per_min": 30.0})
+
+    def test_overlapping_sub_recipes_merged(self):
+        # ec@60 + asp@30 both need iron-plate; the iron-plate step must reflect
+        # the combined demand, not be counted twice.
+        # ec@60: needs 60 iron-plate/min (1 iron-plate per circuit)
+        # asp@30: needs 30 iron-gear-wheel/min → 60 iron-plate/min
+        # Total iron-plate: 120/min
+        # electric-furnace speed=2, time=3.2s → 37.5/min each → 120/37.5 = 3.2 machines
+        out = _fmt_multi("vanilla", [
+            ("electronic-circuit", 60),
+            ("automation-science-pack", 30),
+        ])
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        self.assertIn("iron-plate", steps)
+        self.assertAlmostEqual(steps["iron-plate"]["machine_count"], 3.2, places=4)
+
+    def test_raw_resources_combined(self):
+        # Non-overlapping items: raw_resources must contain both ores.
+        out = _fmt_multi("vanilla", [
+            ("iron-plate", 30),
+            ("copper-plate", 30),
+        ])
+        self.assertAlmostEqual(out["raw_resources"]["iron-ore"],   30.0, places=4)
+        self.assertAlmostEqual(out["raw_resources"]["copper-ore"], 30.0, places=4)
+
+    def test_no_belt_pump_in_multi_target(self):
+        # belt/pump fields must never appear in multi-target output.
+        out = _fmt_multi("vanilla", [
+            ("electronic-circuit", 60),
+            ("automation-science-pack", 30),
+        ])
+        self.assertNotIn("belt", out)
+        self.assertNotIn("belts_needed", out)
+        self.assertNotIn("pump", out)
+        self.assertNotIn("pumps_needed", out)
+
+    def test_bus_inputs_combined_across_targets(self):
+        # Both targets draw iron-plate from the bus; demands accumulate.
+        # ec@60 → 60 iron-plate; asp@30 → iron-gear-wheel needs 60 iron-plate
+        # Total bus_inputs["iron-plate"] = 120
+        s = _solver_new("vanilla", bus_items=frozenset(["iron-plate"]))
+        out = _fmt_multi("vanilla", [
+            ("electronic-circuit", 60),
+            ("automation-science-pack", 30),
+        ], solver=s)
+        self.assertIn("bus_inputs", out)
+        self.assertAlmostEqual(out["bus_inputs"]["iron-plate"], 120.0, places=4)
 
 
 if __name__ == "__main__":

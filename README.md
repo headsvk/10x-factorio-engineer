@@ -28,7 +28,7 @@ dev/
   gen_sample_state.py       # Encodes sample-state.json → sample-state.b64
   sample-state.json         # Sample factory state source JSON
   sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
-  test_cli.py               # unittest suite (132 tests, stdlib only)
+  test_cli.py               # unittest suite (123 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite
   artifact-api.md           # Field research doc for claude.ai artifact APIs
 ```
@@ -45,9 +45,8 @@ Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run
 # Basic usage
 python assets/cli.py --item electronic-circuit --rate 60
 
-# Belt and pump output
-python assets/cli.py --item electronic-circuit --rate 60 --belt blue
-python assets/cli.py --item lubricant --rate 60 --pump legendary
+# Multi-target: solve two items at once (shared sub-recipes merged)
+python assets/cli.py --item electronic-circuit --rate 60 --item automation-science-pack --rate 30
 
 # Productivity + beacon modules
 python assets/cli.py --item electronic-circuit --rate 60 \
@@ -62,7 +61,7 @@ python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-
 python assets/cli.py --item transport-belt --machines 2 --assembler 2
 
 # Bus items (pull iron/copper from bus, don't recurse into smelting)
-python assets/cli.py --item electronic-circuit --rate 1800 --belt red \
+python assets/cli.py --item electronic-circuit --rate 1800 \
     --bus-item iron-plate --bus-item copper-plate
 
 # Space Age with big mining drills
@@ -80,7 +79,7 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 python -m unittest dev.test_cli -v
 ```
 
-132 tests, stdlib only.
+123 tests, stdlib only.
 
 ---
 
