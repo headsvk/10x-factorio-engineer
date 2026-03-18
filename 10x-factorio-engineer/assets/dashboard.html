@@ -271,6 +271,28 @@ td.name-col { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: var(--bg-input);
 border: 1px solid var(--border); border-radius: 3px; padding: 3px 8px; color: var(--text-muted); }
+/* ── Module & beacon chips ── */
+.mod-chip {
+display: inline-flex; align-items: center; gap: 1px;
+padding: 1px 4px; border-radius: 2px;
+font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+border: 1px solid; white-space: nowrap; line-height: 1.6; vertical-align: middle;
+}
+.mod-chip.type-prod  { background: rgba(255, 77,  0,.13); border-color: rgba(255, 77,  0,.4);  color: #FF4D00; }
+.mod-chip.type-speed { background: rgba(  0,159,255,.13); border-color: rgba(  0,159,255,.4);  color: #009FFF; }
+.mod-chip.type-eff   { background: rgba( 73,255,  0,.10); border-color: rgba( 73,255,  0,.35); color: #49FF00; }
+.bcn-chip {
+display: inline-flex; align-items: center; gap: 1px;
+padding: 1px 4px; border-radius: 2px;
+font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); color: #94a3b8;
+white-space: nowrap; line-height: 1.6; vertical-align: middle;
+}
+.qdot { font-size: 7px; vertical-align: middle; }
+.qdot.q-uncommon  { color: #6DFF6D; }
+.qdot.q-rare      { color: #6DA8FF; }
+.qdot.q-epic      { color: #C87DFF; }
+.qdot.q-legendary { color: #FFB347; }
 /* ── Issues ── */
 .issue-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px;
 border-radius: 4px; font-size: 13px; margin-bottom: 8px; }
@@ -503,6 +525,17 @@ function fmtPower(kw) {
 if (kw == null || kw === 0) return null;
 if (kw < 1000) return `${+kw.toFixed(1)} kW`;
 return `${+(kw / 1000).toFixed(2)} MW`;
+}
+function modChip(m) {
+const abbr = {prod: 'P', speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
+const tCls = {prod: 'type-prod', speed: 'type-speed', efficiency: 'type-eff'}[m.type] ?? '';
+const qdot = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
+return `<span class="mod-chip ${tCls}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
+}
+function bcnChip(b, housingQ) {
+const houseDot = housingQ  !== 'normal' ? `<span class="qdot q-${housingQ}">◆</span>` : '';
+const modDot   = b.quality !== 'normal' ? `<span class="qdot q-${b.quality}">◆</span>` : '';
+return `<span class="bcn-chip">${b.count}${houseDot}×beacon · <span style="color:#009FFF">S${b.tier}${modDot}</span></span>`;
 }
 // ── State ────────────────────────────────────────────────────────────────────
 let STATE = { ...DEFAULT_STATE };
@@ -783,15 +816,31 @@ const isFluid = !!(line.fluid) || FLUID_ITEM_IDS.has(line.item);
 const fmtRate = (rate, beltName) => isFluid ? fmtFluid(rate) : fmtRB(rate, beltName);
 let body = '';
 if (isOpen) {
+const clir       = line.cli_result ?? {};
+const modCfgs    = clir.module_configs          ?? {};
+const beaconCfgs = clir.beacon_configs          ?? {};
+const recModOvr  = clir.recipe_module_overrides ?? {};
+const recBcnOvr  = clir.recipe_beacon_overrides ?? {};
+const housingQ   = clir.beacon_quality  ?? 'normal';
+const machineQ   = clir.machine_quality ?? 'normal';
 const machineRows = steps.map(s => {
 const stepPow = fmtPower(s.power_kw);
 const beaconPow = s.beacon_power_kw > 0 ? fmtPower(s.beacon_power_kw) : null;
 const powCell = stepPow
 ? (beaconPow ? `${stepPow} <span style="color:var(--text-dim)">+${beaconPow} beacon</span>` : stepPow)
 : '—';
+const mods    = recModOvr[s.recipe] ?? modCfgs[s.machine]    ?? [];
+const beacon  = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? null;
+const modHtml = mods.map(modChip).join(' ');
+const bcnHtml = beacon ? bcnChip(beacon, housingQ) : '';
+const bonusHtml = s.beacon_speed_bonus > 0
+? `<span style="font-size:9px;color:var(--text-dim)">+${(s.beacon_speed_bonus * 100).toFixed(1)}%</span>`
+: '';
+const chipRow = [modHtml, bcnHtml, bonusHtml].filter(Boolean).join(' ');
+const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}" style="margin-left:3px">◆</span>` : '';
 return `<tr>
 <td>${esc(label(s.recipe))}</td>
-<td class="name-col">${esc(machineLabel(s.machine))}</td>
+<td class="name-col">${esc(machineLabel(s.machine))}${qualDot}${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
 <td class="r">${s.machine_count_ceil}</td>
 <td class="r">${s.rate_per_min != null ? fmtRate(s.rate_per_min, STATE.preferred_belt) : ''}</td>
 <td class="r" style="color:var(--text-dim)">${powCell}</td>
