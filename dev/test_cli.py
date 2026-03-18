@@ -2000,6 +2000,21 @@ class TestMultiTarget(unittest.TestCase):
         self.assertNotIn("pump", out)
         self.assertNotIn("pumps_needed", out)
 
+    def test_target_also_ingredient_accumulates(self):
+        # transport-belt is both a target AND consumed by underground-belt.
+        # 1 asm-2 → transport-belt 180/min; 1 asm-2 → underground-belt 90/min.
+        # underground-belt consumes 225 transport-belt/min as input.
+        # The transport-belt step must merge both demands: 405/min, 2.25 machines.
+        s = _solver_new("vanilla", assembler_level=2, bus_items=frozenset(["iron-plate"]))
+        out = _fmt_multi("vanilla", [
+            ("transport-belt", 180),
+            ("underground-belt", 90),
+        ], solver=s)
+        steps = {st["recipe"]: st for st in out["production_steps"]}
+        tb = steps["transport-belt"]
+        self.assertAlmostEqual(tb["rate_per_min"],  405.0, places=4)
+        self.assertAlmostEqual(tb["machine_count"],  2.25, places=4)
+
     def test_bus_inputs_combined_across_targets(self):
         # Both targets draw iron-plate from the bus; demands accumulate.
         # ec@60 → 60 iron-plate; asp@30 → iron-gear-wheel needs 60 iron-plate
