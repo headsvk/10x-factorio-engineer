@@ -45,6 +45,7 @@ def _solver(dataset: str = "vanilla", **kwargs) -> cli.Solver:
         furnace_type             = kwargs.get("furnace_type",             "electric"),
         module_configs           = kwargs.get("module_configs",           None),
         beacon_configs           = kwargs.get("beacon_configs",           None),
+        default_beacon_config    = kwargs.get("default_beacon_config",    None),
         machine_module_slots     = kwargs.get("machine_module_slots",     d["machine_module_slots"]),
         machine_quality          = kwargs.get("machine_quality",          "normal"),
         beacon_quality           = kwargs.get("beacon_quality",           "normal"),
@@ -733,8 +734,8 @@ def _mspec(count: int, mtype: str, tier: int, quality: str = "normal") -> dict:
 
 
 def _bspec(count: int, tier: int, quality: str = "normal") -> dict:
-    """Build a BeaconSpec dict (speed modules assumed)."""
-    return {"count": count, "tier": tier, "quality": quality}
+    """Build a BeaconSpec dict (2 speed modules assumed, same as old default)."""
+    return {"count": count, "modules": [{"count": 2, "type": "speed", "tier": tier, "quality": quality}]}
 
 
 def _solver_new(dataset: str = "vanilla", **kwargs) -> cli.Solver:
@@ -747,6 +748,7 @@ def _solver_new(dataset: str = "vanilla", **kwargs) -> cli.Solver:
         furnace_type             = kwargs.get("furnace_type",             "electric"),
         module_configs           = kwargs.get("module_configs",           None),
         beacon_configs           = kwargs.get("beacon_configs",           None),
+        default_beacon_config    = kwargs.get("default_beacon_config",    None),
         machine_module_slots     = kwargs.get("machine_module_slots",     d["machine_module_slots"]),
         machine_quality          = kwargs.get("machine_quality",          "normal"),
         beacon_quality           = kwargs.get("beacon_quality",           "normal"),
@@ -1017,16 +1019,16 @@ class TestModuleConfig(unittest.TestCase):
 # ---------------------------------------------------------------------------
 #
 # Beacon speed formula (Factorio 2.0 diminishing returns):
-#   beacon_speed = effectivity × sqrt(count) × BEACON_SLOTS × speed_per_slot
+#   beacon_speed = effectivity × sqrt(count) × sum(speed_module_bonus per slot)
 #
 # BEACON_EFFECTIVITY: normal=1.5, uncommon=1.7, rare=1.9, epic=2.1, legendary=2.5
-# BEACON_SLOTS = 2
 # SPEED_MODULE_BONUS: tier-3 normal = 0.5 per slot
+# _bspec(count, tier, quality) → 2 speed modules per beacon (slots encoded in spec)
 #
-# Example: 1 beacon, speed-3-normal, normal beacon quality:
-#   1.5 × sqrt(1) × 2 × 0.5 = 1.5
+# Example: 1 beacon, 2×speed-3-normal, normal beacon quality:
+#   1.5 × sqrt(1) × (2×0.5) = 1.5
 # Example: 4 beacons (same):
-#   1.5 × sqrt(4) × 2 × 0.5 = 1.5 × 2 × 1 = 3.0
+#   1.5 × sqrt(4) × (2×0.5) = 1.5 × 2 × 1 = 3.0
 # ---------------------------------------------------------------------------
 
 class TestBeaconConfig(unittest.TestCase):
@@ -1043,7 +1045,7 @@ class TestBeaconConfig(unittest.TestCase):
         )
 
     def test_beacon_speed_bonus_value_four(self):
-        # 4 beacons: 1.5 × sqrt(4) × 2 × 0.5 = 3.0
+        # 4 beacons: 1.5 × sqrt(4) × (2×0.5) = 3.0
         s = _solver_new(beacon_configs={
             "assembling-machine-3": _bspec(4, 3, "normal")
         })
@@ -1109,7 +1111,7 @@ class TestBeaconConfig(unittest.TestCase):
 
     def test_beacon_quality_effectivity_normal(self):
         # beacon_quality="normal"  → effectivity=1.5
-        # 1 beacon, speed-3-normal: 1.5 × 1 × 2 × 0.5 = 1.5
+        # 1 beacon, 2×speed-3-normal: 1.5 × 1 × (2×0.5) = 1.5
         s = _solver_new(
             beacon_quality="normal",
             beacon_configs={"assembling-machine-3": _bspec(1, 3)},
@@ -1122,7 +1124,7 @@ class TestBeaconConfig(unittest.TestCase):
 
     def test_beacon_quality_effectivity_rare(self):
         # beacon_quality="rare"  → effectivity=1.9
-        # 1 beacon, speed-3-normal: 1.9 × 1 × 2 × 0.5 = 1.9
+        # 1 beacon, 2×speed-3-normal: 1.9 × 1 × (2×0.5) = 1.9
         s = _solver_new(
             beacon_quality="rare",
             beacon_configs={"assembling-machine-3": _bspec(1, 3)},
@@ -1135,7 +1137,7 @@ class TestBeaconConfig(unittest.TestCase):
 
     def test_beacon_quality_effectivity_legendary(self):
         # beacon_quality="legendary" → effectivity=2.5
-        # 1 beacon, speed-3-normal: 2.5 × 1 × 2 × 0.5 = 2.5
+        # 1 beacon, 2×speed-3-normal: 2.5 × 1 × (2×0.5) = 2.5
         s = _solver_new(
             beacon_quality="legendary",
             beacon_configs={"assembling-machine-3": _bspec(1, 3)},
@@ -1148,7 +1150,7 @@ class TestBeaconConfig(unittest.TestCase):
 
     def test_beacon_module_quality_scales_speed(self):
         # speed-3-legendary in beacon: per-slot bonus = 0.5 × 2.5 = 1.25
-        # 1 normal beacon: 1.5 × 1 × 2 × 1.25 = 3.75
+        # 1 normal beacon: 1.5 × 1 × (2×1.25) = 3.75
         s = _solver_new(
             beacon_quality="normal",
             beacon_configs={"assembling-machine-3": _bspec(1, 3, "legendary")},
@@ -1189,6 +1191,94 @@ class TestBeaconConfig(unittest.TestCase):
         self.assertGreater(
             override_s.steps["electronic-circuit"]["machine_count"],
             global_s.steps["electronic-circuit"]["machine_count"],
+        )
+
+    def test_global_default_beacon_applies_to_all_machines(self):
+        # default_beacon_config applies to every machine that has no per-machine config.
+        # electronic-circuit uses assembling-machine-3; iron-gear-wheel too.
+        # All steps must have non-zero beacon_speed_bonus.
+        s = _solver_new(default_beacon_config=_bspec(4, 3))
+        s.solve("electronic-circuit", Fraction(60))
+        for step in s.steps.values():
+            self.assertGreater(step["beacon_speed_bonus"], 0.0)
+
+    def test_per_machine_overrides_global_default(self):
+        # Per-machine config (1 beacon) wins over global default (4 beacons).
+        # assembler-3 step should use 1-beacon bonus (1.5), not 4-beacon (3.0).
+        s = _solver_new(
+            default_beacon_config=_bspec(4, 3),
+            beacon_configs={"assembling-machine-3": _bspec(1, 3)},
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            1.5, places=6,
+        )
+
+    def test_recipe_override_beats_global_default(self):
+        # Per-recipe override (0 beacons) wins over global default (4 beacons).
+        s = _solver_new(
+            default_beacon_config=_bspec(4, 3),
+            recipe_beacon_overrides={"electronic-circuit": _bspec(0, 3)},
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        step = s.steps["electronic-circuit"]
+        self.assertAlmostEqual(step["beacon_speed_bonus"], 0.0, places=6)
+        self.assertIsInstance(step["machine_count"], Fraction)
+
+    def test_efficiency_module_in_beacon_reduces_machine_power(self):
+        # 4 beacons, each with 2 eff-3-normal modules → transmits efficiency to
+        # nearby machines, reducing their power draw.
+        # effectivity × sqrt(4) × (2 × 0.5 eff-3-normal) = 1.5 × 2 × 1.0 = 3.0 reduction
+        # Clamped to −80% floor. assembler-3 base power = 375 kW → 375 × 0.2 = 75 kW.
+        import argparse
+        d = _DATA["vanilla"]
+        machine_power_w = cli.build_machine_power_w(d["data"])
+        s_no = _solver_new()
+        s_no.solve("electronic-circuit", Fraction(60))
+        s_eff = _solver_new(beacon_configs={
+            "assembling-machine-3": {"count": 4, "modules": [{"count": 2, "type": "efficiency", "tier": 3, "quality": "normal"}]},
+        })
+        s_eff.solve("electronic-circuit", Fraction(60))
+        args_no = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60], rate=60,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        args_eff = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60], rate=60,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None,
+            beacon_configs={"assembling-machine-3": {"count": 4, "modules": [{"count": 2, "type": "efficiency", "tier": 3, "quality": "normal"}]}},
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out_no  = cli.format_output(args_no,  s_no,  d["resource_info"], machine_power_w=machine_power_w)
+        out_eff = cli.format_output(args_eff, s_eff, d["resource_info"], machine_power_w=machine_power_w)
+        step_no  = next(s for s in out_no["production_steps"]  if s["recipe"] == "electronic-circuit")
+        step_eff = next(s for s in out_eff["production_steps"] if s["recipe"] == "electronic-circuit")
+        # Eff beacon reduces machine power draw
+        self.assertLess(step_eff["power_kw"], step_no["power_kw"])
+
+    def test_mixed_beacon_speed_bonus_from_speed_only(self):
+        # 1 beacon with 1 speed-3-normal + 1 eff-3-normal:
+        #   speed_sum = 1 × SPEED_MODULE_BONUS[3] × 1 = 0.5
+        #   bonus = 1.5 × sqrt(1) × 0.5 = 0.75  (half of 2-speed bonus = 1.5)
+        mixed = {"count": 1, "modules": [
+            {"count": 1, "type": "speed", "tier": 3, "quality": "normal"},
+            {"count": 1, "type": "efficiency", "tier": 3, "quality": "normal"},
+        ]}
+        s = _solver_new(beacon_configs={"assembling-machine-3": mixed})
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertAlmostEqual(
+            s.steps["electronic-circuit"]["beacon_speed_bonus"],
+            0.75, places=6,
         )
 
 
@@ -2180,7 +2270,10 @@ class TestStepConfig(unittest.TestCase):
         steps = self._steps(out)
         ec = steps["electronic-circuit"]
         self.assertIn("beacon_spec", ec)
-        self.assertEqual(ec["beacon_spec"], {"count": 8, "tier": 3, "quality": "legendary"})
+        self.assertEqual(ec["beacon_spec"], {
+            "count": 8,
+            "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "legendary"}],
+        })
         self.assertIn("beacon_quality", ec)
         self.assertEqual(ec["beacon_quality"], "legendary")
         ip = steps["iron-plate"]

@@ -533,9 +533,14 @@ const qdot = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</sp
 return `<span class="mod-chip ${tCls}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
 }
 function bcnChip(b, housingQ) {
-const houseDot = housingQ  !== 'normal' ? `<span class="qdot q-${housingQ}">◆</span>` : '';
-const modDot   = b.quality !== 'normal' ? `<span class="qdot q-${b.quality}">◆</span>` : '';
-return `<span class="bcn-chip">${b.count}${houseDot}×beacon · <span style="color:#009FFF">S${b.tier}${modDot}</span></span>`;
+const houseDot = housingQ !== 'normal' ? `<span class="qdot q-${housingQ}">◆</span>` : '';
+const modsHtml = (b.modules ?? []).map(m => {
+const abbr = {speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
+const color = {speed: '#009FFF', efficiency: '#4CAF50'}[m.type] ?? '#aaa';
+const qdot  = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
+return `<span style="color:${color}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
+}).join(' ');
+return `<span class="bcn-chip">${b.count}${houseDot}×beacon · ${modsHtml}</span>`;
 }
 // ── State ────────────────────────────────────────────────────────────────────
 let STATE = { ...DEFAULT_STATE };
@@ -817,12 +822,13 @@ const fmtRate = (rate, beltName) => isFluid ? fmtFluid(rate) : fmtRB(rate, beltN
 let body = '';
 if (isOpen) {
 const clir       = line.cli_result ?? {};
-const modCfgs    = clir.module_configs          ?? {};
-const beaconCfgs = clir.beacon_configs          ?? {};
-const recModOvr  = clir.recipe_module_overrides ?? {};
-const recBcnOvr  = clir.recipe_beacon_overrides ?? {};
-const housingQ   = clir.beacon_quality  ?? 'normal';
-const machineQ   = clir.machine_quality ?? 'normal';
+const modCfgs      = clir.module_configs          ?? {};
+const beaconCfgs   = clir.beacon_configs          ?? {};
+const defaultBcn   = clir.default_beacon          ?? null;
+const recModOvr    = clir.recipe_module_overrides ?? {};
+const recBcnOvr    = clir.recipe_beacon_overrides ?? {};
+const housingQ     = clir.beacon_quality  ?? 'normal';
+const machineQ     = clir.machine_quality ?? 'normal';
 const machineRows = steps.map(s => {
 const stepPow = fmtPower(s.power_kw);
 const beaconPow = s.beacon_power_kw > 0 ? fmtPower(s.beacon_power_kw) : null;
@@ -830,7 +836,7 @@ const powCell = stepPow
 ? (beaconPow ? `${stepPow} <span style="color:var(--text-dim)">+${beaconPow} beacon</span>` : stepPow)
 : '—';
 const mods    = recModOvr[s.recipe] ?? modCfgs[s.machine]    ?? [];
-const beacon  = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? null;
+const beacon  = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? defaultBcn ?? null;
 const modHtml = mods.map(modChip).join(' ');
 const bcnHtml = beacon ? bcnChip(beacon, housingQ) : '';
 const bonusHtml = s.beacon_speed_bonus > 0

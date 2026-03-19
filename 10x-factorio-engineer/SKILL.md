@@ -49,14 +49,15 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [--i
 | `--machine-quality QUALITY` | `normal` | Machine quality: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
 | `--beacon-quality QUALITY` | `normal` | Beacon housing quality (same enum) |
 | `--modules MACHINE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Module config per machine; repeatable |
-| `--beacon MACHINE=COUNT:TIER:QUALITY` | _(none)_ | Beacon config (speed modules) per machine; repeatable |
+| `--beacon [MACHINE=]BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY[+...]` | _(none)_ | Beacon config. Omit `MACHINE=` for a global default (all machines). Multiple module specs joined with `+`. TYPE must be `speed` or `efficiency`. Priority: per-recipe > per-machine > global. Repeatable. |
 | `--recipe ITEM=RECIPE` | _(none)_ | Override recipe; repeatable |
 | `--recipe-machine RECIPE=MACHINE` | _(none)_ | Override machine for a specific recipe; repeatable |
 | `--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Per-recipe module override; repeatable |
-| `--recipe-beacon RECIPE=COUNT:TIER:QUALITY` | _(none)_ | Per-recipe beacon override; repeatable |
+| `--recipe-beacon RECIPE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY[+...]` | _(none)_ | Per-recipe beacon override; same value format as `--beacon`. Repeatable. |
 | `--bus-item ITEM-ID` | _(none)_ | Treat item as a bus input (raw resource); stops recursion at this item; repeatable |
 
-**Module TYPE values:** `prod` / `speed` / `efficiency` (efficiency stored but not used in machine-count math — no speed/productivity effect)
+**Module TYPE values (machine modules):** `prod` / `speed` / `efficiency`
+**Module TYPE values (beacon modules):** `speed` / `efficiency` only — `prod` not allowed in beacons. Efficiency modules in beacons transmit a reduced energy bonus to nearby machines, lowering their power draw.
 
 **Quality enum:** `normal` / `uncommon` / `rare` / `epic` / `legendary` (applies to `--machine-quality`, `--beacon-quality`, pump quality, and the QUALITY field in module specs)
 
@@ -72,8 +73,15 @@ python assets/cli.py --item transport-belt --machines 2 --assembler 2
 # Processing units with 4× prod-3 modules in assembler-3
 python assets/cli.py --item processing-unit --rate 10 --modules assembling-machine-3=4:prod:3:normal --furnace electric
 
-# Assembler-3 with 8× legendary tier-3 beacons
-python assets/cli.py --item electronic-circuit --rate 60 --beacon assembling-machine-3=8:3:legendary
+# Global default: all machines get 8 beacons with 2 speed-3-legendary modules each
+python assets/cli.py --item electronic-circuit --rate 60 --beacon 8:2:speed:3:legendary
+
+# Per-machine beacon: assembler-3 only, 4 beacons × 2 speed-3-normal
+python assets/cli.py --item electronic-circuit --rate 60 --beacon assembling-machine-3=4:2:speed:3:normal
+
+# Mixed beacon modules: 1 speed-3 + 1 eff-3 per beacon (2 beacon total)
+python assets/cli.py --item electronic-circuit --rate 60 \
+  --beacon "assembling-machine-3=4:1:speed:3:normal+1:efficiency:3:normal"
 
 # Space Age holmium plates with big drill + prod modules
 python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big \
@@ -82,7 +90,7 @@ python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner 
 # Electric mining drills with speed modules and beacons
 python assets/cli.py --item iron-plate --rate 100 \
   --modules "electric-mining-drill=3:speed:3:normal" \
-  --beacon "electric-mining-drill=4:3:normal"
+  --beacon "electric-mining-drill=4:2:speed:3:normal"
 
 # Space Age holmium plates
 python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
@@ -118,7 +126,7 @@ The CLI emits JSON to stdout. Example:
       "inputs": { "electronic-circuit": 100.0, "advanced-circuit": 10.0, "sulfuric-acid": 100.0 },
       "machine_quality": "normal",
       "module_specs": [{"count": 2, "type": "prod", "tier": 3, "quality": "rare"}],
-      "beacon_spec": {"count": 8, "tier": 3, "quality": "legendary"},
+      "beacon_spec": {"count": 8, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "legendary"}]},
       "beacon_quality": "legendary",
       "beacon_speed_bonus": 10.0,
       "power_kw": 2812.5,
@@ -134,11 +142,12 @@ The CLI emits JSON to stdout. Example:
   "total_power_mw": 10.8525,
   "total_power_mw_ceil": 11.04,
   "module_configs": { "assembling-machine-3": [{"count": 2, "type": "prod", "tier": 3, "quality": "rare"}] },
-  "beacon_configs": { "assembling-machine-3": {"count": 8, "tier": 3, "quality": "legendary"} },
+  "default_beacon": {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]},
+  "beacon_configs": { "assembling-machine-3": {"count": 8, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "legendary"}]} },
   "recipe_overrides": { "heavy-oil": "coal-liquefaction" },
   "recipe_machine_overrides": { "iron-gear-wheel": "foundry" },
   "recipe_module_overrides": { "iron-gear-wheel": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}] },
-  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "tier": 3, "quality": "normal"} }
+  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]} }
 }
 ```
 
@@ -152,7 +161,8 @@ The CLI emits JSON to stdout. Example:
 | `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |
 | `total_power_mw_ceil` | Same using ceiled machine counts |
 | `module_configs` | Present when `--modules` was passed; module specs per machine |
-| `beacon_configs` | Present when `--beacon` was passed; beacon spec per machine |
+| `default_beacon` | Present when `--beacon VALUE` (no machine key) was passed; global beacon default |
+| `beacon_configs` | Present when `--beacon MACHINE=VALUE` was passed; beacon spec per machine |
 | `recipe_overrides` | Present when `--recipe` was passed |
 | `recipe_machine_overrides` | Present when `--recipe-machine` was passed |
 | `recipe_module_overrides` | Present when `--recipe-modules` was passed |
@@ -210,9 +220,13 @@ working context and update it after every player message.
     // e.g. "assembling-machine-3": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]
     // e.g. "electric-mining-drill": [{"count": 3, "type": "speed", "tier": 3, "quality": "normal"}]
   },
+  // Optional global default beacon — applies to all machines not in beacon_configs
+  // becomes --beacon BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY on every CLI call
+  "default_beacon": null,  // e.g. {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]}
+
   "beacon_configs": {
-    // e.g. "assembling-machine-3": {"count": 8, "tier": 3, "quality": "normal"}
-    // e.g. "electric-mining-drill": {"count": 4, "tier": 3, "quality": "normal"}
+    // e.g. "assembling-machine-3": {"count": 8, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]}
+    // e.g. "electric-mining-drill": {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]}
   },
 
   // Persisted CLI overrides — applied as flags on every cli.py invocation
@@ -288,7 +302,8 @@ When a player says something like:
 - *"I have 2 blocks of iron smelters, 2 red belts each"* → create two `iron-plate` lines, each with `target_rate: 3600` (2 × 1800/min) and labels like `"Iron Smelting Block 1"` / `"Iron Smelting Block 2"`. Multiple lines with the same `item` are valid — one per physical block.
 - *"I use 4 prod-3 modules in all assemblers"* → set `module_configs["assembling-machine-3"] = [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines.
 - *"I use 3 speed-3 modules in my mining drills"* → set `module_configs["electric-mining-drill"] = [{"count": 3, "type": "speed", "tier": 3, "quality": "normal"}]`, re-run CLI for all affected lines (the drill count in `miners_needed` will reflect the speed bonus).
-- *"I have 8 legendary beacons on each assembler-3"* → set `beacon_configs["assembling-machine-3"] = {"count": 8, "tier": 3, "quality": "normal"}`, re-run CLI for all affected lines.
+- *"I have 8 beacons with 2 speed-3 modules on each assembler-3"* → set `beacon_configs["assembling-machine-3"] = {"count": 8, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]}`, re-run CLI for all affected lines.
+- *"I use 4 beacons with 2 speed-3 modules on every machine"* → set `default_beacon = {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]}`, re-run CLI for all lines.
 - *"I have N red belts of iron plate on the bus"* → add/update `bus_items` entry: `{ "item": "iron-plate", "rate": N × 1800 }`. Belt throughputs: yellow=900, red=1800, blue=2700, turbo=3600 items/min. For new lines that draw iron-plate from the bus, add `--bus-item iron-plate` to the CLI call so `bus_inputs` is populated in the cli_result. If the player says a block has its own supply for an item that's also on the bus, run WITHOUT `--bus-item` for that item — the item appears in `raw_resources` instead and Bus Balance is unaffected.
 - When adding any new line where bus_items exist: apply `--bus-item ITEM` for ingredients the player says come from the bus. Mention the assumption once: *"I'll assume X, Y come from the bus since they're declared as bus items — let me know if any have their own miners/supply."*
 - When a new **production line** is added for a manufactured intermediate (plates, circuits, plastic, etc.), automatically add it to `bus_items` with the line's `effective_rate` as the rate. Exception: science packs and other end-product lines are not added to the bus.
@@ -313,7 +328,8 @@ these IDs to friendly names automatically.
 2. Run `python assets/cli.py` with the appropriate flags from factory state:
    `--assembler`, `--furnace`, `--dataset`, `--machine-quality`, `--beacon-quality`,
    `--modules MACHINE=...` for every entry in `module_configs`,
-   `--beacon MACHINE=...` for every entry in `beacon_configs`,
+   `--beacon BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` if `default_beacon` is set,
+   `--beacon MACHINE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` for every entry in `beacon_configs`,
    `--recipe ITEM=RECIPE` for every entry in `recipe_overrides`.
 3. Parse the JSON output.
 4. Format a human-readable answer:
@@ -393,7 +409,7 @@ When starting a new session:
 ### "How many machines do I need for X at Y/min?"
 
 ```
-run: python assets/cli.py --item X --rate Y [--assembler N] [--furnace T] [--modules MACHINE=...] [--beacon MACHINE=...]
+run: python assets/cli.py --item X --rate Y [--assembler N] [--furnace T] [--modules MACHINE=...] [--beacon [MACHINE=]BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY]
 format: lead with machine count for X, then key dependencies, then raw resources
 ```
 

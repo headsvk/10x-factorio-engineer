@@ -477,12 +477,16 @@ def _compute_step_power(
     * power_kw      — exact fractional machine_count × adjusted draw
     * power_kw_ceil — ceiling machine count × adjusted draw
     * beacon_power_kw — physical beacon count × beacon idle draw
+
+    Machine energy_bonus comes from machine modules (Fraction arithmetic).
+    Beacon efficiency modules transmit a reduced energy bonus to nearby machines
+    (float, via sqrt); their contribution is added before the −80% floor clamp.
     """
     base_w = machine_power_w.get(machine_key, 0)
     if base_w == 0:
         return (0.0, 0.0, 0.0)
 
-    # Build energy_bonus from module specs
+    # Build energy_bonus from machine module specs (exact Fraction)
     energy_bonus: Fraction = Fraction(0)
     for spec in module_specs:
         count = Fraction(spec["count"])
@@ -496,15 +500,25 @@ def _compute_step_power(
             # Speed/prod: add penalty; NOT quality-scaled
             energy_bonus += count * MODULE_CONSUMPTION_PENALTY[mtype][tier]
 
-    # Clamp to −80% floor
-    energy_bonus = max(energy_bonus, Fraction(-4, 5))
+    # Add beacon-transmitted efficiency (uses sqrt → float arithmetic)
+    beacon_eff_bonus: float = 0.0
+    if beacon_spec and beacon_spec.get("count", 0) > 0:
+        effectivity = float(BEACON_EFFECTIVITY[beacon_quality])
+        sqrt_count  = math.sqrt(beacon_spec["count"])
+        for mod in beacon_spec["modules"]:
+            if mod["type"] == "efficiency":
+                beacon_eff_bonus -= mod["count"] * effectivity * sqrt_count * float(
+                    MODULE_EFFICIENCY_REDUCTION[mod["tier"]] * MODULE_QUALITY_MULT[mod["quality"]]
+                )
 
-    factor: Fraction = Fraction(base_w, 1000) * (Fraction(1) + energy_bonus)
+    # Combine and clamp to −80% floor
+    combined = max(float(energy_bonus) + beacon_eff_bonus, -0.8)
 
-    power_kw      = float(machine_count * factor)
-    power_kw_ceil = float(math.ceil(machine_count) * factor)
+    factor = base_w / 1000.0 * (1.0 + combined)
+    power_kw      = float(machine_count) * factor
+    power_kw_ceil = math.ceil(float(machine_count)) * factor
 
-    # Beacon power
+    # Beacon idle power draw
     if beacon_spec is None or beacon_spec.get("count", 0) == 0:
         beacon_power_kw = 0.0
     else:
@@ -736,7 +750,9 @@ class Solver:
       ({machine_key: bspec}) are per-machine defaults, overridable per-recipe.
     * Machine quality adds an additive speed bonus to base crafting speed.
     * Beacon speed uses Factorio 2.0 diminishing-returns formula:
-        effectivity × sqrt(count) × BEACON_SLOTS × module_bonus_per_slot
+        effectivity × sqrt(count) × sum(speed_module_bonus per slot)
+    * Beacon efficiency modules transmit reduced energy consumption to nearby
+      machines; their effect is applied in _compute_step_power().
     """
 
     def __init__(
@@ -747,6 +763,7 @@ class Solver:
         furnace_type: str,
         module_configs: dict | None = None,
         beacon_configs: dict | None = None,
+        default_beacon_config: dict | None = None,
         machine_module_slots: dict | None = None,
         machine_quality: str = "normal",
         beacon_quality: str = "normal",
@@ -762,6 +779,7 @@ class Solver:
         self.furnace_type    = furnace_type
         self.module_configs:        dict = module_configs        or {}
         self.beacon_configs:        dict = beacon_configs        or {}
+        self.default_beacon_config: dict | None = default_beacon_config
         self.machine_module_slots:  dict = machine_module_slots  or {}
         self.machine_quality: str  = machine_quality
         self.beacon_quality:  str  = beacon_quality
@@ -790,12 +808,12 @@ class Solver:
         return []
 
     def _get_beacon(self, recipe_key: str, machine_key: str) -> dict | None:
-        """Return beacon spec (recipe override > machine global > None)."""
+        """Return beacon spec (recipe override > per-machine > global default > None)."""
         if recipe_key in self.recipe_beacon_overrides:
             return self.recipe_beacon_overrides[recipe_key]
         if machine_key in self.beacon_configs:
             return self.beacon_configs[machine_key]
-        return None
+        return self.default_beacon_config
 
     def _compute_module_effects(
         self, specs: list, machine_key: str, allow_prod: bool
@@ -829,22 +847,22 @@ class Solver:
     def _compute_beacon_speed(self, beacon_spec: dict | None) -> float:
         """
         Compute beacon speed bonus using Factorio 2.0 diminishing-returns formula:
-          effectivity × sqrt(count) × BEACON_SLOTS × module_bonus_per_slot
+          effectivity × sqrt(count) × sum(speed_module_bonus per slot)
+        Only speed modules contribute to the speed bonus.
+        Efficiency modules in beacons are handled separately in _compute_step_power().
         Returns 0.0 when no beacon or count == 0.
         """
         if not beacon_spec or beacon_spec.get("count", 0) == 0:
             return 0.0
-        effectivity  = BEACON_EFFECTIVITY[self.beacon_quality]
-        module_bonus = (
-            SPEED_MODULE_BONUS[beacon_spec["tier"]]
-            * MODULE_QUALITY_MULT[beacon_spec["quality"]]
-        )
-        return (
-            float(effectivity)
-            * math.sqrt(beacon_spec["count"])
-            * BEACON_SLOTS
-            * float(module_bonus)
-        )
+        effectivity = float(BEACON_EFFECTIVITY[self.beacon_quality])
+        sqrt_count  = math.sqrt(beacon_spec["count"])
+        speed_sum   = 0.0
+        for mod in beacon_spec["modules"]:
+            if mod["type"] == "speed":
+                speed_sum += mod["count"] * float(
+                    SPEED_MODULE_BONUS[mod["tier"]] * MODULE_QUALITY_MULT[mod["quality"]]
+                )
+        return effectivity * sqrt_count * speed_sum
 
     def rate_for_machines(self, item_key: str, machines: float) -> Fraction:
         """
@@ -1135,6 +1153,7 @@ def compute_miners(
     module_configs: dict | None = None,
     machine_module_slots: dict | None = None,
     beacon_configs: dict | None = None,
+    default_beacon_config: dict | None = None,
     beacon_quality: str = "normal",
 ) -> dict:
     if machine_power_w is None:
@@ -1200,20 +1219,16 @@ def compute_miners(
             energy_bonus = max(energy_bonus, Fraction(-4, 5))
 
             # Beacon speed bonus (same diminishing-returns formula as crafting machines)
-            beacon_spec = (beacon_configs or {}).get(drill_key)
+            beacon_spec = (beacon_configs or {}).get(drill_key) or default_beacon_config
             beacon_speed_bonus = 0.0
             if beacon_spec and beacon_spec.get("count", 0) > 0:
-                effectivity  = BEACON_EFFECTIVITY[beacon_quality]
-                module_bonus = (
-                    SPEED_MODULE_BONUS[beacon_spec["tier"]]
-                    * MODULE_QUALITY_MULT[beacon_spec["quality"]]
-                )
-                beacon_speed_bonus = (
-                    float(effectivity)
-                    * math.sqrt(beacon_spec["count"])
-                    * BEACON_SLOTS
-                    * float(module_bonus)
-                )
+                effectivity = float(BEACON_EFFECTIVITY[beacon_quality])
+                sqrt_count  = math.sqrt(beacon_spec["count"])
+                for mod in beacon_spec["modules"]:
+                    if mod["type"] == "speed":
+                        beacon_speed_bonus += mod["count"] * effectivity * sqrt_count * float(
+                            SPEED_MODULE_BONUS[mod["tier"]] * MODULE_QUALITY_MULT[mod["quality"]]
+                        )
 
             base_speed    = MINER_SPEED[drill_key] * (Fraction(1) + speed_bonus)
             eff_speed     = float(base_speed) * (1.0 + beacon_speed_bonus)
@@ -1315,6 +1330,7 @@ def format_output(
         module_configs=solver.module_configs or None,
         machine_module_slots=solver.machine_module_slots or None,
         beacon_configs=solver.beacon_configs or None,
+        default_beacon_config=solver.default_beacon_config,
         beacon_quality=solver.beacon_quality,
     )
 
@@ -1347,6 +1363,8 @@ def format_output(
     # Echo non-empty configs
     if getattr(args, "module_configs", None):
         out["module_configs"] = args.module_configs
+    if getattr(args, "default_beacon_config", None):
+        out["default_beacon"] = args.default_beacon_config
     if getattr(args, "beacon_configs", None):
         out["beacon_configs"] = args.beacon_configs
 
@@ -1411,16 +1429,25 @@ def _parse_module_spec(raw_value: str, flag: str) -> dict:
 
 
 def _parse_beacon_spec(raw_value: str, flag: str) -> dict:
-    """Parse 'COUNT:TIER:QUALITY' into a beacon spec dict."""
-    parts = raw_value.split(":")
-    if len(parts) < 3:
-        sys.exit(f"{flag} value must be COUNT:TIER:QUALITY, got: {raw_value!r}")
+    """Parse 'BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY[+MOD_COUNT:TYPE:TIER:QUALITY]'
+    into a beacon spec dict.  Module specs use the same COUNT:TYPE:TIER:QUALITY
+    format as --modules.  Multiple module specs are joined with '+'.
+    Only 'speed' and 'efficiency' types are valid inside a beacon.
+    """
+    colon = raw_value.find(":")
+    if colon < 0:
+        sys.exit(f"{flag} value must be BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY, got: {raw_value!r}")
     try:
-        count = int(parts[0])
-        tier  = int(parts[1])
+        count = int(raw_value[:colon])
     except ValueError:
-        sys.exit(f"{flag} COUNT and TIER must be integers, got: {raw_value!r}")
-    return {"count": count, "tier": tier, "quality": parts[2]}
+        sys.exit(f"{flag} BEACON_COUNT must be an integer, got: {raw_value[:colon]!r}")
+    modules = []
+    for mod_raw in raw_value[colon + 1:].split("+"):
+        spec = _parse_module_spec(mod_raw, flag)
+        if spec["type"] not in ("speed", "efficiency"):
+            sys.exit(f"{flag} beacon modules must be 'speed' or 'efficiency', got: {spec['type']!r}")
+        modules.append(spec)
+    return {"count": count, "modules": modules}
 
 
 def parse_args(prefs: dict | None = None) -> argparse.Namespace:
@@ -1440,7 +1467,7 @@ Examples:
   python cli.py --item lubricant --rate 60 --pump legendary
   python cli.py --item electronic-circuit --rate 60 \\
       --modules "assembling-machine-3=4:prod:3:normal" \\
-      --beacon "assembling-machine-3=4:3:normal" \\
+      --beacon "assembling-machine-3=4:2:speed:3:normal" \\
       --machine-quality legendary
 """,
     )
@@ -1484,10 +1511,14 @@ Examples:
     p.add_argument(
         "--beacon",
         action="append", default=[],
-        metavar="MACHINE=COUNT:TIER:QUALITY",
+        metavar="[MACHINE=]BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY",
         help=(
-            "Beacon count and module quality per machine. Repeatable. "
-            "E.g. --beacon 'assembling-machine-3=4:3:normal'"
+            "Beacon config. Omit MACHINE= for a global default (all machines). "
+            "Repeatable; per-machine overrides the global default. "
+            "Module type must be 'speed' or 'efficiency'. "
+            "Mix types with '+': 'MACHINE=4:1:speed:3:normal+1:efficiency:3:normal'. "
+            "E.g. --beacon '4:2:speed:3:normal' (global) or "
+            "--beacon 'assembling-machine-3=4:2:speed:3:normal' (per-machine)."
         ),
     )
     p.add_argument(
@@ -1516,9 +1547,9 @@ Examples:
     p.add_argument(
         "--recipe-beacon",
         action="append", default=[],
-        metavar="RECIPE=COUNT:TIER:QUALITY",
+        metavar="RECIPE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY",
         dest="recipe_beacon",
-        help="Per-recipe beacon override. Repeatable.",
+        help="Per-recipe beacon override. Repeatable. Same value format as --beacon.",
     )
     p.add_argument(
         "--bus-item",
@@ -1579,11 +1610,16 @@ def main() -> None:
         k, v = _parse_kv(raw, "--modules")
         module_configs.setdefault(k, []).append(_parse_module_spec(v, "--modules"))
 
-    # Parse --beacon MACHINE=COUNT:TIER:QUALITY
+    # Parse --beacon [MACHINE=]BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY
+    # No KEY= prefix → global default applied to all machines not otherwise configured.
+    default_beacon_config: dict | None = None
     beacon_configs: dict[str, dict] = {}
     for raw in args.beacon:
-        k, v = _parse_kv(raw, "--beacon")
-        beacon_configs[k] = _parse_beacon_spec(v, "--beacon")
+        if "=" in raw:
+            k, v = _parse_kv(raw, "--beacon")
+            beacon_configs[k] = _parse_beacon_spec(v, "--beacon")
+        else:
+            default_beacon_config = _parse_beacon_spec(raw, "--beacon")
 
     # Parse per-recipe overrides
     recipe_machine_overrides: dict[str, str] = {}
@@ -1615,6 +1651,7 @@ def main() -> None:
         args.assembler, args.furnace,
         module_configs=module_configs or None,
         beacon_configs=beacon_configs or None,
+        default_beacon_config=default_beacon_config,
         machine_module_slots=machine_module_slots,
         machine_quality=args.machine_quality,
         beacon_quality=args.beacon_quality,
@@ -1646,6 +1683,7 @@ def main() -> None:
     # Attach parsed configs to args so format_output can echo them
     args.module_configs           = module_configs or None
     args.beacon_configs           = beacon_configs or None
+    args.default_beacon_config    = default_beacon_config
     args.recipe_machine_overrides = recipe_machine_overrides or None
     args.recipe_module_overrides  = recipe_module_overrides  or None
     args.recipe_beacon_overrides  = recipe_beacon_overrides  or None
