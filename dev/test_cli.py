@@ -2100,5 +2100,93 @@ class TestStepInputs(unittest.TestCase):
         self.assertGreater(ip["inputs"]["iron-ore"], 60.0)
 
 
+class TestStepConfig(unittest.TestCase):
+    """Per-step config fields: machine_quality, module_specs, beacon_spec, beacon_quality."""
+
+    def _steps(self, out: dict) -> dict:
+        return {s["recipe"]: s for s in out["production_steps"]}
+
+    def test_machine_quality_always_present(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        for step in out["production_steps"]:
+            self.assertIn("machine_quality", step)
+            self.assertEqual(step["machine_quality"], "normal")
+
+    def test_machine_quality_legendary(self):
+        import argparse
+        d = _DATA["vanilla"]
+        s = _solver_new("vanilla", machine_quality="legendary")
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(d["data"])
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60.0], rate=60.0, machines_list=[],
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="legendary", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        for step in out["production_steps"]:
+            self.assertEqual(step["machine_quality"], "legendary")
+
+    def test_module_specs_absent_when_no_modules(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        for step in out["production_steps"]:
+            self.assertNotIn("module_specs", step)
+
+    def test_module_specs_present_global(self):
+        # Global --modules assembling-machine-3=4:prod:3:normal
+        # ec step uses assembler-3 → gets module_specs
+        # iron-plate step uses electric-furnace → no module_specs
+        s = _solver_new("vanilla", module_configs={
+            "assembling-machine-3": [_mspec(4, "prod", 3)],
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        out = _fmt_new("vanilla", "electronic-circuit", 60, solver=s)
+        steps = self._steps(out)
+        ec = steps["electronic-circuit"]
+        self.assertIn("module_specs", ec)
+        self.assertEqual(ec["module_specs"], [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}])
+        ip = steps["iron-plate"]
+        self.assertNotIn("module_specs", ip)
+
+    def test_recipe_module_override_wins_per_step(self):
+        # --recipe-modules electronic-circuit=2:speed:3:normal → only ec step gets specs
+        s = _solver_new("vanilla", recipe_module_overrides={
+            "electronic-circuit": [_mspec(2, "speed", 3)],
+        })
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        out = _fmt_new("vanilla", "electronic-circuit", 60, solver=s)
+        steps = self._steps(out)
+        ec = steps["electronic-circuit"]
+        self.assertIn("module_specs", ec)
+        self.assertEqual(ec["module_specs"], [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}])
+        ip = steps["iron-plate"]
+        self.assertNotIn("module_specs", ip)
+
+    def test_beacon_spec_and_quality_per_step(self):
+        # --beacon assembling-machine-3=8:3:legendary → ec step (assembler-3) gets beacon fields
+        # iron-plate step (electric-furnace) gets no beacon fields
+        s = _solver_new("vanilla", beacon_configs={
+            "assembling-machine-3": _bspec(8, 3, "legendary"),
+        }, beacon_quality="legendary")
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        out = _fmt_new("vanilla", "electronic-circuit", 60, solver=s)
+        steps = self._steps(out)
+        ec = steps["electronic-circuit"]
+        self.assertIn("beacon_spec", ec)
+        self.assertEqual(ec["beacon_spec"], {"count": 8, "tier": 3, "quality": "legendary"})
+        self.assertIn("beacon_quality", ec)
+        self.assertEqual(ec["beacon_quality"], "legendary")
+        ip = steps["iron-plate"]
+        self.assertNotIn("beacon_spec", ip)
+        self.assertNotIn("beacon_quality", ip)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

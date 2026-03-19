@@ -1289,11 +1289,17 @@ def format_output(
                 k: _f(v)
                 for k, v in sorted(s["inputs"].items(), key=lambda x: -x[1])
             },
+            "machine_quality":    solver.machine_quality,
             "beacon_speed_bonus": round(s["beacon_speed_bonus"], 6),
             "power_kw":           round(pwr,      4),
             "power_kw_ceil":      round(pwr_ceil, 4),
             "beacon_power_kw":    round(bpwr,     4),
         }
+        if module_specs:
+            step_out["module_specs"] = module_specs
+        if beacon_spec is not None:
+            step_out["beacon_spec"]    = beacon_spec
+            step_out["beacon_quality"] = solver.beacon_quality
         steps_list_raw.append(step_out)
 
     steps_list = sorted(steps_list_raw, key=lambda x: -x["rate_per_min"])
