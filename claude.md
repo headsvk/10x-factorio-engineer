@@ -370,6 +370,12 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 
 ---
 
+## Using the CLI
+
+Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.md` §2 for the full flags reference and output shape. CLAUDE.md only has the bare invocation pattern — SKILL.md §2 is the authoritative flags table.
+
+---
+
 ## Tests
 
 ```bash
