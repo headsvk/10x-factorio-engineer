@@ -120,8 +120,7 @@ the same data that powers <https://kirkmcdonald.github.io/calc.html>.
 ### Dashboard
 
 - **Factorio icons** — item and machine icons throughout the UI
-- **Shopping list view** — total machines, belts, and modules needed to physically build all lines
-- **Multi-save slots** — switch between named factory states without manual import/export
+- **Per-location tabs** — separate production lines, miners, and power totals per planet (Nauvis, Vulcanus, Gleba, Fulgora, Aquilo) and per space platform; players can have multiple named platforms
 
 ### Skill / Workflow
 

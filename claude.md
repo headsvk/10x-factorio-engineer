@@ -436,13 +436,6 @@ Top-level keys: `items[]`, `recipes[]`, `resources[]`, `planets[]`
 
 ---
 
-## Known Limitations / Pending Work
-
-1. **No quality recycling loops**: Quality tier progression (e.g. recycling normal→legendary) is not modelled. Machine/module/beacon quality multipliers are applied directly but the throughput cost of quality recycling lines is out of scope.
-
-
----
-
 ## Dependencies
 
 Stdlib only — no `pip install` required: `argparse`, `json`, `math`, `os`, `sys`, `urllib.request`, `collections`, `fractions`.
