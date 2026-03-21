@@ -2149,5 +2149,191 @@ class TestStepConfig(unittest.TestCase):
         self.assertNotIn("beacon_quality", ip)
 
 
+# ---------------------------------------------------------------------------
+# Human-readable output format
+# ---------------------------------------------------------------------------
+
+class TestHumanReadableOutput(unittest.TestCase):
+
+    def test_basic_output_not_json(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        text = cli.format_human_readable(out)
+        self.assertIsInstance(text, str)
+        self.assertFalse(text.startswith("{"), "human output should not start with '{'")
+
+    def test_header_single_target(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        text = cli.format_human_readable(out)
+        self.assertIn("electronic-circuit", text)
+        self.assertIn("60", text)
+        self.assertIn("/min", text)
+
+    def test_header_multi_target(self):
+        s = _solver_new()
+        s.solve("electronic-circuit", Fraction(60))
+        s.solve("iron-gear-wheel", Fraction(30))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        import argparse
+        d = _DATA["vanilla"]
+        args = argparse.Namespace(
+            items=["electronic-circuit", "iron-gear-wheel"],
+            rates=[60.0, 30.0],
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        text = cli.format_human_readable(out)
+        self.assertIn("Targets:", text)
+        self.assertIn("electronic-circuit", text)
+        self.assertIn("iron-gear-wheel", text)
+
+    def test_sections_present(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        text = cli.format_human_readable(out)
+        self.assertIn("Production Steps", text)
+        self.assertIn("Raw Resources", text)
+        self.assertIn("Miners Needed", text)
+        self.assertIn("Power", text)
+
+    def test_machine_names_in_steps(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        text = cli.format_human_readable(out)
+        self.assertIn("assembling-machine-3", text)
+        self.assertIn("electric-furnace", text)
+
+    def test_inputs_listed(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        text = cli.format_human_readable(out)
+        self.assertIn("<-", text)
+        self.assertIn("iron-plate", text)
+        self.assertIn("copper-cable", text)
+
+    def test_raw_resources_listed(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        text = cli.format_human_readable(out)
+        self.assertIn("iron-ore", text)
+        self.assertIn("copper-ore", text)
+
+    def test_module_config_shown_in_header(self):
+        s = _solver_new(module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]})
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        import argparse
+        d = _DATA["vanilla"]
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60.0], rate=60.0,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
+            beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        text = cli.format_human_readable(out)
+        self.assertIn("Modules:", text)
+        self.assertIn("prod-3", text)
+
+    def test_module_detail_per_step(self):
+        s = _solver_new(module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]})
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        import argparse
+        d = _DATA["vanilla"]
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60.0], rate=60.0,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
+            beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        text = cli.format_human_readable(out)
+        self.assertIn("modules:", text)
+
+    def test_beacon_config_shown_in_header(self):
+        s = _solver_new(
+            beacon_configs={"assembling-machine-3": _bspec(8, 3, "legendary")},
+            beacon_quality="legendary",
+        )
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        import argparse
+        d = _DATA["vanilla"]
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60.0], rate=60.0,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="legendary",
+            module_configs=None,
+            beacon_configs={"assembling-machine-3": _bspec(8, 3, "legendary")},
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        text = cli.format_human_readable(out)
+        self.assertIn("Beacons:", text)
+        self.assertIn("tier-3", text)
+
+    def test_machine_quality_in_step_label(self):
+        s = _solver_new(machine_quality="legendary")
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        import argparse
+        d = _DATA["vanilla"]
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60.0], rate=60.0,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="legendary", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        text = cli.format_human_readable(out)
+        self.assertIn("legendary assembling-machine-3", text)
+
+    def test_pumpjack_shows_yield(self):
+        s = _solver_new()
+        s.solve("heavy-oil", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        out = _fmt_new("vanilla", "heavy-oil", 60, solver=s)
+        text = cli.format_human_readable(out)
+        self.assertIn("field yield", text)
+
+    def test_bus_inputs_section(self):
+        s = _solver_new(bus_items=frozenset(["iron-plate", "copper-plate"]))
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        import argparse
+        d = _DATA["vanilla"]
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit",
+            rates=[60.0], rate=60.0,
+            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        text = cli.format_human_readable(out)
+        self.assertIn("Bus Inputs", text)
+        self.assertIn("iron-plate", text)
+
+    def test_power_line_present(self):
+        out = _fmt_new("vanilla", "electronic-circuit", 60)
+        text = cli.format_human_readable(out)
+        self.assertIn("MW", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
