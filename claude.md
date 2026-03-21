@@ -143,7 +143,6 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `build_raw_set(data)` | Items with no recipe (ores, crude-oil, water, etc.) |
 | `build_recipe_index(data)` | `{item_key: [recipe, ...]}`, skips recycling + barrel subgroups |
 | `build_resource_info(data)` | `{item: {mining_time, yield, category}}` using `Fraction` |
-| `build_fluid_set(data)` | `frozenset` of item keys whose type is `"fluid"` in the dataset |
 | `build_machine_power_w(data)` | `{machine_key: watts}` for electric machines only (burners excluded); scans `crafting_machines`, `agricultural_tower`, `rocket_silo`, `mining_drills` |
 | `_beacon_sharing_factor(machine_key)` | Returns how many machines share each physical beacon (4 for ≤4-tile machines, 2 for 5–7-tile, 1 for ≥8-tile) |
 | `_compute_step_power(...)` | Returns `(power_kw, power_kw_ceil, beacon_power_kw)` for a production step using module/beacon config |
