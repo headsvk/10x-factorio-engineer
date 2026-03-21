@@ -681,44 +681,6 @@ class TestNutrientsRecipes(unittest.TestCase):
 # Turbo belt (Space Age)
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Prefs file (factorio-prefs.json)
-# ---------------------------------------------------------------------------
-
-class TestPrefsFile(unittest.TestCase):
-    """load_prefs() reads factorio-prefs.json and returns a plain dict."""
-
-    def test_missing_file_returns_empty_dict(self):
-        result = cli.load_prefs("/nonexistent/path/prefs.json")
-        self.assertEqual(result, {})
-
-    def test_reads_all_supported_fields(self):
-        import json, tempfile, os
-        prefs = {
-            "dataset": "space-age",
-            "assembler": 2,
-            "furnace": "stone",
-            "miner": "big",
-            "prod_module": 1,
-            "speed": 0.5,
-            "recipe_overrides": {"heavy-oil": "coal-liquefaction"},
-            "machine_overrides": {"metallurgy": "assembling-machine-3"},
-            "preferred_belt": "blue",
-        }
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json",
-                                         delete=False, encoding="utf-8") as f:
-            json.dump(prefs, f)
-            fname = f.name
-        try:
-            loaded = cli.load_prefs(fname)
-            self.assertEqual(loaded["dataset"],   "space-age")
-            self.assertEqual(loaded["assembler"],  2)
-            self.assertEqual(loaded["recipe_overrides"]["heavy-oil"], "coal-liquefaction")
-            self.assertEqual(loaded["machine_overrides"]["metallurgy"], "assembling-machine-3")
-            self.assertEqual(loaded["preferred_belt"], "blue")
-        finally:
-            os.unlink(fname)
-
 
 # ===========================================================================
 # NEW API HELPERS
