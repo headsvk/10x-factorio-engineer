@@ -19,9 +19,6 @@ Usage:
                   [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
                   [--bus-item ITEM-ID]                          # repeatable
 
-Auto-loads factorio-prefs.json from the current directory if present.
-CLI flags always override prefs.
-
 Outputs clean JSON to stdout:
   - production_steps: machine type + count per recipe in the dependency tree
   - raw_resources:    mining / pumping rates per minute (no recipe)
@@ -63,7 +60,6 @@ from fractions import Fraction
 # ---------------------------------------------------------------------------
 
 DATA_DIR   = os.path.dirname(os.path.abspath(__file__))
-PREFS_FILE = "factorio-prefs.json"   # auto-loaded from CWD if present
 
 DATA_FILES = {
     "vanilla":   "vanilla-2.0.55.json",
@@ -301,26 +297,6 @@ def load_data(dataset: str) -> dict:
         urllib.request.urlretrieve(url, path)
         sys.stderr.write(f"Saved to {path}\n")
     with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def load_prefs(path: str | None = None) -> dict:
-    """
-    Load factorio-prefs.json from the current working directory (or *path*
-    if given).  Returns an empty dict if the file doesn't exist.
-
-    Supported keys (all optional):
-      dataset, assembler, furnace, miner, machine_quality, beacon_quality, belt, pump
-        — become CLI flag defaults; explicit flags still win.
-      recipe_overrides  {item-id: recipe-key}
-        — merged with --recipe flags; explicit --recipe flags win.
-      preferred_belt    "yellow"|"red"|"blue"|"turbo"
-        — consumed by Claude (SKILL.md) only; not used by the solver.
-    """
-    filepath = path or PREFS_FILE
-    if not os.path.exists(filepath):
-        return {}
-    with open(filepath, encoding="utf-8") as fh:
         return json.load(fh)
 
 
@@ -1413,7 +1389,7 @@ def _parse_beacon_spec(raw_value: str, flag: str) -> dict:
     return {"count": count, "tier": tier, "quality": parts[2]}
 
 
-def parse_args(prefs: dict | None = None) -> argparse.Namespace:
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "Factorio production calculator -- outputs JSON with machine counts, "
@@ -1521,12 +1497,6 @@ Examples:
             "E.g. --bus-item iron-plate --bus-item copper-plate"
         ),
     )
-    if prefs:
-        p.set_defaults(**{
-            k: v for k, v in prefs.items()
-            if k in {"dataset", "assembler", "furnace", "miner",
-                     "machine_quality", "beacon_quality"}
-        })
     args = p.parse_args()
     if not args.items:
         p.error("At least one --item must be provided.")
@@ -1554,11 +1524,10 @@ Examples:
 
 
 def main() -> None:
-    prefs = load_prefs()
-    args  = parse_args(prefs)
+    args  = parse_args()
 
-    # Parse --recipe ITEM=RECIPE (prefs baseline; CLI flags win)
-    recipe_overrides: dict[str, str] = dict(prefs.get("recipe_overrides", {}))
+    # Parse --recipe ITEM=RECIPE
+    recipe_overrides: dict[str, str] = {}
     for raw in args.recipe:
         k, v = _parse_kv(raw, "--recipe")
         recipe_overrides[k] = v
