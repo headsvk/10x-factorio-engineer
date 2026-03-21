@@ -55,6 +55,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [--i
 | `--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Per-recipe module override; repeatable |
 | `--recipe-beacon RECIPE=COUNT:TIER:QUALITY` | _(none)_ | Per-recipe beacon override; repeatable |
 | `--bus-item ITEM-ID` | _(none)_ | Treat item as a bus input (raw resource); stops recursion at this item; repeatable |
+| `--format json/human` | `json` | Output format. **Always omit this flag** (defaults to `json`) — `--format human` is for human terminal reading only, not for Claude's programmatic use. |
 
 **Module TYPE values:** `prod` / `speed` / `efficiency` (efficiency stored but not used in machine-count math — no speed/productivity effect)
 

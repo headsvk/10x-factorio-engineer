@@ -39,6 +39,7 @@ in `10x-factorio-engineer/references/` are loaded on demand per topic.
 | `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. To preview: run `python dev/preview.py` then use the Claude Preview MCP tool (server name `dashboard-preview`, config at `.claude/launch.json`) — **never** open the file in a browser via `--open` or `subprocess`. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. The JSON example must include every field that appears in real CLI output — run the CLI and copy actual values rather than inventing them. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. Verify by grepping SKILL.md for each new field name and confirming it appears in both the example block and the field table. |
 | CLI flag added, removed, or changed | 1. Update the module-level docstring at the top of `cli.py` (Usage block). 2. Update the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
+| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) OR `--format human` output layout changes | Update the sample `--format human` output block in `README.md`. Run the CLI with `--format human` and copy actual output rather than editing manually. |
 | Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample-state.json` to match the new schema. 4. Run `python dev/gen_sample_state.py` to regenerate `dev/sample-state.b64`. 5. Run `python dev/build_dashboard.py` to rebuild the artifact. |
 | New CLI flag or solver behaviour added | Add tests to `dev/test_cli.py` covering the new feature. Run `python -m unittest dev.test_cli -v` and fix any failures before finishing. Update the test count in `README.md` and in the Tests section of `CLAUDE.md`. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
@@ -122,7 +123,7 @@ and run `python dev/wiki.py crawl` to fetch them.
 | `dev/wiki_crawl_urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
 | `dev/wiki.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki.py crawl` (~15 min) |
-| `dev/test_cli.py` | `unittest` suite (136 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (148 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -374,7 +375,7 @@ This matches FactorioLab's display. Players divide this across their pumpjack fi
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 136 tests covering:
+`dev/test_cli.py` contains 148 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -402,6 +403,7 @@ python -m unittest dev.test_cli -v
 | `TestMultiTarget` | Two-item solve merges shared sub-recipes; `targets` array replaces top-level `item`/`rate_per_min`; raw_resources and bus_inputs accumulate across all targets; belt/pump fields absent in multi-target output |
 | `TestStepInputs` | `inputs` dict present on every production step; ingredient consumption rates correct; reduced by productivity modules; bus items appear in step inputs; oil steps have crude-oil input; multi-target inputs accumulate |
 | `TestStepConfig` | `machine_quality` always present per step; `module_specs` present only when modules configured (global or per-recipe override); `beacon_spec`+`beacon_quality` present only when beacon configured; per-recipe override wins over global |
+| `TestHumanReadableOutput` | `format_human_readable()` returns non-JSON text; header contains item+rate; sections present (Production Steps, Raw Resources, Miners Needed, Power); machine names in steps; module/beacon config in header and detail lines; machine quality in step label; pumpjack shows yield%; bus inputs section when bus items present |
 
 ---
 

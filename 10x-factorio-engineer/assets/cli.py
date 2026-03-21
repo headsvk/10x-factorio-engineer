@@ -18,8 +18,9 @@ Usage:
                   [--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY]  # repeatable
                   [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
                   [--bus-item ITEM-ID]                          # repeatable
+                  [--format json|human]
 
-Outputs clean JSON to stdout:
+Outputs clean JSON to stdout (default), or human-readable text with --format human:
   - production_steps: machine type + count per recipe in the dependency tree
   - raw_resources:    mining / pumping rates per minute (no recipe)
   - miners_needed:    drill / pumpjack / offshore-pump counts per raw resource
@@ -1351,6 +1352,127 @@ def format_output(
     return out
 
 
+def format_human_readable(out: dict) -> str:
+    """Render the output dict from format_output() as human-readable text."""
+    lines: list[str] = []
+
+    # --- Header ---
+    if "targets" in out:
+        targets_str = ", ".join(
+            f"{t['item']}@{t['rate_per_min']}/min" for t in out["targets"]
+        )
+        lines.append(f"=== Targets: {targets_str} ===")
+    else:
+        lines.append(f"=== {out['item']} @ {out['rate_per_min']}/min ===")
+
+    config_parts = [
+        f"Dataset: {out['dataset']}",
+        f"Assembler: {out['assembler']}",
+        f"Furnace: {out['furnace']}",
+        f"Miner: {out['miner']}",
+    ]
+    lines.append("  |  ".join(config_parts))
+
+    mq = out.get("machine_quality", "normal")
+    bq = out.get("beacon_quality", "normal")
+    if mq != "normal" or bq != "normal":
+        lines.append(f"Machine quality: {mq}  |  Beacon quality: {bq}")
+
+    if out.get("module_configs"):
+        for machine, specs in out["module_configs"].items():
+            spec_strs = []
+            for s in specs:
+                spec_strs.append(f"{s['count']}x {s['type']}-{s['tier']}-{s['quality']}")
+            lines.append(f"Modules:  {machine} = {', '.join(spec_strs)}")
+
+    if out.get("beacon_configs"):
+        for machine, spec in out["beacon_configs"].items():
+            lines.append(
+                f"Beacons:  {machine} = {spec['count']}x tier-{spec['tier']}-{spec['quality']}"
+            )
+
+    # --- Production Steps ---
+    lines.append("")
+    lines.append("Production Steps")
+    lines.append("----------------")
+    for step in out.get("production_steps", []):
+        recipe       = step["recipe"]
+        machine      = step["machine"]
+        machine_q    = step.get("machine_quality", "normal")
+        mc           = step["machine_count"]
+        mc_ceil      = step["machine_count_ceil"]
+        rate         = step["rate_per_min"]
+        machine_label = f"{machine_q} {machine}" if machine_q != "normal" else machine
+        lines.append(f"{recipe:<30}  {rate}/min    {mc} -> {mc_ceil} {machine_label}")
+
+        # optional modules / beacons / speed / power detail line
+        detail_parts: list[str] = []
+        if step.get("module_specs"):
+            mod_strs = []
+            for s in step["module_specs"]:
+                mod_strs.append(f"{s['count']}x {s['type']}-{s['tier']}-{s['quality']}")
+            detail_parts.append(f"modules: {', '.join(mod_strs)}")
+        if step.get("beacon_spec") is not None:
+            bs = step["beacon_spec"]
+            detail_parts.append(f"beacons: {bs['count']}x tier-{bs['tier']}-{bs['quality']}")
+        if step.get("beacon_speed_bonus", 0):
+            detail_parts.append(f"speed bonus: +{round(step['beacon_speed_bonus'], 4)}")
+        if detail_parts:
+            lines.append(f"  {('  |  ').join(detail_parts)}")
+
+        pwr      = step.get("power_kw", 0)
+        pwr_ceil = step.get("power_kw_ceil", 0)
+        bpwr     = step.get("beacon_power_kw", 0)
+        if pwr or bpwr:
+            pwr_str = f"power: {pwr} kW  ({pwr_ceil} kW ceil)"
+            if bpwr:
+                pwr_str += f"  +  {bpwr} kW beacons"
+            lines.append(f"  {pwr_str}")
+
+        for inp_item, inp_rate in step.get("inputs", {}).items():
+            lines.append(f"  <- {inp_item:<28}  {inp_rate}/min")
+        lines.append("")
+
+    # --- Raw Resources ---
+    lines.append("Raw Resources")
+    lines.append("-------------")
+    for item, rate in out.get("raw_resources", {}).items():
+        lines.append(f"  {item:<30}  {rate}/min")
+
+    # --- Miners ---
+    miners = out.get("miners_needed", {})
+    if miners:
+        lines.append("")
+        lines.append("Miners Needed")
+        lines.append("-------------")
+        for item, info in miners.items():
+            if not isinstance(info, dict):
+                continue
+            machine = info.get("machine", "")
+            if "required_yield_pct" in info:
+                lines.append(f"  {item:<30}  requires {info['required_yield_pct']}% field yield  ({machine})")
+            else:
+                mc  = info.get("machine_count", 0)
+                mcc = info.get("machine_count_ceil", 0)
+                lines.append(f"  {item:<30}  {mc} {machine} ({mcc} ceil)")
+
+    # --- Bus Inputs ---
+    if out.get("bus_inputs"):
+        lines.append("")
+        lines.append("Bus Inputs (from bus, not mined)")
+        lines.append("---------------------------------")
+        for item, rate in out["bus_inputs"].items():
+            lines.append(f"  {item:<30}  {rate}/min")
+
+    # --- Power ---
+    lines.append("")
+    lines.append("Power")
+    lines.append("-----")
+    lines.append(f"  Total: {out.get('total_power_mw', 0)} MW  ({out.get('total_power_mw_ceil', 0)} MW with ceil counts)")
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -1497,6 +1619,11 @@ Examples:
             "E.g. --bus-item iron-plate --bus-item copper-plate"
         ),
     )
+    p.add_argument(
+        "--format", default="json", choices=["json", "human"],
+        dest="output_format",
+        help="Output format: json (default) or human-readable text.",
+    )
     args = p.parse_args()
     if not args.items:
         p.error("At least one --item must be provided.")
@@ -1609,10 +1736,11 @@ def main() -> None:
     args.recipe_module_overrides  = recipe_module_overrides  or None
     args.recipe_beacon_overrides  = recipe_beacon_overrides  or None
 
-    print(json.dumps(format_output(
-        args, solver, resource_info,
-        machine_power_w=machine_power_w,
-    ), indent=2))
+    result = format_output(args, solver, resource_info, machine_power_w=machine_power_w)
+    if args.output_format == "human":
+        print(format_human_readable(result))
+    else:
+        print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
