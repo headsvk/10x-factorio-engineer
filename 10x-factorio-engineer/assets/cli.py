@@ -387,16 +387,6 @@ def build_resource_info(data: dict) -> dict:
     return info
 
 
-def build_fluid_set(data: dict) -> frozenset:
-    """Return set of item keys whose type is 'fluid' in the dataset."""
-    fluids: set[str] = set()
-    for item in data.get("items", []):
-        if item.get("type") == "fluid":
-            key = item.get("key") or item.get("name", "")
-            if key:
-                fluids.add(key)
-    return frozenset(fluids)
-
 
 def build_machine_power_w(data: dict) -> dict[str, int]:
     """
