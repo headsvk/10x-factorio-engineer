@@ -139,7 +139,6 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | Function | Role |
 |----------|------|
 | `load_data(dataset)` | Load JSON; auto-download if missing |
-| `load_prefs(path)` | Load `factorio-prefs.json` from CWD (or given path); returns `{}` if absent |
 | `build_raw_set(data)` | Items with no recipe (ores, crude-oil, water, etc.) |
 | `build_recipe_index(data)` | `{item_key: [recipe, ...]}`, skips recycling + barrel subgroups |
 | `build_resource_info(data)` | `{item: {mining_time, yield, category}}` using `Fraction` |
@@ -397,7 +396,6 @@ python -m unittest dev.test_cli -v
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |
 | `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
-| `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
 | `TestMachinesFlag` | `rate_for_machines` round-trips integer/fractional machine counts; Fraction return type without beacons; prod-module and beacon round-trips; raises on raw resource; assembler level respected |
 | `TestPowerConsumption` | Electric machines have `power_kw > 0`; burner machines give 0; efficiency modules reduce power (quality-scaled); speed/prod penalty not quality-scaled; efficiency floor at −80%; beacon sharing (3×3 = ÷4, 5×5 = ÷2); `total_power_mw` in output; miner `power_kw` present; miner efficiency reduces power (quality-scaled, −80% floor); miner `beacon_power_kw` emitted and included in `total_power_mw` |
 | `TestProbabilisticOutputs` | `uranium-processing` U-238 output reflects 0.993 probability; U-235 reflects 0.007 probability; `rate_for_machines` returns correct probability-weighted rates for both isotopes; ratio U-235/U-238 machine count ≈ 141× |
