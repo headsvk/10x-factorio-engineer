@@ -2385,9 +2385,12 @@ class TestLocationFilter(unittest.TestCase):
         # Gleba has plants: jellystem and/or yumako-tree
         self.assertTrue(len(raw) > 0)
 
-    def test_space_platform_raw_set_empty(self):
+    def test_space_platform_raw_set_contains_asteroid_chunks(self):
         raw = _DATA["space-platform"]["raw_set"]
-        self.assertEqual(len(raw), 0)
+        self.assertIn("metallic-asteroid-chunk", raw)
+        self.assertIn("carbonic-asteroid-chunk", raw)
+        self.assertIn("oxide-asteroid-chunk", raw)
+        self.assertIn("promethium-asteroid-chunk", raw)
 
     def test_nauvis_excludes_vulcanus_recipes(self):
         # acid-neutralisation requires pressure=4000 (Vulcanus) → not valid on Nauvis
@@ -2426,6 +2429,33 @@ class TestLocationFilter(unittest.TestCase):
             s.solve("tungsten-ore", Fraction(60))
         self.assertIn("tungsten-ore", str(ctx.exception))
         self.assertIn("space-platform", str(ctx.exception))
+
+    def test_space_platform_space_science_pack_90_per_min(self):
+        # 90/min is the standard target rate matching blue/red/green science on Nauvis.
+        # Full chain must resolve without imports: chunks → ore/carbon/ice → plates/water → pack.
+        s = _solver("space-platform")
+        s.solve("space-science-pack", Fraction(90))
+        d = _DATA["space-platform"]["data"]
+        s.resolve_oil(d)
+
+        # Raw resources must be only asteroid chunks — no planet imports needed
+        self.assertSetEqual(
+            set(s.raw_resources.keys()),
+            {"metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk"},
+        )
+
+        # Verify the key recipes in the production chain
+        recipe_keys = {step["recipe"] for step in s.steps.values()}
+        self.assertIn("space-science-pack", recipe_keys)
+        self.assertIn("metallic-asteroid-crushing", recipe_keys)  # iron ore source
+        self.assertIn("carbonic-asteroid-crushing", recipe_keys)  # carbon source
+        self.assertIn("oxide-asteroid-crushing", recipe_keys)     # ice source
+        self.assertIn("iron-plate", recipe_keys)
+        # ice-melting not needed: space-science-pack consumes ice directly
+
+        # No oil products should be demanded
+        self.assertEqual(s.oil_demands.get("petroleum-gas", Fraction(0)), Fraction(0))
+        self.assertEqual(s.oil_demands.get("heavy-oil", Fraction(0)), Fraction(0))
 
     def test_explicit_recipe_override_bypasses_planet_filter(self):
         # simple-coal-liquefaction is Vulcanus-only (pressure=4000)
