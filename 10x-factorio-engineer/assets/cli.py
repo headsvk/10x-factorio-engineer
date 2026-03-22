@@ -8,7 +8,7 @@ Usage:
                   [--assembler 1|2|3]
                   [--furnace stone|steel|electric]
                   [--miner electric|big]
-                  [--dataset vanilla|space-age]
+                  [--location PLANET]
                   [--machine-quality QUALITY]
                   [--beacon-quality QUALITY]
                   [--modules MACHINE=COUNT:TYPE:TIER:QUALITY]   # repeatable
@@ -289,8 +289,13 @@ MODULE_EFFICIENCY_REDUCTION: dict[int, Fraction] = {
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_data(dataset: str) -> dict:
-    """Return parsed JSON for *dataset*, downloading the file if absent."""
+def load_data(location: str | None = None) -> dict:
+    """Return parsed JSON for the appropriate dataset, downloading the file if absent.
+
+    location=None  → vanilla dataset (no planet filtering)
+    location=str   → space-age dataset; validates location key against dataset planets
+    """
+    dataset = "space-age" if location else "vanilla"
     path = os.path.join(DATA_DIR, DATA_FILES[dataset])
     if not os.path.exists(path):
         url = DATA_URLS[dataset]
@@ -298,24 +303,52 @@ def load_data(dataset: str) -> dict:
         urllib.request.urlretrieve(url, path)
         sys.stderr.write(f"Saved to {path}\n")
     with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+        data = json.load(fh)
+    if location is not None:
+        valid_keys = {p["key"] for p in data.get("planets", [])}
+        if location not in valid_keys:
+            sys.exit(f"Unknown location '{location}'. Valid: {sorted(valid_keys)}")
+    return data
 
 
 # ---------------------------------------------------------------------------
 # Index building
 # ---------------------------------------------------------------------------
 
-def build_raw_set(data: dict) -> frozenset:
-    """Return set of item keys that are raw inputs (mined / pumped)."""
+def build_raw_set(data: dict, location: str | None = None) -> frozenset:
+    """Return set of item keys that are raw inputs (mined / pumped).
+
+    location=None  → original behaviour (all planets' resources)
+    location=str   → only resources available at that specific planet
+    """
     raw: set[str] = set()
-    for res in data.get("resources", []):
-        for r in res.get("results", []):
-            raw.add(r["name"])
-    for planet in data.get("planets", []):
-        pres = planet.get("resources", {})
-        raw.update(pres.get("resource", []))
-        raw.update(pres.get("offshore", []))
+    if location is None:
+        for res in data.get("resources", []):
+            for r in res.get("results", []):
+                raw.add(r["name"])
+        for planet in data.get("planets", []):
+            pres = planet.get("resources", {})
+            raw.update(pres.get("resource", []))
+            raw.update(pres.get("offshore", []))
+    else:
+        for planet in data.get("planets", []):
+            if planet["key"] == location:
+                pres = planet.get("resources", {})
+                raw.update(pres.get("resource", []))
+                raw.update(pres.get("offshore", []))
+                raw.update(pres.get("plants", []))
+                break
     return frozenset(raw)
+
+
+def get_planet_props(data: dict, location: str | None) -> dict:
+    """Return surface_properties dict for location, or {} if not found/None."""
+    if not location:
+        return {}
+    for p in data.get("planets", []):
+        if p["key"] == location:
+            return p.get("surface_properties", {})
+    return {}
 
 
 def build_recipe_index(data: dict) -> dict[str, list]:
@@ -495,10 +528,21 @@ def get_machine(cat: str, assembler_level: int, furnace_type: str) -> tuple[str,
     return ASSEMBLER_KEY[assembler_level], ASSEMBLER_SPEED[assembler_level]
 
 
+def _recipe_valid_for_planet(recipe: dict, planet_props: dict) -> bool:
+    """Return True if all recipe surface_conditions are satisfied by planet_props."""
+    for cond in recipe.get("surface_conditions", []):
+        prop = cond["property"]
+        val = planet_props.get(prop, 0)
+        if val < cond.get("min", val) or val > cond.get("max", val):
+            return False
+    return True
+
+
 def pick_recipe(
     item_key: str,
     recipe_idx: dict,
     overrides: dict | None = None,
+    planet_props: dict | None = None,
 ) -> dict | None:
     """
     Select canonical recipe for item_key.
@@ -517,13 +561,21 @@ def pick_recipe(
     if not candidates:
         return None
 
-    # 1. Explicit override
+    # 1. Explicit override — bypasses planet filtering
     if overrides and item_key in overrides:
         wanted = overrides[item_key]
         for r in candidates:
             if r["key"] == wanted:
                 return r
         # Override key not found among candidates -- fall through to defaults
+
+    # Planet filtering (only when planet_props given, no explicit override matched)
+    if planet_props:
+        filtered = [r for r in candidates if _recipe_valid_for_planet(r, planet_props)]
+        if filtered:
+            candidates = filtered
+        elif not (overrides and item_key in overrides):
+            return None  # all recipes filtered out by planet conditions
 
     # Sort by the game's display order so fallback picks the preferred variant
     candidates = sorted(candidates, key=lambda r: r.get("order", ""))
@@ -722,6 +774,8 @@ class Solver:
         recipe_module_overrides: dict | None = None,
         recipe_beacon_overrides: dict | None = None,
         bus_items: frozenset | None = None,
+        planet_props: dict | None = None,
+        location: str | None = None,
     ):
         self.recipe_idx      = recipe_idx
         self.raw_set         = raw_set
@@ -737,6 +791,8 @@ class Solver:
         self.recipe_module_overrides:  dict = recipe_module_overrides  or {}
         self.recipe_beacon_overrides:  dict = recipe_beacon_overrides  or {}
         self.bus_items: frozenset = frozenset(bus_items) if bus_items else frozenset()
+        self.planet_props: dict = planet_props or {}
+        self.location: str | None = location
 
         self.steps: dict[str, dict]             = {}
         self.raw_resources: dict[str, Fraction] = defaultdict(Fraction)
@@ -821,7 +877,7 @@ class Solver:
         formula in solve(), so solve(item, rate_for_machines(item, N)) gives
         back exactly N machines for the top-level step.
         """
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None)
         if recipe is None:
             raise ValueError(f"No recipe found for item '{item_key}'")
 
@@ -899,10 +955,15 @@ class Solver:
             self.raw_resources[item_key] += rate
             return
 
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None)
 
-        # No recipe → treat as raw
+        # No recipe → treat as raw (or raise if planet-restricted)
         if recipe is None:
+            if self.planet_props and item_key not in self.raw_set:
+                raise ValueError(
+                    f"'{item_key}' cannot be produced at location '{self.location}'. "
+                    f"Use --bus-item {item_key} to import it."
+                )
             self.raw_resources[item_key] += rate
             return
 
@@ -1292,7 +1353,7 @@ def format_output(
                 {"item": itm, "rate_per_min": rate}
                 for itm, rate in zip(args.items, args.rates)
             ],
-            "dataset":         args.dataset,
+            "location":        getattr(args, "location", None),
             "assembler":       args.assembler,
             "furnace":         args.furnace,
             "miner":           args.miner,
@@ -1303,7 +1364,7 @@ def format_output(
         out = {
             "item":            args.item,
             "rate_per_min":    args.rate,
-            "dataset":         args.dataset,
+            "location":        getattr(args, "location", None),
             "assembler":       args.assembler,
             "furnace":         args.furnace,
             "miner":           args.miner,
@@ -1365,8 +1426,10 @@ def format_human_readable(out: dict) -> str:
     else:
         lines.append(f"=== {out['item']} @ {out['rate_per_min']}/min ===")
 
+    location_val = out.get("location")
+    location_str = location_val if location_val is not None else "vanilla"
     config_parts = [
-        f"Dataset: {out['dataset']}",
+        f"Location: {location_str}",
         f"Assembler: {out['assembler']}",
         f"Furnace: {out['furnace']}",
         f"Miner: {out['miner']}",
@@ -1522,8 +1585,8 @@ def parse_args() -> argparse.Namespace:
 Examples:
   python cli.py --item electronic-circuit --rate 60
   python cli.py --item processing-unit --rate 10 --assembler 3 --furnace electric
-  python cli.py --item rocket-fuel --rate 5 --assembler 3 --dataset space-age
-  python cli.py --item tungsten-carbide --rate 60 --dataset space-age --miner big
+  python cli.py --item rocket-fuel --rate 5 --assembler 3 --location nauvis
+  python cli.py --item tungsten-carbide --rate 60 --location vulcanus --miner big
   python cli.py --item electronic-circuit --rate 60 --belt blue
   python cli.py --item lubricant --rate 60 --pump legendary
   python cli.py --item electronic-circuit --rate 60 \\
@@ -1551,8 +1614,16 @@ Examples:
                    help="Furnace type (default: electric).")
     p.add_argument("--miner",    default="electric", choices=["electric", "big"],
                    help="Mining drill for solid ores (default: electric).")
-    p.add_argument("--dataset",  default="vanilla", choices=["vanilla", "space-age"],
-                   help="Game dataset (default: vanilla).")
+    p.add_argument(
+        "--location", default=None,
+        metavar="PLANET",
+        dest="location",
+        help=(
+            "Target location (space-age planet or space-platform). "
+            "Omit for vanilla. Valid: nauvis, vulcanus, fulgora, gleba, aquilo, space-platform. "
+            "Automatically selects the Space Age dataset."
+        ),
+    )
     p.add_argument("--machine-quality", default="normal",
                    choices=list(QUALITY_NAMES), dest="machine_quality",
                    help="Quality tier of all machines (default: normal).")
@@ -1689,8 +1760,9 @@ def main() -> None:
 
     bus_items: frozenset = frozenset(args.bus_item)
 
-    data            = load_data(args.dataset)
-    raw_set         = build_raw_set(data)
+    data            = load_data(args.location)
+    raw_set         = build_raw_set(data, args.location)
+    planet_props    = get_planet_props(data, args.location)
     recipe_idx      = build_recipe_index(data)
     resource_info   = build_resource_info(data)
     machine_power_w      = build_machine_power_w(data)
@@ -1709,6 +1781,8 @@ def main() -> None:
         recipe_module_overrides=recipe_module_overrides or None,
         recipe_beacon_overrides=recipe_beacon_overrides or None,
         bus_items=bus_items or None,
+        planet_props=planet_props or None,
+        location=args.location,
     )
 
     targets: list[tuple[str, Fraction]] = []

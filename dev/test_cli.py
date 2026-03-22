@@ -24,20 +24,42 @@ _DATA: dict[str, dict] = {}
 
 
 def setUpModule() -> None:
-    for ds in ("vanilla", "space-age"):
-        data = cli.load_data(ds)
-        _DATA[ds] = {
+    vanilla_data = cli.load_data(None)
+    sa_data = cli.load_data("nauvis")  # any space-age location works to load the file
+
+    def _build(data: dict, location: "str | None") -> dict:
+        return {
             "data":                data,
-            "raw_set":             cli.build_raw_set(data),
+            "raw_set":             cli.build_raw_set(data, location),
             "recipe_idx":          cli.build_recipe_index(data),
             "resource_info":       cli.build_resource_info(data),
             "machine_module_slots": cli.build_machine_module_slots(data),
+            "planet_props":        cli.get_planet_props(data, location),
         }
 
+    _DATA["vanilla"]        = _build(vanilla_data, None)
+    _DATA["nauvis"]         = _build(sa_data, "nauvis")
+    _DATA["vulcanus"]       = _build(sa_data, "vulcanus")
+    _DATA["fulgora"]        = _build(sa_data, "fulgora")
+    _DATA["gleba"]          = _build(sa_data, "gleba")
+    _DATA["aquilo"]         = _build(sa_data, "aquilo")
+    _DATA["space-platform"] = _build(sa_data, "space-platform")
+    # Backward-compat alias: "space-age" uses space-age data with no planet filtering
+    # (planet_props={}, raw_set from all planets) — preserves old test behaviour
+    _DATA["space-age"] = {
+        "data":                sa_data,
+        "raw_set":             cli.build_raw_set(sa_data, None),
+        "recipe_idx":          cli.build_recipe_index(sa_data),
+        "resource_info":       cli.build_resource_info(sa_data),
+        "machine_module_slots": cli.build_machine_module_slots(sa_data),
+        "planet_props":        {},
+    }
 
-def _solver(dataset: str = "vanilla", **kwargs) -> cli.Solver:
-    """Convenience factory using the new Solver API; kwargs override defaults."""
-    d = _DATA[dataset]
+
+def _solver(location: "str | None" = None, **kwargs) -> cli.Solver:
+    """Convenience factory using the Solver API; kwargs override defaults."""
+    key = location or "vanilla"
+    d = _DATA[key]
     return cli.Solver(
         recipe_idx               = kwargs.get("recipe_idx",               d["recipe_idx"]),
         raw_set                  = kwargs.get("raw_set",                  d["raw_set"]),
@@ -53,6 +75,8 @@ def _solver(dataset: str = "vanilla", **kwargs) -> cli.Solver:
         recipe_module_overrides  = kwargs.get("recipe_module_overrides",  None),
         recipe_beacon_overrides  = kwargs.get("recipe_beacon_overrides",  None),
         bus_items                = kwargs.get("bus_items",                None),
+        planet_props             = kwargs.get("planet_props",             d["planet_props"]),
+        location                 = kwargs.get("location",                 location),
     )
 
 
@@ -215,7 +239,7 @@ class TestRecipeOverride(unittest.TestCase):
         s.resolve_oil(_DATA["vanilla"]["data"])
         args = argparse.Namespace(
             items=["solid-fuel"], item="solid-fuel", rates=[10], rate=10,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -491,7 +515,7 @@ class TestSimpleCoalLiquefaction(unittest.TestCase):
 
     def _solver_scl(self, **kw):
         return _solver(
-            dataset="space-age",
+            "vulcanus",
             recipe_overrides={"heavy-oil": "simple-coal-liquefaction"},
             **kw,
         )
@@ -698,9 +722,10 @@ def _bspec(count: int, tier: int, quality: str = "normal") -> dict:
     return {"count": count, "tier": tier, "quality": quality}
 
 
-def _solver_new(dataset: str = "vanilla", **kwargs) -> cli.Solver:
+def _solver_new(location: "str | None" = None, **kwargs) -> cli.Solver:
     """Convenience factory using the new Solver API."""
-    d = _DATA[dataset]
+    key = location or "vanilla"
+    d = _DATA[key]
     return cli.Solver(
         recipe_idx               = kwargs.get("recipe_idx",               d["recipe_idx"]),
         raw_set                  = kwargs.get("raw_set",                  d["raw_set"]),
@@ -716,13 +741,15 @@ def _solver_new(dataset: str = "vanilla", **kwargs) -> cli.Solver:
         recipe_module_overrides  = kwargs.get("recipe_module_overrides",  None),
         recipe_beacon_overrides  = kwargs.get("recipe_beacon_overrides",  None),
         bus_items                = kwargs.get("bus_items",                None),
+        planet_props             = kwargs.get("planet_props",             d["planet_props"]),
+        location                 = kwargs.get("location",                 location),
     )
 
 
 def _fmt_new(
-    dataset: str,
-    item: str,
-    rate: float,
+    location: "str | None" = None,
+    item: str = "",
+    rate: float = 0.0,
     *,
     solver: "cli.Solver | None" = None,
 ) -> dict:
@@ -731,16 +758,17 @@ def _fmt_new(
     Builds a solver internally unless one is passed in.
     """
     import argparse
-    d = _DATA[dataset]
+    key = location or "vanilla"
+    d = _DATA[key]
     if solver is None:
-        s = _solver_new(dataset)
+        s = _solver_new(location)
         s.solve(item, Fraction(rate))
         s.resolve_oil(d["data"])
     else:
         s = solver
     args = argparse.Namespace(
         items=[item], item=item, rates=[rate], rate=rate,
-        dataset=dataset, assembler=3, furnace="electric", miner="electric",
+        location=location, assembler=3, furnace="electric", miner="electric",
         machine_quality="normal", beacon_quality="normal",
         module_configs=None, beacon_configs=None,
         recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -961,7 +989,7 @@ class TestModuleConfig(unittest.TestCase):
 
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
-            rates=[60], rate=60, dataset="vanilla",
+            rates=[60], rate=60, location=None,
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
@@ -1278,7 +1306,7 @@ class TestRecipeMachineOverride(unittest.TestCase):
 
         args = argparse.Namespace(
             items=["iron-gear-wheel"], item="iron-gear-wheel",
-            rates=[60], rate=60, dataset="vanilla",
+            rates=[60], rate=60, location=None,
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
@@ -1343,7 +1371,7 @@ class TestBusItem(unittest.TestCase):
         s.resolve_oil(_DATA["vanilla"]["data"])
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
-            rates=[60], rate=60, dataset="vanilla",
+            rates=[60], rate=60, location=None,
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
@@ -1463,7 +1491,7 @@ class TestMachinesFlag(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 def _fmt_power(
-    dataset: str,
+    location: "str | None",
     item: str,
     rate: float,
     *,
@@ -1472,17 +1500,18 @@ def _fmt_power(
 ) -> dict:
     """Run solver + format_output including machine_power_w."""
     import argparse
-    d = _DATA[dataset]
+    key = location or "vanilla"
+    d = _DATA[key]
     machine_power_w = cli.build_machine_power_w(d["data"])
     if solver is None:
-        s = _solver_new(dataset, **solver_kwargs)
+        s = _solver_new(location, **solver_kwargs)
         s.solve(item, Fraction(rate))
         s.resolve_oil(d["data"])
     else:
         s = solver
     args = argparse.Namespace(
         items=[item], item=item, rates=[rate], rate=rate,
-        dataset=dataset, assembler=3, furnace="electric", miner="electric",
+        location=location, assembler=3, furnace="electric", miner="electric",
         machine_quality="normal", beacon_quality="normal",
         module_configs=None, beacon_configs=None,
         recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -1516,7 +1545,7 @@ class TestPowerConsumption(unittest.TestCase):
         s2.solve("iron-plate", Fraction(60))
         args = argparse.Namespace(
             items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
-            dataset="vanilla", assembler=3, furnace="stone", miner="electric",
+            location=None, assembler=3, furnace="stone", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -1541,7 +1570,7 @@ class TestPowerConsumption(unittest.TestCase):
         s_eff.solve("iron-plate", Fraction(60))
         args = argparse.Namespace(
             items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs={"electric-furnace": [_mspec(1, "efficiency", 3)]},
             beacon_configs=None,
@@ -1575,7 +1604,7 @@ class TestPowerConsumption(unittest.TestCase):
             s.solve("iron-plate", Fraction(60))
             args = argparse.Namespace(
                 items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
-                dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+                location=None, assembler=3, furnace="electric", miner="electric",
                 machine_quality="normal", beacon_quality="normal",
                 module_configs={"electric-furnace": [_mspec(1, "efficiency", 3, quality)]},
                 beacon_configs=None,
@@ -1630,7 +1659,7 @@ class TestPowerConsumption(unittest.TestCase):
         s_prod.solve("electronic-circuit", Fraction(60))
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
-            rates=[60], rate=60, dataset="vanilla",
+            rates=[60], rate=60, location=None,
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
@@ -1667,7 +1696,7 @@ class TestPowerConsumption(unittest.TestCase):
         s.solve("iron-plate", Fraction(60))
         args = argparse.Namespace(
             items=["iron-plate"], item="iron-plate", rates=[60], rate=60,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs={"electric-furnace": [_mspec(4, "efficiency", 3)]},
             beacon_configs=None,
@@ -1695,7 +1724,7 @@ class TestPowerConsumption(unittest.TestCase):
         s.solve("electronic-circuit", Fraction(60))
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
-            rates=[60], rate=60, dataset="vanilla",
+            rates=[60], rate=60, location=None,
             assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None,
@@ -1722,7 +1751,7 @@ class TestPowerConsumption(unittest.TestCase):
         s.resolve_oil(d["data"])
         args = argparse.Namespace(
             items=["heavy-oil"], item="heavy-oil", rates=[100], rate=100,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None,
             beacon_configs={"oil-refinery": _bspec(4, 3, "normal")},
@@ -1864,7 +1893,7 @@ class TestProbabilisticOutputs(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 def _fmt_multi(
-    dataset: str,
+    location: "str | None",
     targets: list,
     *,
     solver: "cli.Solver | None" = None,
@@ -1874,8 +1903,9 @@ def _fmt_multi(
     targets: list of (item_id, rate_per_min) tuples.
     """
     import argparse
-    d = _DATA[dataset]
-    s = solver if solver is not None else _solver_new(dataset)
+    key = location or "vanilla"
+    d = _DATA[key]
+    s = solver if solver is not None else _solver_new(location)
     for item, rate in targets:
         s.solve(item, Fraction(rate))
     s.resolve_oil(d["data"])
@@ -1884,7 +1914,7 @@ def _fmt_multi(
     args = argparse.Namespace(
         items=items, item=items[0],
         rates=rates, rate=rates[0],
-        dataset=dataset, assembler=3, furnace="electric", miner="electric",
+        location=location, assembler=3, furnace="electric", miner="electric",
         machine_quality="normal", beacon_quality="normal",
         module_configs=None, beacon_configs=None,
         recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -2017,7 +2047,7 @@ class TestStepInputs(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
             rates=[60.0], rate=60.0, machines_list=[],
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
             beacon_configs=None, recipe_machine_overrides=None,
@@ -2082,7 +2112,7 @@ class TestStepConfig(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
             rates=[60.0], rate=60.0, machines_list=[],
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="legendary", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -2178,7 +2208,7 @@ class TestHumanReadableOutput(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit", "iron-gear-wheel"],
             rates=[60.0, 30.0],
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -2226,7 +2256,7 @@ class TestHumanReadableOutput(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
             rates=[60.0], rate=60.0,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
             beacon_configs=None,
@@ -2247,7 +2277,7 @@ class TestHumanReadableOutput(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
             rates=[60.0], rate=60.0,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs={"assembling-machine-3": [_mspec(4, "prod", 3)]},
             beacon_configs=None,
@@ -2270,7 +2300,7 @@ class TestHumanReadableOutput(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
             rates=[60.0], rate=60.0,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="legendary",
             module_configs=None,
             beacon_configs={"assembling-machine-3": _bspec(8, 3, "legendary")},
@@ -2291,7 +2321,7 @@ class TestHumanReadableOutput(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
             rates=[60.0], rate=60.0,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="legendary", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -2318,7 +2348,7 @@ class TestHumanReadableOutput(unittest.TestCase):
         args = argparse.Namespace(
             items=["electronic-circuit"], item="electronic-circuit",
             rates=[60.0], rate=60.0,
-            dataset="vanilla", assembler=3, furnace="electric", miner="electric",
+            location=None, assembler=3, furnace="electric", miner="electric",
             machine_quality="normal", beacon_quality="normal",
             module_configs=None, beacon_configs=None,
             recipe_machine_overrides=None, recipe_module_overrides=None,
@@ -2333,6 +2363,115 @@ class TestHumanReadableOutput(unittest.TestCase):
         out = _fmt_new("vanilla", "electronic-circuit", 60)
         text = cli.format_human_readable(out)
         self.assertIn("MW", text)
+
+
+# ---------------------------------------------------------------------------
+# Location filtering (--location PLANET)
+# ---------------------------------------------------------------------------
+
+class TestLocationFilter(unittest.TestCase):
+    """Tests that --location correctly filters recipes and raw resources."""
+
+    def test_vulcanus_raw_set_contains_tungsten(self):
+        raw = _DATA["vulcanus"]["raw_set"]
+        self.assertIn("tungsten-ore", raw)
+
+    def test_vulcanus_raw_set_no_iron_ore(self):
+        raw = _DATA["vulcanus"]["raw_set"]
+        self.assertNotIn("iron-ore", raw)
+
+    def test_gleba_raw_set_contains_plants(self):
+        raw = _DATA["gleba"]["raw_set"]
+        # Gleba has plants: jellystem and/or yumako-tree
+        self.assertTrue(len(raw) > 0)
+
+    def test_space_platform_raw_set_empty(self):
+        raw = _DATA["space-platform"]["raw_set"]
+        self.assertEqual(len(raw), 0)
+
+    def test_nauvis_excludes_vulcanus_recipes(self):
+        # acid-neutralisation requires pressure=4000 (Vulcanus) → not valid on Nauvis
+        planet_props = _DATA["nauvis"]["planet_props"]
+        recipe_idx = _DATA["nauvis"]["recipe_idx"]
+        # Find acid-neutralisation recipe
+        acid_recipe = None
+        for rs in recipe_idx.values():
+            for r in rs:
+                if r["key"] == "acid-neutralisation":
+                    acid_recipe = r
+                    break
+            if acid_recipe:
+                break
+        if acid_recipe:
+            self.assertFalse(cli._recipe_valid_for_planet(acid_recipe, planet_props))
+
+    def test_vulcanus_allows_acid_neutralisation(self):
+        planet_props = _DATA["vulcanus"]["planet_props"]
+        recipe_idx = _DATA["vulcanus"]["recipe_idx"]
+        acid_recipe = None
+        for rs in recipe_idx.values():
+            for r in rs:
+                if r["key"] == "acid-neutralisation":
+                    acid_recipe = r
+                    break
+            if acid_recipe:
+                break
+        if acid_recipe:
+            self.assertTrue(cli._recipe_valid_for_planet(acid_recipe, planet_props))
+
+    def test_space_platform_errors_on_unavailable_item(self):
+        # tungsten-ore has no recipe on space-platform and is not in raw_set there
+        s = _solver("space-platform")
+        with self.assertRaises(ValueError) as ctx:
+            s.solve("tungsten-ore", Fraction(60))
+        self.assertIn("tungsten-ore", str(ctx.exception))
+        self.assertIn("space-platform", str(ctx.exception))
+
+    def test_explicit_recipe_override_bypasses_planet_filter(self):
+        # simple-coal-liquefaction is Vulcanus-only (pressure=4000)
+        # but explicit --recipe override should bypass this on any planet
+        idx = _DATA["nauvis"]["recipe_idx"]
+        planet_props = _DATA["nauvis"]["planet_props"]
+        r = cli.pick_recipe("heavy-oil", idx,
+                            overrides={"heavy-oil": "simple-coal-liquefaction"},
+                            planet_props=planet_props)
+        # Should return the recipe despite planet filter
+        assert r is not None
+        self.assertEqual(r["key"], "simple-coal-liquefaction")
+
+    def test_location_field_in_output(self):
+        import argparse
+        d = _DATA["vulcanus"]
+        s = _solver("vulcanus")
+        s.solve("tungsten-plate", Fraction(60))
+        s.resolve_oil(d["data"])
+        args = argparse.Namespace(
+            items=["tungsten-plate"], item="tungsten-plate", rates=[60.0], rate=60.0,
+            location="vulcanus", assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        result = cli.format_output(args, s, d["resource_info"])
+        self.assertEqual(result["location"], "vulcanus")
+
+    def test_no_location_gives_null_in_output(self):
+        import argparse
+        d = _DATA["vanilla"]
+        s = _solver()
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(d["data"])
+        args = argparse.Namespace(
+            items=["electronic-circuit"], item="electronic-circuit", rates=[60.0], rate=60.0,
+            location=None, assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        result = cli.format_output(args, s, d["resource_info"])
+        self.assertIsNone(result.get("location"))
 
 
 if __name__ == "__main__":
