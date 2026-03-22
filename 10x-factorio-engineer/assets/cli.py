@@ -180,6 +180,26 @@ RECIPE_DEFAULTS: dict[str, str] = {
     # minable) and fish-breeding creates a circular nutrients dependency.
     # nutrients-from-yumako-mash is the cleanest fully-automatable Gleba route.
     "nutrients": "nutrients-from-yumako-mash",
+    # steam-condensation sorts before ice-melting (order field: b < c) but
+    # steam is never a raw resource — ice-melting is the correct automatable default.
+    "water": "ice-melting",
+    # ammoniacal-solution-separation sorts first for ice (order a[ammonia] < b-a-c)
+    # but ammoniacal-solution is only a raw resource on Aquilo. On space platforms
+    # and elsewhere, oxide-asteroid-crushing is the correct automatable source.
+    # On Aquilo, ice is mined directly so this default is never reached there.
+    "ice": "oxide-asteroid-crushing",
+}
+
+# Location-specific recipe overrides. Checked before exact-key-match so that
+# location correctness wins over the implicit "recipe key == item key" heuristic.
+# Overridden by explicit --recipe flags (step 1 in pick_recipe).
+RECIPE_DEFAULTS_BY_LOCATION: dict[str, dict[str, str]] = {
+    "space-platform": {
+        # The recipe with key=="carbon" (coal+sulfuric-acid) is the standard
+        # Nauvis route but coal and sulfuric-acid are unavailable on platforms.
+        # carbonic-asteroid-chunk is a platform raw resource; use it directly.
+        "carbon": "carbonic-asteroid-crushing",
+    },
 }
 
 # Productivity module bonus per filled slot, by tier
@@ -338,6 +358,15 @@ def build_raw_set(data: dict, location: str | None = None) -> frozenset:
                 raw.update(pres.get("offshore", []))
                 raw.update(pres.get("plants", []))
                 break
+        # Asteroid collectors are not modeled in the dataset — chunks are the
+        # raw inputs for space platforms, gathered externally by collectors.
+        if location == "space-platform":
+            raw.update({
+                "metallic-asteroid-chunk",
+                "carbonic-asteroid-chunk",
+                "oxide-asteroid-chunk",
+                "promethium-asteroid-chunk",
+            })
     return frozenset(raw)
 
 
@@ -543,16 +572,20 @@ def pick_recipe(
     recipe_idx: dict,
     overrides: dict | None = None,
     planet_props: dict | None = None,
+    location: str | None = None,
 ) -> dict | None:
     """
     Select canonical recipe for item_key.
 
     Priority:
       1. Explicit override from --recipe ITEM=RECIPE flag.
-      2. Recipe whose key == item_key (exact match).
-      3. advanced-oil-processing (legacy fallback for oil products).
-      3.5. Entry in RECIPE_DEFAULTS (overrides order-sort for un-automatable defaults).
-      4. First candidate after sorting by the game's ``order`` field.
+      2. Entry in RECIPE_DEFAULTS_BY_LOCATION for the current location.
+         (Before exact-key-match so location correctness wins over the implicit
+         "recipe key == item key" heuristic.)
+      3. Recipe whose key == item_key (exact match).
+      4. advanced-oil-processing (legacy fallback for oil products).
+      4.5. Entry in RECIPE_DEFAULTS (overrides order-sort for un-automatable defaults).
+      5. First candidate after sorting by the game's ``order`` field.
 
     Sorting by ``order`` before the fallback selects the game-preferred recipe
     (e.g. solid-fuel-from-petroleum-gas over less-efficient variants).
@@ -580,24 +613,33 @@ def pick_recipe(
     # Sort by the game's display order so fallback picks the preferred variant
     candidates = sorted(candidates, key=lambda r: r.get("order", ""))
 
-    # 2. Exact key match
+    # 2. Location-specific defaults (checked before exact-key-match)
+    if location:
+        loc_defaults = RECIPE_DEFAULTS_BY_LOCATION.get(location, {})
+        if item_key in loc_defaults:
+            wanted = loc_defaults[item_key]
+            for r in candidates:
+                if r["key"] == wanted:
+                    return r
+
+    # 3. Exact key match
     for r in candidates:
         if r["key"] == item_key:
             return r
 
-    # 3. advanced-oil-processing legacy fallback
+    # 4. advanced-oil-processing legacy fallback
     for r in candidates:
         if r["key"] == "advanced-oil-processing":
             return r
 
-    # 3.5. Hard-coded preferred recipe (avoids unautomatable order-sort defaults)
+    # 4.5. Hard-coded preferred recipe (avoids unautomatable order-sort defaults)
     if item_key in RECIPE_DEFAULTS:
         wanted = RECIPE_DEFAULTS[item_key]
         for r in candidates:
             if r["key"] == wanted:
                 return r
 
-    # 4. First after order-sort
+    # 5. First after order-sort
     return candidates[0]
 
 
@@ -877,7 +919,7 @@ class Solver:
         formula in solve(), so solve(item, rate_for_machines(item, N)) gives
         back exactly N machines for the top-level step.
         """
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location)
         if recipe is None:
             raise ValueError(f"No recipe found for item '{item_key}'")
 
@@ -955,7 +997,7 @@ class Solver:
             self.raw_resources[item_key] += rate
             return
 
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location)
 
         # No recipe → treat as raw (or raise if planet-restricted)
         if recipe is None:
