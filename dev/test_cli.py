@@ -1887,6 +1887,34 @@ class TestProbabilisticOutputs(unittest.TestCase):
             result = solver.rate_for_machines(item, 8)
             self.assertAlmostEqual(float(result), expected, places=4)
 
+    def test_u235_appears_as_co_product_when_solving_for_u238(self):
+        # Solving for 1 U-238/min: U-235 is a co-product at 0.007/0.993 rate
+        s = _solver("vanilla")
+        s.solve("uranium-238", Fraction(1))
+        # U-235 should be in surplus (not consumed by anything downstream)
+        self.assertIn("uranium-235", s.surplus)
+        self.assertAlmostEqual(float(s.surplus["uranium-235"]), 0.007 / 0.993, places=6)
+        # Step outputs should list both products
+        step = s.steps["uranium-processing"]
+        self.assertIn("uranium-238", step["outputs"])
+        self.assertIn("uranium-235", step["outputs"])
+        self.assertAlmostEqual(float(step["outputs"]["uranium-238"]), 1.0, places=6)
+        self.assertAlmostEqual(float(step["outputs"]["uranium-235"]), 0.007 / 0.993, places=6)
+
+    def test_space_platform_crushing_co_products(self):
+        # oxide-asteroid-crushing returns the chunk at 0.2 probability.
+        # Solving for 18 ice/min (5 ice/chunk): 3.6 cycles/min consumed,
+        # 0.72/min returned as co-product, 2.88/min net from collectors.
+        s = _solver("space-platform")
+        s.solve("ice", Fraction(18))
+        step = s.steps["oxide-asteroid-crushing"]
+        self.assertIn("ice", step["outputs"])
+        self.assertIn("oxide-asteroid-chunk", step["outputs"])
+        self.assertAlmostEqual(float(step["outputs"]["ice"]), 18.0, places=6)
+        self.assertAlmostEqual(float(step["outputs"]["oxide-asteroid-chunk"]), 0.72, places=6)
+        # Net raw resource demand: 3.6 gross - 0.72 recycled = 2.88
+        self.assertAlmostEqual(float(s.raw_resources["oxide-asteroid-chunk"]), 2.88, places=6)
+
 
 # ---------------------------------------------------------------------------
 # Multi-target solve  (--item A --rate X --item B --rate Y ...)
