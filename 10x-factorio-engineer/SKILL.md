@@ -45,7 +45,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [--i
 | `--assembler 1/2/3` | `3` | Assembling machine tier |
 | `--furnace stone/steel/electric` | `electric` | Furnace type |
 | `--miner electric/big` | `electric` | `big` = Space Age big mining drill |
-| `--dataset vanilla/space-age` | `vanilla` | |
+| `--location PLANET` | _(none)_ | Target location; omit for vanilla. Options: `nauvis` `vulcanus` `fulgora` `gleba` `aquilo` `space-platform`. Automatically selects the Space Age dataset. |
 | `--machine-quality QUALITY` | `normal` | Machine quality: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
 | `--beacon-quality QUALITY` | `normal` | Beacon housing quality (same enum) |
 | `--modules MACHINE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Module config per machine; repeatable |
@@ -76,8 +76,8 @@ python assets/cli.py --item processing-unit --rate 10 --modules assembling-machi
 # Assembler-3 with 8× legendary tier-3 beacons
 python assets/cli.py --item electronic-circuit --rate 60 --beacon assembling-machine-3=8:3:legendary
 
-# Space Age holmium plates with big drill + prod modules
-python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big \
+# Space Age holmium plates with big drill + prod modules (Fulgora)
+python assets/cli.py --item holmium-plate --rate 30 --location fulgora --miner big \
   --modules "big-mining-drill=4:prod:3:normal"
 
 # Electric mining drills with speed modules and beacons
@@ -85,8 +85,8 @@ python assets/cli.py --item iron-plate --rate 100 \
   --modules "electric-mining-drill=3:speed:3:normal" \
   --beacon "electric-mining-drill=4:3:normal"
 
-# Space Age holmium plates
-python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
+# Space Age holmium plates (Fulgora)
+python assets/cli.py --item holmium-plate --rate 30 --location fulgora --miner big
 
 # Force light-oil path for solid fuel
 python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
@@ -103,7 +103,7 @@ The CLI emits JSON to stdout. Example:
 {
   "item": "processing-unit",
   "rate_per_min": 10,
-  "dataset": "vanilla",
+  "location": null,
   "assembler": 3,
   "furnace": "electric",
   "miner": "electric",
@@ -147,6 +147,7 @@ The CLI emits JSON to stdout. Example:
 |-----|------------------|
 | `item` + `rate_per_min` | Present in single-target output; the requested item and rate |
 | `targets` | Present in multi-target output (2+ `--item` flags); array of `{item, rate_per_min}` objects instead of top-level `item`/`rate_per_min` |
+| `location` | string or null | `"vulcanus"` / `null` (vanilla) | Location passed via `--location`; `null` means vanilla (no planet filtering) |
 | `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `inputs` (ingredient consumption rates in items/min), `machine_quality` (always), `module_specs` (if modules applied), `beacon_spec` + `beacon_quality` (if beacon applied), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw` |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw`; `module_specs` present when modules applied to the drill |
@@ -199,7 +200,7 @@ working context and update it after every player message.
 ```jsonc
 {
   "save_name": "My Factory",          // player-given name, default "Main Factory"
-  "dataset": "vanilla",               // "vanilla" | "space-age"
+  "location": null,                   // null (vanilla) | "nauvis" | "vulcanus" | "fulgora" | "gleba" | "aquilo" | "space-platform"
   "assembler": 3,                     // player's current assembler tier
   "furnace": "electric",              // furnace type
   "machine_quality": "normal",        // "normal"|"uncommon"|"rare"|"epic"|"legendary"
@@ -282,7 +283,7 @@ When a player says something like:
   `bottlenecks` and `next_steps`.
 - *"I want 45 science packs per minute"* → run the CLI for each science pack
   in the set, store results in `lines`, populate `targets`.
-- *"switch to Space Age"* → set `dataset: space-age`, re-run CLI for all lines.
+- *"switch to Space Age"* → set `location: "nauvis"` (or the player's specific planet), re-run CLI for all lines.
 - *"I'm using coal liquefaction"* → add `"heavy-oil": "coal-liquefaction"` to
   `recipe_overrides`, re-run CLI for all affected lines.
 - *"I use blue belts"* → set `preferred_belt: "blue"`.
@@ -312,7 +313,7 @@ these IDs to friendly names automatically.
 
 1. Identify the item(s) and rate(s) the player is asking about.
 2. Run `python assets/cli.py` with the appropriate flags from factory state:
-   `--assembler`, `--furnace`, `--dataset`, `--machine-quality`, `--beacon-quality`,
+   `--assembler`, `--furnace`, `--location` (when set), `--machine-quality`, `--beacon-quality`,
    `--modules MACHINE=...` for every entry in `module_configs`,
    `--beacon MACHINE=...` for every entry in `beacon_configs`,
    `--recipe ITEM=RECIPE` for every entry in `recipe_overrides`.
@@ -358,7 +359,7 @@ code block so the player can paste it into the dashboard's Import panel:
 ```json
 {
   "save_name": "My Factory",
-  "dataset": "vanilla",
+  "location": null,
   ...
 }
 ```
