@@ -1073,6 +1073,7 @@ class Solver:
                 self.solve(ing["name"], ing_rate, new_chain)
             self.steps[recipe_key] = {
                 "recipe":             recipe_key,
+                "output_item":        item_key,
                 "machine":            machine_key,
                 "machine_count":      machines_needed,
                 "rate_per_min":       rate,
@@ -1351,6 +1352,7 @@ def format_output(
 
         step_out: dict = {
             "recipe":             recipe_key,
+            "output_item":        s.get("output_item", recipe_key),
             "machine":            machine_key,
             "machine_count":      _f(machine_count),
             "machine_count_ceil": math.ceil(machine_count),
@@ -1502,13 +1504,15 @@ def format_human_readable(out: dict) -> str:
     lines.append("----------------")
     for step in out.get("production_steps", []):
         recipe       = step["recipe"]
+        output_item  = step.get("output_item", recipe)
         machine      = step["machine"]
         machine_q    = step.get("machine_quality", "normal")
         mc           = step["machine_count"]
         mc_ceil      = step["machine_count_ceil"]
         rate         = step["rate_per_min"]
         machine_label = f"{machine_q} {machine}" if machine_q != "normal" else machine
-        lines.append(f"{recipe:<30}  {rate}/min    {mc} -> {mc_ceil} {machine_label}")
+        recipe_label  = f"{recipe} → {output_item}" if output_item != recipe else recipe
+        lines.append(f"{recipe_label:<30}  {rate}/min    {mc} -> {mc_ceil} {machine_label}")
 
         # optional modules / beacons / speed / power detail line
         detail_parts: list[str] = []
