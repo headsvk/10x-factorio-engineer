@@ -335,6 +335,18 @@ def load_data(location: str | None = None) -> dict:
 # Index building
 # ---------------------------------------------------------------------------
 
+def build_known_items(data: dict) -> frozenset:
+    """Return set of all valid item keys (items + fluids) in the dataset."""
+    keys: set[str] = set()
+    for item in data.get("items", []):
+        if "key" in item:
+            keys.add(item["key"])
+    for fluid in data.get("fluids", []):
+        if "item_key" in fluid:
+            keys.add(fluid["item_key"])
+    return frozenset(keys)
+
+
 def build_raw_set(data: dict, location: str | None = None) -> frozenset:
     """Return set of item keys that are raw inputs (mined / pumped).
 
@@ -1815,6 +1827,11 @@ def main() -> None:
     resource_info   = build_resource_info(data)
     machine_power_w      = build_machine_power_w(data)
     machine_module_slots = build_machine_module_slots(data)
+    known_items     = build_known_items(data)
+
+    for item in args.items:
+        if item not in known_items:
+            sys.exit(f"error: unknown item '{item}' — not found in dataset")
 
     solver = Solver(
         recipe_idx, raw_set,
