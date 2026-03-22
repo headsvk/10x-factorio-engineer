@@ -1090,12 +1090,33 @@ class Solver:
                 ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
                 inputs[ing["name"]] = inputs.get(ing["name"], Fraction(0)) + ing_rate
                 self.solve(ing["name"], ing_rate, new_chain)
+            outputs = self.steps[recipe_key]["outputs"]
+            outputs[item_key] = outputs.get(item_key, Fraction(0)) + rate
+            for res in recipe.get("results", []):
+                co = res["name"]
+                if co == item_key:
+                    continue
+                prob   = Fraction(str(res.get("probability", 1)))
+                co_amt = Fraction(str(res.get("amount", 1))) * prob
+                if prod_bonus > 0:
+                    co_amt = co_amt * (Fraction(1) + prod_bonus)
+                outputs[co] = outputs.get(co, Fraction(0)) + cycles_per_min * co_amt
         else:
             step_inputs: dict[str, Fraction] = {}
             for ing in recipe.get("ingredients", []):
                 ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
                 step_inputs[ing["name"]] = ing_rate
                 self.solve(ing["name"], ing_rate, new_chain)
+            step_outputs: dict[str, Fraction] = {item_key: rate}
+            for res in recipe.get("results", []):
+                co = res["name"]
+                if co == item_key:
+                    continue
+                prob   = Fraction(str(res.get("probability", 1)))
+                co_amt = Fraction(str(res.get("amount", 1))) * prob
+                if prod_bonus > 0:
+                    co_amt = co_amt * (Fraction(1) + prod_bonus)
+                step_outputs[co] = cycles_per_min * co_amt
             self.steps[recipe_key] = {
                 "recipe":             recipe_key,
                 "output_item":        item_key,
@@ -1104,6 +1125,7 @@ class Solver:
                 "rate_per_min":       rate,
                 "beacon_speed_bonus": beacon_speed_bonus,
                 "inputs":             step_inputs,
+                "outputs":            step_outputs,
             }
 
     def resolve_oil(self, data: dict) -> None:
@@ -1364,13 +1386,22 @@ def format_output(
             beacon_spec, solver.beacon_quality, machine_power_w,
         )
 
+        primary_item = s.get("output_item", recipe_key)
+        raw_outputs  = s.get("outputs", {primary_item: s["rate_per_min"]})
+        # Primary output first, then co-products sorted by rate descending
+        outputs_sorted = {primary_item: _f(raw_outputs[primary_item])}
+        for k, v in sorted(raw_outputs.items(), key=lambda x: -x[1]):
+            if k != primary_item:
+                outputs_sorted[k] = _f(v)
+
         step_out: dict = {
             "recipe":             recipe_key,
-            "output_item":        s.get("output_item", recipe_key),
+            "output_item":        primary_item,
             "machine":            machine_key,
             "machine_count":      _f(machine_count),
             "machine_count_ceil": math.ceil(machine_count),
             "rate_per_min":       _f(s["rate_per_min"]),
+            "outputs":            outputs_sorted,
             "inputs": {
                 k: _f(v)
                 for k, v in sorted(s["inputs"].items(), key=lambda x: -x[1])
@@ -1524,16 +1555,13 @@ def format_human_readable(out: dict) -> str:
     lines.append("Production Steps")
     lines.append("----------------")
     for step in out.get("production_steps", []):
-        recipe       = step["recipe"]
-        output_item  = step.get("output_item", recipe)
-        machine      = step["machine"]
-        machine_q    = step.get("machine_quality", "normal")
-        mc           = step["machine_count"]
-        mc_ceil      = step["machine_count_ceil"]
-        rate         = step["rate_per_min"]
+        recipe        = step["recipe"]
+        machine       = step["machine"]
+        machine_q     = step.get("machine_quality", "normal")
+        mc            = step["machine_count"]
+        mc_ceil       = step["machine_count_ceil"]
         machine_label = f"{machine_q} {machine}" if machine_q != "normal" else machine
-        recipe_label  = f"{recipe} → {output_item}" if output_item != recipe else recipe
-        lines.append(f"{recipe_label:<30}  {rate}/min    {mc} -> {mc_ceil} {machine_label}")
+        lines.append(f"{recipe:<30}  {mc} -> {mc_ceil} {machine_label}")
 
         # optional modules / beacons / speed / power detail line
         detail_parts: list[str] = []
@@ -1559,6 +1587,8 @@ def format_human_readable(out: dict) -> str:
                 pwr_str += f"  +  {bpwr} kW beacons"
             lines.append(f"  {pwr_str}")
 
+        for out_item, out_rate in step.get("outputs", {}).items():
+            lines.append(f"  -> {out_item:<28}  {out_rate}/min")
         for inp_item, inp_rate in step.get("inputs", {}).items():
             lines.append(f"  <- {inp_item:<28}  {inp_rate}/min")
         lines.append("")
@@ -1568,15 +1598,6 @@ def format_human_readable(out: dict) -> str:
     lines.append("-------------")
     for item, rate in out.get("raw_resources", {}).items():
         lines.append(f"  {item:<30}  {rate}/min")
-
-    # --- Co-products ---
-    co_products = out.get("co_products", {})
-    if co_products:
-        lines.append("")
-        lines.append("Co-products")
-        lines.append("-----------")
-        for item, rate in co_products.items():
-            lines.append(f"  {item:<30}  {rate}/min")
 
     # --- Miners ---
     miners = out.get("miners_needed", {})
