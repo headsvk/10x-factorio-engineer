@@ -1395,6 +1395,12 @@ def format_output(
         for k, v in sorted(solver.raw_resources.items(), key=lambda x: -x[1])
     }
 
+    co_products = {
+        k: _f(v)
+        for k, v in sorted(solver.surplus.items(), key=lambda x: -x[1])
+        if v > 0
+    }
+
     miners = compute_miners(
         solver.raw_resources, resource_info, args.miner,
         machine_power_w=machine_power_w,
@@ -1458,6 +1464,7 @@ def format_output(
 
     out["production_steps"]    = steps_list
     out["raw_resources"]       = raw_sorted
+    out["co_products"]         = co_products
     out["miners_needed"]       = miners
     out["total_power_mw"]      = round((total_step_pwr + miner_pwr) / 1000, 4)
     out["total_power_mw_ceil"] = round((total_step_pwr_ceil + miner_pwr) / 1000, 4)
@@ -1561,6 +1568,15 @@ def format_human_readable(out: dict) -> str:
     lines.append("-------------")
     for item, rate in out.get("raw_resources", {}).items():
         lines.append(f"  {item:<30}  {rate}/min")
+
+    # --- Co-products ---
+    co_products = out.get("co_products", {})
+    if co_products:
+        lines.append("")
+        lines.append("Co-products")
+        lines.append("-----------")
+        for item, rate in co_products.items():
+            lines.append(f"  {item:<30}  {rate}/min")
 
     # --- Miners ---
     miners = out.get("miners_needed", {})
