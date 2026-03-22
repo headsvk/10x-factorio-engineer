@@ -1203,12 +1203,21 @@ class Solver:
                     + cycles * Fraction(str(ing.get("amount", 1)))
                 )
 
+            oil_step_outputs: dict[str, Fraction] = {
+                res["name"]: cycles * Fraction(str(res.get("amount", 1)))
+                for res in rcp.get("results", [])
+                if res["name"] in OIL_PRODUCTS or _recipe_yield(rcp, res["name"]) > 0
+            }
+
             if rkey in self.steps:
                 self.steps[rkey]["machine_count"] += machines
                 self.steps[rkey]["rate_per_min"]  += disp_rate
                 step_inp = self.steps[rkey]["inputs"]
                 for k, v in oil_inputs.items():
                     step_inp[k] = step_inp.get(k, Fraction(0)) + v
+                step_out_d = self.steps[rkey]["outputs"]
+                for k, v in oil_step_outputs.items():
+                    step_out_d[k] = step_out_d.get(k, Fraction(0)) + v
             else:
                 self.steps[rkey] = {
                     "recipe":             rkey,
@@ -1217,6 +1226,7 @@ class Solver:
                     "rate_per_min":       disp_rate,
                     "beacon_speed_bonus": 0.0,
                     "inputs":             oil_inputs,
+                    "outputs":            oil_step_outputs,
                 }
 
             # Push oil-recipe ingredients into raw resources
@@ -1386,22 +1396,22 @@ def format_output(
             beacon_spec, solver.beacon_quality, machine_power_w,
         )
 
-        primary_item = s.get("output_item", recipe_key)
-        raw_outputs  = s.get("outputs", {primary_item: s["rate_per_min"]})
-        # Primary output first, then co-products sorted by rate descending
-        outputs_sorted = {primary_item: _f(raw_outputs[primary_item])}
+        primary_item = s.get("output_item")
+        raw_outputs  = s.get("outputs") or {primary_item or recipe_key: s["rate_per_min"]}
+        # Primary output first (if known and present), then rest by rate descending
+        outputs_sorted: dict = {}
+        if primary_item and primary_item in raw_outputs:
+            outputs_sorted[primary_item] = _f(raw_outputs[primary_item])
         for k, v in sorted(raw_outputs.items(), key=lambda x: -x[1]):
-            if k != primary_item:
+            if k not in outputs_sorted:
                 outputs_sorted[k] = _f(v)
 
         step_out: dict = {
-            "recipe":             recipe_key,
-            "output_item":        primary_item,
-            "machine":            machine_key,
+            "recipe":   recipe_key,
+            "machine":  machine_key,
             "machine_count":      _f(machine_count),
             "machine_count_ceil": math.ceil(machine_count),
-            "rate_per_min":       _f(s["rate_per_min"]),
-            "outputs":            outputs_sorted,
+            "outputs":  outputs_sorted,
             "inputs": {
                 k: _f(v)
                 for k, v in sorted(s["inputs"].items(), key=lambda x: -x[1])
@@ -1419,7 +1429,7 @@ def format_output(
             step_out["beacon_quality"] = solver.beacon_quality
         steps_list_raw.append(step_out)
 
-    steps_list = sorted(steps_list_raw, key=lambda x: -x["rate_per_min"])
+    steps_list = sorted(steps_list_raw, key=lambda x: -next(iter(x["outputs"].values()), 0))
 
     raw_sorted = {
         k: _f(v)

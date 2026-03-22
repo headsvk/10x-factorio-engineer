@@ -842,7 +842,7 @@ return `<tr>
 <td>${esc(label(s.recipe))}</td>
 <td class="name-col">${esc(machineLabel(s.machine))}${qualDot}${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
 <td class="r">${s.machine_count_ceil}</td>
-<td class="r">${s.rate_per_min != null ? fmtRate(s.rate_per_min, STATE.preferred_belt) : ''}</td>
+<td class="r">${s.outputs ? fmtRate(Object.values(s.outputs)[0], STATE.preferred_belt) : ''}</td>
 <td class="r" style="color:var(--text-dim)">${powCell}</td>
 </tr>`;
 }).join('');

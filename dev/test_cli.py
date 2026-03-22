@@ -2031,8 +2031,8 @@ class TestMultiTarget(unittest.TestCase):
         ], solver=s)
         steps = {st["recipe"]: st for st in out["production_steps"]}
         tb = steps["transport-belt"]
-        self.assertAlmostEqual(tb["rate_per_min"],  405.0, places=4)
-        self.assertAlmostEqual(tb["machine_count"],  2.25, places=4)
+        self.assertAlmostEqual(tb["outputs"]["transport-belt"], 405.0, places=4)
+        self.assertAlmostEqual(tb["machine_count"],              2.25, places=4)
 
     def test_bus_inputs_combined_across_targets(self):
         # Both targets draw iron-plate from the bus; demands accumulate.
