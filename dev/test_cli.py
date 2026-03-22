@@ -2438,11 +2438,19 @@ class TestLocationFilter(unittest.TestCase):
         d = _DATA["space-platform"]["data"]
         s.resolve_oil(d)
 
-        # Raw resources must be only asteroid chunks — no planet imports needed
+        # Raw resources must be only asteroid chunks — no planet imports needed.
+        # Values reflect net demand after 20% chunk recycling from basic crushing:
+        #   metallic: 90/min ÷ 20 ore/chunk × 0.8 net = 3.6/min → iron-plate step
+        #             then iron-plate needs 36 ore/min, ore from 36/20=1.8 cycles×0.8=1.44
+        #   carbonic: 18 carbon/min ÷ 10 carbon/chunk × 0.8 = 1.44/min
+        #   oxide:    18 ice/min    ÷  5 ice/chunk    × 0.8 = 2.88/min
         self.assertSetEqual(
             set(s.raw_resources.keys()),
             {"metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk"},
         )
+        self.assertEqual(s.raw_resources["metallic-asteroid-chunk"], Fraction(72, 50))  # 1.44
+        self.assertEqual(s.raw_resources["carbonic-asteroid-chunk"], Fraction(72, 50))  # 1.44
+        self.assertEqual(s.raw_resources["oxide-asteroid-chunk"],    Fraction(144, 50)) # 2.88
 
         # Verify the key recipes in the production chain
         recipe_keys = {step["recipe"] for step in s.steps.values()}

@@ -1056,6 +1056,19 @@ class Solver:
         else:
             machines_needed = (cycles_per_min * energy_req) / (60 * effective_speed)
 
+        # Credit co-products as surplus BEFORE recursing into ingredients so that
+        # self-recycling co-products (e.g. asteroid chunks returned by crushing)
+        # are available to offset the ingredient demand in the same step.
+        for res in recipe.get("results", []):
+            co = res["name"]
+            if co == item_key:
+                continue
+            prob   = Fraction(str(res.get("probability", 1)))
+            co_amt = Fraction(str(res.get("amount", 1))) * prob
+            if prod_bonus > 0:
+                co_amt = co_amt * (Fraction(1) + prod_bonus)
+            self.surplus[co] += cycles_per_min * co_amt
+
         # Accumulate step (same recipe may arrive from multiple tree paths)
         if recipe_key in self.steps:
             self.steps[recipe_key]["rate_per_min"]  += rate
@@ -1080,17 +1093,6 @@ class Solver:
                 "beacon_speed_bonus": beacon_speed_bonus,
                 "inputs":             step_inputs,
             }
-
-        # Credit co-products as surplus (probability and productivity both apply)
-        for res in recipe.get("results", []):
-            co = res["name"]
-            if co == item_key:
-                continue
-            prob   = Fraction(str(res.get("probability", 1)))
-            co_amt = Fraction(str(res.get("amount", 1))) * prob
-            if prod_bonus > 0:
-                co_amt = co_amt * (Fraction(1) + prod_bonus)
-            self.surplus[co] += cycles_per_min * co_amt
 
     def resolve_oil(self, data: dict) -> None:
         """
