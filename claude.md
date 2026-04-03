@@ -39,6 +39,7 @@ in `10x-factorio-engineer/references/` are loaded on demand per topic.
 | `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. To preview: run `python dev/preview.py` then use the Claude Preview MCP tool (server name `dashboard-preview`, config at `.claude/launch.json`) — **never** open the file in a browser via `--open` or `subprocess`. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. The JSON example must include every field that appears in real CLI output — run the CLI and copy actual values rather than inventing them. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. Verify by grepping SKILL.md for each new field name and confirming it appears in both the example block and the field table. |
 | CLI flag added, removed, or changed | 1. Update the module-level docstring at the top of `cli.py` (Usage block). 2. Update the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
+| `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) OR `--format human` output layout changes | Update the sample `--format human` output block in `README.md`. Run the CLI with `--format human` and copy actual output rather than editing manually. |
 | Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample-state.json` to match the new schema. 4. Run `python dev/gen_sample_state.py` to regenerate `dev/sample-state.b64`. 5. Run `python dev/build_dashboard.py` to rebuild the artifact. |
 | New CLI flag or solver behaviour added | Add tests to `dev/test_cli.py` covering the new feature. Run `python -m unittest dev.test_cli -v` and fix any failures before finishing. Update the test count in `README.md` and in the Tests section of `CLAUDE.md`. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
@@ -122,7 +123,7 @@ and run `python dev/wiki.py crawl` to fetch them.
 | `dev/wiki_crawl_urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
 | `dev/wiki.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki.py crawl` (~15 min) |
-| `dev/test_cli.py` | `unittest` suite (136 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (158 tests, stdlib only) — dev only |
 | `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -138,17 +139,17 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 
 | Function | Role |
 |----------|------|
-| `load_data(dataset)` | Load JSON; auto-download if missing |
-| `load_prefs(path)` | Load `factorio-prefs.json` from CWD (or given path); returns `{}` if absent |
-| `build_raw_set(data)` | Items with no recipe (ores, crude-oil, water, etc.) |
+| `load_data(location)` | Load JSON; `location=None` → vanilla, location string → space-age; auto-download if missing |
+| `build_raw_set(data, location)` | Items with no recipe; `location=None` → all planets, location string → specific planet only |
+| `get_planet_props(data, location)` | Return `surface_properties` dict for the given planet, or `{}` if not found/None |
+| `_recipe_valid_for_planet(recipe, planet_props)` | Return True if all recipe surface_conditions are satisfied |
 | `build_recipe_index(data)` | `{item_key: [recipe, ...]}`, skips recycling + barrel subgroups |
 | `build_resource_info(data)` | `{item: {mining_time, yield, category}}` using `Fraction` |
-| `build_fluid_set(data)` | `frozenset` of item keys whose type is `"fluid"` in the dataset |
 | `build_machine_power_w(data)` | `{machine_key: watts}` for electric machines only (burners excluded); scans `crafting_machines`, `agricultural_tower`, `rocket_silo`, `mining_drills` |
 | `_beacon_sharing_factor(machine_key)` | Returns how many machines share each physical beacon (4 for ≤4-tile machines, 2 for 5–7-tile, 1 for ≥8-tile) |
 | `_compute_step_power(...)` | Returns `(power_kw, power_kw_ceil, beacon_power_kw)` for a production step using module/beacon config |
 | `get_machine(cat, assembler_level, furnace_type)` | Maps recipe category → `(machine_key, speed)` |
-| `pick_recipe(item_key, recipe_idx, overrides)` | Picks canonical recipe (see selection logic below) |
+| `pick_recipe(item_key, recipe_idx, overrides, planet_props)` | Picks canonical recipe; filters by planet surface_conditions when planet_props given (see selection logic below) |
 | `_gauss2 / _gauss3` | Exact `Fraction` Gaussian elimination (2×2 and 3×3) |
 | `solve_oil_system(...)` | Joint linear solve for refinery recipe (AOP / CL / simple-CL) + cracking |
 | `Solver.solve(item_key, rate)` | Recursive tree walk; defers oil products |
@@ -169,6 +170,8 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 - `recipe_module_overrides`: `{recipe_key: [ModuleSpec]}` — per-recipe module override (`--recipe-modules`)
 - `recipe_beacon_overrides`: `{recipe_key: BeaconSpec}` — per-recipe beacon override (`--recipe-beacon`)
 - `bus_items`: `frozenset[str]` — item IDs treated as bus inputs; stops recursion (`--bus-item`)
+- `planet_props`: `dict` — surface_properties for the target location; empty dict means no planet filtering
+- `location`: `str | None` — location string (for error messages); `None` for vanilla
 - `machine_quality`: `str` — quality tier applied to all machines (speed bonus via `MACHINE_QUALITY_SPEED`)
 - `beacon_quality`: `str` — quality tier of beacon housings (effectivity via `BEACON_EFFECTIVITY`)
 
@@ -276,11 +279,12 @@ Same lookup order applies to beacon config (`recipe_beacon_overrides` → `beaco
 ## Recipe Selection Logic (`pick_recipe`)
 
 Priority (in `pick_recipe`):
-1. Explicit `--recipe ITEM=RECIPE` override passed in from CLI.
-2. Recipe whose `key == item_key` (exact match).
-3. `advanced-oil-processing` (legacy fallback for oil products).
-4. Entry in `RECIPE_DEFAULTS` (hard-coded preferred recipes that override the order-sort default when the order-sort winner is un-automatable or causes circular dependencies in the solver).
-5. First candidate after sorting all candidates by the game's `order` field.
+1. Explicit `--recipe ITEM=RECIPE` override passed in from CLI — bypasses planet filtering entirely.
+2. Planet filtering: when `planet_props` given, remove candidates whose `surface_conditions` are not satisfied. If all candidates are filtered out, return `None`.
+3. Recipe whose `key == item_key` (exact match).
+4. `advanced-oil-processing` (legacy fallback for oil products).
+5. Entry in `RECIPE_DEFAULTS` (hard-coded preferred recipes that override the order-sort default when the order-sort winner is un-automatable or causes circular dependencies in the solver).
+6. First candidate after sorting all candidates by the game's `order` field.
 
 Step 5's sort ensures the game-preferred variant is chosen when no exact match exists (e.g. `solid-fuel-from-petroleum-gas` over the less-efficient heavy-oil and petroleum-gas variants).
 
@@ -382,7 +386,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 136 tests covering:
+`dev/test_cli.py` contains 158 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -404,13 +408,14 @@ python -m unittest dev.test_cli -v
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |
 | `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
-| `TestPrefsFile` | `load_prefs()` returns `{}` for missing file; reads all supported fields |
 | `TestMachinesFlag` | `rate_for_machines` round-trips integer/fractional machine counts; Fraction return type without beacons; prod-module and beacon round-trips; raises on raw resource; assembler level respected |
 | `TestPowerConsumption` | Electric machines have `power_kw > 0`; burner machines give 0; efficiency modules reduce power (quality-scaled); speed/prod penalty not quality-scaled; efficiency floor at −80%; beacon sharing (3×3 = ÷4, 5×5 = ÷2); `total_power_mw` in output; miner `power_kw` present; miner efficiency reduces power (quality-scaled, −80% floor); miner `beacon_power_kw` emitted and included in `total_power_mw` |
 | `TestProbabilisticOutputs` | `uranium-processing` U-238 output reflects 0.993 probability; U-235 reflects 0.007 probability; `rate_for_machines` returns correct probability-weighted rates for both isotopes; ratio U-235/U-238 machine count ≈ 141× |
 | `TestMultiTarget` | Two-item solve merges shared sub-recipes; `targets` array replaces top-level `item`/`rate_per_min`; raw_resources and bus_inputs accumulate across all targets; belt/pump fields absent in multi-target output |
 | `TestStepInputs` | `inputs` dict present on every production step; ingredient consumption rates correct; reduced by productivity modules; bus items appear in step inputs; oil steps have crude-oil input; multi-target inputs accumulate |
 | `TestStepConfig` | `machine_quality` always present per step; `module_specs` present only when modules configured (global or per-recipe override); `beacon_spec`+`beacon_quality` present only when beacon configured; per-recipe override wins over global |
+| `TestHumanReadableOutput` | `format_human_readable()` returns non-JSON text; header contains item+rate; sections present (Production Steps, Raw Resources, Miners Needed, Power); machine names in steps; module/beacon config in header and detail lines; machine quality in step label; pumpjack shows yield%; bus inputs section when bus items present |
+| `TestLocationFilter` | `--location` raw_set filtering (vulcanus has tungsten-ore, not iron-ore; gleba has plants; space-platform is empty); planet surface_conditions filtering (acid-neutralisation valid on vulcanus, not nauvis); explicit `--recipe` override bypasses planet filter; `location` field in JSON output (`null` for vanilla, planet key when given) |
 
 ---
 

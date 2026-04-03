@@ -28,7 +28,7 @@ dev/
   gen_sample_state.py       # Encodes sample-state.json → sample-state.b64
   sample-state.json         # Sample factory state source JSON
   sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
-  test_cli.py               # unittest suite (136 tests, stdlib only)
+  test_cli.py               # unittest suite (158 tests, stdlib only)
   artifact-api-test.html    # claude.ai runtime API test suite
   artifact-api.md           # Field research doc for claude.ai artifact APIs
 ```
@@ -64,11 +64,76 @@ python assets/cli.py --item transport-belt --machines 2 --assembler 2
 python assets/cli.py --item electronic-circuit --rate 1800 \
     --bus-item iron-plate --bus-item copper-plate
 
-# Space Age with big mining drills
-python assets/cli.py --item holmium-plate --rate 30 --dataset space-age --miner big
+# Space Age with big mining drills (Fulgora)
+python assets/cli.py --item holmium-plate --rate 30 --location fulgora --miner big
 
 # Pipe into jq
 python assets/cli.py --item processing-unit --rate 10 | jq .raw_resources
+
+# Human-readable terminal output
+python assets/cli.py --item electronic-circuit --rate 60 --format human
+```
+
+Use `--format human` for a quick terminal overview; omit it (or pass `--format json`) to get structured JSON for piping to `jq` or other tools.
+
+#### Sample `--format human` output
+
+```
+$ python assets/cli.py --item electronic-circuit --rate 60 --format human
+
+=== electronic-circuit @ 60.0/min ===
+Location: vanilla  |  Assembler: 3  |  Furnace: electric  |  Miner: electric
+
+Production Steps
+----------------
+copper-cable                    180.0/min    0.6 -> 1 assembling-machine-3
+  power: 225.0 kW  (375.0 kW ceil)
+  <- copper-plate                  90.0/min
+
+copper-plate                    90.0/min    2.4 -> 3 electric-furnace
+  power: 432.0 kW  (540.0 kW ceil)
+  <- copper-ore                    90.0/min
+
+iron-plate                      60.0/min    1.6 -> 2 electric-furnace
+  power: 288.0 kW  (360.0 kW ceil)
+  <- iron-ore                      60.0/min
+
+electronic-circuit              60.0/min    0.4 -> 1 assembling-machine-3
+  power: 150.0 kW  (375.0 kW ceil)
+  <- copper-cable                  180.0/min
+  <- iron-plate                    60.0/min
+
+Raw Resources
+-------------
+  copper-ore                      90.0/min
+  iron-ore                        60.0/min
+
+Miners Needed
+-------------
+  iron-ore                        2.0 electric-mining-drill (2 ceil)
+  copper-ore                      3.0 electric-mining-drill (3 ceil)
+
+Power
+-----
+  Total: 1.545 MW  (2.1 MW with ceil counts)
+```
+
+With modules + beacons + machine quality the header shows configuration and each step includes a detail line:
+```
+=== electronic-circuit @ 60.0/min ===
+Location: vanilla  |  Assembler: 3  |  Furnace: electric  |  Miner: electric
+Machine quality: legendary  |  Beacon quality: normal
+Modules:  assembling-machine-3 = 4x prod-3-normal
+Beacons:  assembling-machine-3 = 8x tier-3-legendary
+
+Production Steps
+----------------
+electronic-circuit              60.0/min    0.0098 -> 1 legendary assembling-machine-3
+  modules: 4x prod-3-normal  |  beacons: 8x tier-3-legendary  |  speed bonus: +10.6066
+  power: 15.5084 kW  (1575.0 kW ceil)  +  960.0 kW beacons
+  <- copper-cable                  128.5714/min
+  <- iron-plate                    42.8571/min
+...
 ```
 
 See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags reference and full JSON output shape.
@@ -79,7 +144,7 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 python -m unittest dev.test_cli -v
 ```
 
-136 tests, stdlib only.
+158 tests, stdlib only.
 
 ---
 

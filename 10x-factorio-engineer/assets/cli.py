@@ -8,7 +8,7 @@ Usage:
                   [--assembler 1|2|3]
                   [--furnace stone|steel|electric]
                   [--miner electric|big]
-                  [--dataset vanilla|space-age]
+                  [--location PLANET]
                   [--machine-quality QUALITY]
                   [--beacon-quality QUALITY]
                   [--modules MACHINE=COUNT:TYPE:TIER:QUALITY]   # repeatable
@@ -18,11 +18,9 @@ Usage:
                   [--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY]  # repeatable
                   [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
                   [--bus-item ITEM-ID]                          # repeatable
+                  [--format json|human]
 
-Auto-loads factorio-prefs.json from the current directory if present.
-CLI flags always override prefs.
-
-Outputs clean JSON to stdout:
+Outputs clean JSON to stdout (default), or human-readable text with --format human:
   - production_steps: machine type + count per recipe in the dependency tree
   - raw_resources:    mining / pumping rates per minute (no recipe)
   - miners_needed:    drill / pumpjack / offshore-pump counts per raw resource
@@ -63,7 +61,6 @@ from fractions import Fraction
 # ---------------------------------------------------------------------------
 
 DATA_DIR   = os.path.dirname(os.path.abspath(__file__))
-PREFS_FILE = "factorio-prefs.json"   # auto-loaded from CWD if present
 
 DATA_FILES = {
     "vanilla":   "vanilla-2.0.55.json",
@@ -183,6 +180,26 @@ RECIPE_DEFAULTS: dict[str, str] = {
     # minable) and fish-breeding creates a circular nutrients dependency.
     # nutrients-from-yumako-mash is the cleanest fully-automatable Gleba route.
     "nutrients": "nutrients-from-yumako-mash",
+    # steam-condensation sorts before ice-melting (order field: b < c) but
+    # steam is never a raw resource — ice-melting is the correct automatable default.
+    "water": "ice-melting",
+    # ammoniacal-solution-separation sorts first for ice (order a[ammonia] < b-a-c)
+    # but ammoniacal-solution is only a raw resource on Aquilo. On space platforms
+    # and elsewhere, oxide-asteroid-crushing is the correct automatable source.
+    # On Aquilo, ice is mined directly so this default is never reached there.
+    "ice": "oxide-asteroid-crushing",
+}
+
+# Location-specific recipe overrides. Checked before exact-key-match so that
+# location correctness wins over the implicit "recipe key == item key" heuristic.
+# Overridden by explicit --recipe flags (step 1 in pick_recipe).
+RECIPE_DEFAULTS_BY_LOCATION: dict[str, dict[str, str]] = {
+    "space-platform": {
+        # The recipe with key=="carbon" (coal+sulfuric-acid) is the standard
+        # Nauvis route but coal and sulfuric-acid are unavailable on platforms.
+        # carbonic-asteroid-chunk is a platform raw resource; use it directly.
+        "carbon": "carbonic-asteroid-crushing",
+    },
 }
 
 # Productivity module bonus per filled slot, by tier
@@ -292,8 +309,13 @@ MODULE_EFFICIENCY_REDUCTION: dict[int, Fraction] = {
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_data(dataset: str) -> dict:
-    """Return parsed JSON for *dataset*, downloading the file if absent."""
+def load_data(location: str | None = None) -> dict:
+    """Return parsed JSON for the appropriate dataset, downloading the file if absent.
+
+    location=None  → vanilla dataset (no planet filtering)
+    location=str   → space-age dataset; validates location key against dataset planets
+    """
+    dataset = "space-age" if location else "vanilla"
     path = os.path.join(DATA_DIR, DATA_FILES[dataset])
     if not os.path.exists(path):
         url = DATA_URLS[dataset]
@@ -301,44 +323,73 @@ def load_data(dataset: str) -> dict:
         urllib.request.urlretrieve(url, path)
         sys.stderr.write(f"Saved to {path}\n")
     with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def load_prefs(path: str | None = None) -> dict:
-    """
-    Load factorio-prefs.json from the current working directory (or *path*
-    if given).  Returns an empty dict if the file doesn't exist.
-
-    Supported keys (all optional):
-      dataset, assembler, furnace, miner, machine_quality, beacon_quality, belt, pump
-        — become CLI flag defaults; explicit flags still win.
-      recipe_overrides  {item-id: recipe-key}
-        — merged with --recipe flags; explicit --recipe flags win.
-      preferred_belt    "yellow"|"red"|"blue"|"turbo"
-        — consumed by Claude (SKILL.md) only; not used by the solver.
-    """
-    filepath = path or PREFS_FILE
-    if not os.path.exists(filepath):
-        return {}
-    with open(filepath, encoding="utf-8") as fh:
-        return json.load(fh)
+        data = json.load(fh)
+    if location is not None:
+        valid_keys = {p["key"] for p in data.get("planets", [])}
+        if location not in valid_keys:
+            sys.exit(f"Unknown location '{location}'. Valid: {sorted(valid_keys)}")
+    return data
 
 
 # ---------------------------------------------------------------------------
 # Index building
 # ---------------------------------------------------------------------------
 
-def build_raw_set(data: dict) -> frozenset:
-    """Return set of item keys that are raw inputs (mined / pumped)."""
+def build_known_items(data: dict) -> frozenset:
+    """Return set of all valid item keys (items + fluids) in the dataset."""
+    keys: set[str] = set()
+    for item in data.get("items", []):
+        if "key" in item:
+            keys.add(item["key"])
+    for fluid in data.get("fluids", []):
+        if "item_key" in fluid:
+            keys.add(fluid["item_key"])
+    return frozenset(keys)
+
+
+def build_raw_set(data: dict, location: str | None = None) -> frozenset:
+    """Return set of item keys that are raw inputs (mined / pumped).
+
+    location=None  → original behaviour (all planets' resources)
+    location=str   → only resources available at that specific planet
+    """
     raw: set[str] = set()
-    for res in data.get("resources", []):
-        for r in res.get("results", []):
-            raw.add(r["name"])
-    for planet in data.get("planets", []):
-        pres = planet.get("resources", {})
-        raw.update(pres.get("resource", []))
-        raw.update(pres.get("offshore", []))
+    if location is None:
+        for res in data.get("resources", []):
+            for r in res.get("results", []):
+                raw.add(r["name"])
+        for planet in data.get("planets", []):
+            pres = planet.get("resources", {})
+            raw.update(pres.get("resource", []))
+            raw.update(pres.get("offshore", []))
+    else:
+        for planet in data.get("planets", []):
+            if planet["key"] == location:
+                pres = planet.get("resources", {})
+                raw.update(pres.get("resource", []))
+                raw.update(pres.get("offshore", []))
+                raw.update(pres.get("plants", []))
+                break
+        # Asteroid collectors are not modeled in the dataset — chunks are the
+        # raw inputs for space platforms, gathered externally by collectors.
+        if location == "space-platform":
+            raw.update({
+                "metallic-asteroid-chunk",
+                "carbonic-asteroid-chunk",
+                "oxide-asteroid-chunk",
+                "promethium-asteroid-chunk",
+            })
     return frozenset(raw)
+
+
+def get_planet_props(data: dict, location: str | None) -> dict:
+    """Return surface_properties dict for location, or {} if not found/None."""
+    if not location:
+        return {}
+    for p in data.get("planets", []):
+        if p["key"] == location:
+            return p.get("surface_properties", {})
+    return {}
 
 
 def build_recipe_index(data: dict) -> dict[str, list]:
@@ -386,16 +437,6 @@ def build_resource_info(data: dict) -> dict:
             })
     return info
 
-
-def build_fluid_set(data: dict) -> frozenset:
-    """Return set of item keys whose type is 'fluid' in the dataset."""
-    fluids: set[str] = set()
-    for item in data.get("items", []):
-        if item.get("type") == "fluid":
-            key = item.get("key") or item.get("name", "")
-            if key:
-                fluids.add(key)
-    return frozenset(fluids)
 
 
 def build_machine_power_w(data: dict) -> dict[str, int]:
@@ -542,20 +583,35 @@ def get_machine(cat: str, assembler_level: int, furnace_type: str) -> tuple[str,
     return ASSEMBLER_KEY[assembler_level], ASSEMBLER_SPEED[assembler_level]
 
 
+def _recipe_valid_for_planet(recipe: dict, planet_props: dict) -> bool:
+    """Return True if all recipe surface_conditions are satisfied by planet_props."""
+    for cond in recipe.get("surface_conditions", []):
+        prop = cond["property"]
+        val = planet_props.get(prop, 0)
+        if val < cond.get("min", val) or val > cond.get("max", val):
+            return False
+    return True
+
+
 def pick_recipe(
     item_key: str,
     recipe_idx: dict,
     overrides: dict | None = None,
+    planet_props: dict | None = None,
+    location: str | None = None,
 ) -> dict | None:
     """
     Select canonical recipe for item_key.
 
     Priority:
       1. Explicit override from --recipe ITEM=RECIPE flag.
-      2. Recipe whose key == item_key (exact match).
-      3. advanced-oil-processing (legacy fallback for oil products).
-      3.5. Entry in RECIPE_DEFAULTS (overrides order-sort for un-automatable defaults).
-      4. First candidate after sorting by the game's ``order`` field.
+      2. Entry in RECIPE_DEFAULTS_BY_LOCATION for the current location.
+         (Before exact-key-match so location correctness wins over the implicit
+         "recipe key == item key" heuristic.)
+      3. Recipe whose key == item_key (exact match).
+      4. advanced-oil-processing (legacy fallback for oil products).
+      4.5. Entry in RECIPE_DEFAULTS (overrides order-sort for un-automatable defaults).
+      5. First candidate after sorting by the game's ``order`` field.
 
     Sorting by ``order`` before the fallback selects the game-preferred recipe
     (e.g. solid-fuel-from-petroleum-gas over less-efficient variants).
@@ -564,7 +620,7 @@ def pick_recipe(
     if not candidates:
         return None
 
-    # 1. Explicit override
+    # 1. Explicit override — bypasses planet filtering
     if overrides and item_key in overrides:
         wanted = overrides[item_key]
         for r in candidates:
@@ -572,27 +628,44 @@ def pick_recipe(
                 return r
         # Override key not found among candidates -- fall through to defaults
 
+    # Planet filtering (only when planet_props given, no explicit override matched)
+    if planet_props:
+        filtered = [r for r in candidates if _recipe_valid_for_planet(r, planet_props)]
+        if filtered:
+            candidates = filtered
+        elif not (overrides and item_key in overrides):
+            return None  # all recipes filtered out by planet conditions
+
     # Sort by the game's display order so fallback picks the preferred variant
     candidates = sorted(candidates, key=lambda r: r.get("order", ""))
 
-    # 2. Exact key match
+    # 2. Location-specific defaults (checked before exact-key-match)
+    if location:
+        loc_defaults = RECIPE_DEFAULTS_BY_LOCATION.get(location, {})
+        if item_key in loc_defaults:
+            wanted = loc_defaults[item_key]
+            for r in candidates:
+                if r["key"] == wanted:
+                    return r
+
+    # 3. Exact key match
     for r in candidates:
         if r["key"] == item_key:
             return r
 
-    # 3. advanced-oil-processing legacy fallback
+    # 4. advanced-oil-processing legacy fallback
     for r in candidates:
         if r["key"] == "advanced-oil-processing":
             return r
 
-    # 3.5. Hard-coded preferred recipe (avoids unautomatable order-sort defaults)
+    # 4.5. Hard-coded preferred recipe (avoids unautomatable order-sort defaults)
     if item_key in RECIPE_DEFAULTS:
         wanted = RECIPE_DEFAULTS[item_key]
         for r in candidates:
             if r["key"] == wanted:
                 return r
 
-    # 4. First after order-sort
+    # 5. First after order-sort
     return candidates[0]
 
 
@@ -772,6 +845,8 @@ class Solver:
         recipe_module_overrides: dict | None = None,
         recipe_beacon_overrides: dict | None = None,
         bus_items: frozenset | None = None,
+        planet_props: dict | None = None,
+        location: str | None = None,
     ):
         self.recipe_idx      = recipe_idx
         self.raw_set         = raw_set
@@ -788,6 +863,8 @@ class Solver:
         self.recipe_module_overrides:  dict = recipe_module_overrides  or {}
         self.recipe_beacon_overrides:  dict = recipe_beacon_overrides  or {}
         self.bus_items: frozenset = frozenset(bus_items) if bus_items else frozenset()
+        self.planet_props: dict = planet_props or {}
+        self.location: str | None = location
 
         self.steps: dict[str, dict]             = {}
         self.raw_resources: dict[str, Fraction] = defaultdict(Fraction)
@@ -872,7 +949,7 @@ class Solver:
         formula in solve(), so solve(item, rate_for_machines(item, N)) gives
         back exactly N machines for the top-level step.
         """
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location)
         if recipe is None:
             raise ValueError(f"No recipe found for item '{item_key}'")
 
@@ -950,10 +1027,15 @@ class Solver:
             self.raw_resources[item_key] += rate
             return
 
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location)
 
-        # No recipe → treat as raw
+        # No recipe → treat as raw (or raise if planet-restricted)
         if recipe is None:
+            if self.planet_props and item_key not in self.raw_set:
+                raise ValueError(
+                    f"'{item_key}' cannot be produced at location '{self.location}'. "
+                    f"Use --bus-item {item_key} to import it."
+                )
             self.raw_resources[item_key] += rate
             return
 
@@ -1004,31 +1086,9 @@ class Solver:
         else:
             machines_needed = (cycles_per_min * energy_req) / (60 * effective_speed)
 
-        # Accumulate step (same recipe may arrive from multiple tree paths)
-        if recipe_key in self.steps:
-            self.steps[recipe_key]["rate_per_min"]  += rate
-            self.steps[recipe_key]["machine_count"] += machines_needed
-            inputs = self.steps[recipe_key]["inputs"]
-            for ing in recipe.get("ingredients", []):
-                ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
-                inputs[ing["name"]] = inputs.get(ing["name"], Fraction(0)) + ing_rate
-                self.solve(ing["name"], ing_rate, new_chain)
-        else:
-            step_inputs: dict[str, Fraction] = {}
-            for ing in recipe.get("ingredients", []):
-                ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
-                step_inputs[ing["name"]] = ing_rate
-                self.solve(ing["name"], ing_rate, new_chain)
-            self.steps[recipe_key] = {
-                "recipe":             recipe_key,
-                "machine":            machine_key,
-                "machine_count":      machines_needed,
-                "rate_per_min":       rate,
-                "beacon_speed_bonus": beacon_speed_bonus,
-                "inputs":             step_inputs,
-            }
-
-        # Credit co-products as surplus (probability and productivity both apply)
+        # Credit co-products as surplus BEFORE recursing into ingredients so that
+        # self-recycling co-products (e.g. asteroid chunks returned by crushing)
+        # are available to offset the ingredient demand in the same step.
         for res in recipe.get("results", []):
             co = res["name"]
             if co == item_key:
@@ -1038,6 +1098,53 @@ class Solver:
             if prod_bonus > 0:
                 co_amt = co_amt * (Fraction(1) + prod_bonus)
             self.surplus[co] += cycles_per_min * co_amt
+
+        # Accumulate step (same recipe may arrive from multiple tree paths)
+        if recipe_key in self.steps:
+            self.steps[recipe_key]["rate_per_min"]  += rate
+            self.steps[recipe_key]["machine_count"] += machines_needed
+            inputs = self.steps[recipe_key]["inputs"]
+            for ing in recipe.get("ingredients", []):
+                ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
+                inputs[ing["name"]] = inputs.get(ing["name"], Fraction(0)) + ing_rate
+                self.solve(ing["name"], ing_rate, new_chain)
+            outputs = self.steps[recipe_key]["outputs"]
+            outputs[item_key] = outputs.get(item_key, Fraction(0)) + rate
+            for res in recipe.get("results", []):
+                co = res["name"]
+                if co == item_key:
+                    continue
+                prob   = Fraction(str(res.get("probability", 1)))
+                co_amt = Fraction(str(res.get("amount", 1))) * prob
+                if prod_bonus > 0:
+                    co_amt = co_amt * (Fraction(1) + prod_bonus)
+                outputs[co] = outputs.get(co, Fraction(0)) + cycles_per_min * co_amt
+        else:
+            step_inputs: dict[str, Fraction] = {}
+            for ing in recipe.get("ingredients", []):
+                ing_rate = cycles_per_min * Fraction(str(ing.get("amount", 1)))
+                step_inputs[ing["name"]] = ing_rate
+                self.solve(ing["name"], ing_rate, new_chain)
+            step_outputs: dict[str, Fraction] = {item_key: rate}
+            for res in recipe.get("results", []):
+                co = res["name"]
+                if co == item_key:
+                    continue
+                prob   = Fraction(str(res.get("probability", 1)))
+                co_amt = Fraction(str(res.get("amount", 1))) * prob
+                if prod_bonus > 0:
+                    co_amt = co_amt * (Fraction(1) + prod_bonus)
+                step_outputs[co] = cycles_per_min * co_amt
+            self.steps[recipe_key] = {
+                "recipe":             recipe_key,
+                "output_item":        item_key,
+                "machine":            machine_key,
+                "machine_count":      machines_needed,
+                "rate_per_min":       rate,
+                "beacon_speed_bonus": beacon_speed_bonus,
+                "inputs":             step_inputs,
+                "outputs":            step_outputs,
+            }
 
     def resolve_oil(self, data: dict) -> None:
         """
@@ -1114,12 +1221,21 @@ class Solver:
                     + cycles * Fraction(str(ing.get("amount", 1)))
                 )
 
+            oil_step_outputs: dict[str, Fraction] = {
+                res["name"]: cycles * Fraction(str(res.get("amount", 1)))
+                for res in rcp.get("results", [])
+                if res["name"] in OIL_PRODUCTS or _recipe_yield(rcp, res["name"]) > 0
+            }
+
             if rkey in self.steps:
                 self.steps[rkey]["machine_count"] += machines
                 self.steps[rkey]["rate_per_min"]  += disp_rate
                 step_inp = self.steps[rkey]["inputs"]
                 for k, v in oil_inputs.items():
                     step_inp[k] = step_inp.get(k, Fraction(0)) + v
+                step_out_d = self.steps[rkey]["outputs"]
+                for k, v in oil_step_outputs.items():
+                    step_out_d[k] = step_out_d.get(k, Fraction(0)) + v
             else:
                 self.steps[rkey] = {
                     "recipe":             rkey,
@@ -1128,6 +1244,7 @@ class Solver:
                     "rate_per_min":       disp_rate,
                     "beacon_speed_bonus": 0.0,
                     "inputs":             oil_inputs,
+                    "outputs":            oil_step_outputs,
                 }
 
             # Push oil-recipe ingredients into raw resources
@@ -1294,12 +1411,22 @@ def format_output(
             beacon_spec, solver.beacon_quality, machine_power_w,
         )
 
+        primary_item = s.get("output_item")
+        raw_outputs  = s.get("outputs") or {primary_item or recipe_key: s["rate_per_min"]}
+        # Primary output first (if known and present), then rest by rate descending
+        outputs_sorted: dict = {}
+        if primary_item and primary_item in raw_outputs:
+            outputs_sorted[primary_item] = _f(raw_outputs[primary_item])
+        for k, v in sorted(raw_outputs.items(), key=lambda x: -x[1]):
+            if k not in outputs_sorted:
+                outputs_sorted[k] = _f(v)
+
         step_out: dict = {
-            "recipe":             recipe_key,
-            "machine":            machine_key,
+            "recipe":   recipe_key,
+            "machine":  machine_key,
             "machine_count":      _f(machine_count),
             "machine_count_ceil": math.ceil(machine_count),
-            "rate_per_min":       _f(s["rate_per_min"]),
+            "outputs":  outputs_sorted,
             "inputs": {
                 k: _f(v)
                 for k, v in sorted(s["inputs"].items(), key=lambda x: -x[1])
@@ -1317,11 +1444,17 @@ def format_output(
             step_out["beacon_quality"] = solver.beacon_quality
         steps_list_raw.append(step_out)
 
-    steps_list = sorted(steps_list_raw, key=lambda x: -x["rate_per_min"])
+    steps_list = sorted(steps_list_raw, key=lambda x: -next(iter(x["outputs"].values()), 0))
 
     raw_sorted = {
         k: _f(v)
         for k, v in sorted(solver.raw_resources.items(), key=lambda x: -x[1])
+    }
+
+    co_products = {
+        k: _f(v)
+        for k, v in sorted(solver.surplus.items(), key=lambda x: -x[1])
+        if v > 0
     }
 
     miners = compute_miners(
@@ -1341,7 +1474,7 @@ def format_output(
                 {"item": itm, "rate_per_min": rate}
                 for itm, rate in zip(args.items, args.rates)
             ],
-            "dataset":         args.dataset,
+            "location":        getattr(args, "location", None),
             "assembler":       args.assembler,
             "furnace":         args.furnace,
             "miner":           args.miner,
@@ -1352,7 +1485,7 @@ def format_output(
         out = {
             "item":            args.item,
             "rate_per_min":    args.rate,
-            "dataset":         args.dataset,
+            "location":        getattr(args, "location", None),
             "assembler":       args.assembler,
             "furnace":         args.furnace,
             "miner":           args.miner,
@@ -1390,6 +1523,7 @@ def format_output(
 
     out["production_steps"]    = steps_list
     out["raw_resources"]       = raw_sorted
+    out["co_products"]         = co_products
     out["miners_needed"]       = miners
     out["total_power_mw"]      = round((total_step_pwr + miner_pwr) / 1000, 4)
     out["total_power_mw_ceil"] = round((total_step_pwr_ceil + miner_pwr) / 1000, 4)
@@ -1401,6 +1535,130 @@ def format_output(
         }
 
     return out
+
+
+def format_human_readable(out: dict) -> str:
+    """Render the output dict from format_output() as human-readable text."""
+    lines: list[str] = []
+
+    # --- Header ---
+    if "targets" in out:
+        targets_str = ", ".join(
+            f"{t['item']}@{t['rate_per_min']}/min" for t in out["targets"]
+        )
+        lines.append(f"=== Targets: {targets_str} ===")
+    else:
+        lines.append(f"=== {out['item']} @ {out['rate_per_min']}/min ===")
+
+    location_val = out.get("location")
+    location_str = location_val if location_val is not None else "vanilla"
+    config_parts = [
+        f"Location: {location_str}",
+        f"Assembler: {out['assembler']}",
+        f"Furnace: {out['furnace']}",
+        f"Miner: {out['miner']}",
+    ]
+    lines.append("  |  ".join(config_parts))
+
+    mq = out.get("machine_quality", "normal")
+    bq = out.get("beacon_quality", "normal")
+    if mq != "normal" or bq != "normal":
+        lines.append(f"Machine quality: {mq}  |  Beacon quality: {bq}")
+
+    if out.get("module_configs"):
+        for machine, specs in out["module_configs"].items():
+            spec_strs = []
+            for s in specs:
+                spec_strs.append(f"{s['count']}x {s['type']}-{s['tier']}-{s['quality']}")
+            lines.append(f"Modules:  {machine} = {', '.join(spec_strs)}")
+
+    if out.get("beacon_configs"):
+        for machine, spec in out["beacon_configs"].items():
+            lines.append(
+                f"Beacons:  {machine} = {spec['count']}x tier-{spec['tier']}-{spec['quality']}"
+            )
+
+    # --- Production Steps ---
+    lines.append("")
+    lines.append("Production Steps")
+    lines.append("----------------")
+    for step in out.get("production_steps", []):
+        recipe        = step["recipe"]
+        machine       = step["machine"]
+        machine_q     = step.get("machine_quality", "normal")
+        mc            = step["machine_count"]
+        mc_ceil       = step["machine_count_ceil"]
+        machine_label = f"{machine_q} {machine}" if machine_q != "normal" else machine
+        lines.append(f"{recipe:<30}  {mc} -> {mc_ceil} {machine_label}")
+
+        # optional modules / beacons / speed / power detail line
+        detail_parts: list[str] = []
+        if step.get("module_specs"):
+            mod_strs = []
+            for s in step["module_specs"]:
+                mod_strs.append(f"{s['count']}x {s['type']}-{s['tier']}-{s['quality']}")
+            detail_parts.append(f"modules: {', '.join(mod_strs)}")
+        if step.get("beacon_spec") is not None:
+            bs = step["beacon_spec"]
+            detail_parts.append(f"beacons: {bs['count']}x tier-{bs['tier']}-{bs['quality']}")
+        if step.get("beacon_speed_bonus", 0):
+            detail_parts.append(f"speed bonus: +{round(step['beacon_speed_bonus'], 4)}")
+        if detail_parts:
+            lines.append(f"  {('  |  ').join(detail_parts)}")
+
+        pwr      = step.get("power_kw", 0)
+        pwr_ceil = step.get("power_kw_ceil", 0)
+        bpwr     = step.get("beacon_power_kw", 0)
+        if pwr or bpwr:
+            pwr_str = f"power: {pwr} kW  ({pwr_ceil} kW ceil)"
+            if bpwr:
+                pwr_str += f"  +  {bpwr} kW beacons"
+            lines.append(f"  {pwr_str}")
+
+        for out_item, out_rate in step.get("outputs", {}).items():
+            lines.append(f"  -> {out_item:<28}  {out_rate}/min")
+        for inp_item, inp_rate in step.get("inputs", {}).items():
+            lines.append(f"  <- {inp_item:<28}  {inp_rate}/min")
+        lines.append("")
+
+    # --- Raw Resources ---
+    lines.append("Raw Resources")
+    lines.append("-------------")
+    for item, rate in out.get("raw_resources", {}).items():
+        lines.append(f"  {item:<30}  {rate}/min")
+
+    # --- Miners ---
+    miners = out.get("miners_needed", {})
+    if miners:
+        lines.append("")
+        lines.append("Miners Needed")
+        lines.append("-------------")
+        for item, info in miners.items():
+            if not isinstance(info, dict):
+                continue
+            machine = info.get("machine", "")
+            if "required_yield_pct" in info:
+                lines.append(f"  {item:<30}  requires {info['required_yield_pct']}% field yield  ({machine})")
+            else:
+                mc  = info.get("machine_count", 0)
+                mcc = info.get("machine_count_ceil", 0)
+                lines.append(f"  {item:<30}  {mc} {machine} ({mcc} ceil)")
+
+    # --- Bus Inputs ---
+    if out.get("bus_inputs"):
+        lines.append("")
+        lines.append("Bus Inputs (from bus, not mined)")
+        lines.append("---------------------------------")
+        for item, rate in out["bus_inputs"].items():
+            lines.append(f"  {item:<30}  {rate}/min")
+
+    # --- Power ---
+    lines.append("")
+    lines.append("Power")
+    lines.append("-----")
+    lines.append(f"  Total: {out.get('total_power_mw', 0)} MW  ({out.get('total_power_mw_ceil', 0)} MW with ceil counts)")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1450,7 +1708,7 @@ def _parse_beacon_spec(raw_value: str, flag: str) -> dict:
     return {"count": count, "modules": modules}
 
 
-def parse_args(prefs: dict | None = None) -> argparse.Namespace:
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "Factorio production calculator -- outputs JSON with machine counts, "
@@ -1461,8 +1719,8 @@ def parse_args(prefs: dict | None = None) -> argparse.Namespace:
 Examples:
   python cli.py --item electronic-circuit --rate 60
   python cli.py --item processing-unit --rate 10 --assembler 3 --furnace electric
-  python cli.py --item rocket-fuel --rate 5 --assembler 3 --dataset space-age
-  python cli.py --item tungsten-carbide --rate 60 --dataset space-age --miner big
+  python cli.py --item rocket-fuel --rate 5 --assembler 3 --location nauvis
+  python cli.py --item tungsten-carbide --rate 60 --location vulcanus --miner big
   python cli.py --item electronic-circuit --rate 60 --belt blue
   python cli.py --item lubricant --rate 60 --pump legendary
   python cli.py --item electronic-circuit --rate 60 \\
@@ -1490,8 +1748,16 @@ Examples:
                    help="Furnace type (default: electric).")
     p.add_argument("--miner",    default="electric", choices=["electric", "big"],
                    help="Mining drill for solid ores (default: electric).")
-    p.add_argument("--dataset",  default="vanilla", choices=["vanilla", "space-age"],
-                   help="Game dataset (default: vanilla).")
+    p.add_argument(
+        "--location", default=None,
+        metavar="PLANET",
+        dest="location",
+        help=(
+            "Target location (space-age planet or space-platform). "
+            "Omit for vanilla. Valid: nauvis, vulcanus, fulgora, gleba, aquilo, space-platform. "
+            "Automatically selects the Space Age dataset."
+        ),
+    )
     p.add_argument("--machine-quality", default="normal",
                    choices=list(QUALITY_NAMES), dest="machine_quality",
                    help="Quality tier of all machines (default: normal).")
@@ -1562,12 +1828,11 @@ Examples:
             "E.g. --bus-item iron-plate --bus-item copper-plate"
         ),
     )
-    if prefs:
-        p.set_defaults(**{
-            k: v for k, v in prefs.items()
-            if k in {"dataset", "assembler", "furnace", "miner",
-                     "machine_quality", "beacon_quality"}
-        })
+    p.add_argument(
+        "--format", default="json", choices=["json", "human"],
+        dest="output_format",
+        help="Output format: json (default) or human-readable text.",
+    )
     args = p.parse_args()
     if not args.items:
         p.error("At least one --item must be provided.")
@@ -1595,11 +1860,10 @@ Examples:
 
 
 def main() -> None:
-    prefs = load_prefs()
-    args  = parse_args(prefs)
+    args  = parse_args()
 
-    # Parse --recipe ITEM=RECIPE (prefs baseline; CLI flags win)
-    recipe_overrides: dict[str, str] = dict(prefs.get("recipe_overrides", {}))
+    # Parse --recipe ITEM=RECIPE
+    recipe_overrides: dict[str, str] = {}
     for raw in args.recipe:
         k, v = _parse_kv(raw, "--recipe")
         recipe_overrides[k] = v
@@ -1639,12 +1903,18 @@ def main() -> None:
 
     bus_items: frozenset = frozenset(args.bus_item)
 
-    data            = load_data(args.dataset)
-    raw_set         = build_raw_set(data)
+    data            = load_data(args.location)
+    raw_set         = build_raw_set(data, args.location)
+    planet_props    = get_planet_props(data, args.location)
     recipe_idx      = build_recipe_index(data)
     resource_info   = build_resource_info(data)
     machine_power_w      = build_machine_power_w(data)
     machine_module_slots = build_machine_module_slots(data)
+    known_items     = build_known_items(data)
+
+    for item in args.items:
+        if item not in known_items:
+            sys.exit(f"error: unknown item '{item}' — not found in dataset")
 
     solver = Solver(
         recipe_idx, raw_set,
@@ -1660,6 +1930,8 @@ def main() -> None:
         recipe_module_overrides=recipe_module_overrides or None,
         recipe_beacon_overrides=recipe_beacon_overrides or None,
         bus_items=bus_items or None,
+        planet_props=planet_props or None,
+        location=args.location,
     )
 
     targets: list[tuple[str, Fraction]] = []
@@ -1688,10 +1960,11 @@ def main() -> None:
     args.recipe_module_overrides  = recipe_module_overrides  or None
     args.recipe_beacon_overrides  = recipe_beacon_overrides  or None
 
-    print(json.dumps(format_output(
-        args, solver, resource_info,
-        machine_power_w=machine_power_w,
-    ), indent=2))
+    result = format_output(args, solver, resource_info, machine_power_w=machine_power_w)
+    if args.output_format == "human":
+        print(format_human_readable(result))
+    else:
+        print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
