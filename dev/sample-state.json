@@ -15,7 +15,7 @@
     { "item": "copper-plate",       "rate": 10800 },
     { "item": "steel-plate",        "rate": 1800  },
     { "item": "electronic-circuit", "rate": 3600  },
-    { "item": "petroleum-gas",      "rate": 18000, "fluid": true }
+    { "item": "petroleum-gas",      "rate": 400, "fluid": true }
   ],
   "targets": {
     "automation-science-pack": 60,
@@ -199,7 +199,7 @@
     }
   ],
   "bottlenecks": [
-    "Petroleum bus only supplies 18000/min; processing-unit line needs 510/min leaving 17490/min for other consumers"
+    "Petroleum Gas bus only supplies 400/min; Processing Unit line needs 510/min — 110/min short. Expand pumpjack field or add cracking."
   ],
   "next_steps": [
     "Add advanced circuits line (feeds into processing units)",

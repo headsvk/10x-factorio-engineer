@@ -595,15 +595,18 @@ class TestGlebaMachineRouting(unittest.TestCase):
         self.assertNotIn("assembling-machine-1", machines)
 
     def test_pressing_agricultural_tower(self):
-        # transport-belt has category 'pressing' in the Space Age dataset,
-        # which should route to agricultural-tower (speed 1).
+        # transport-belt has category 'pressing' in the Space Age dataset.
+        # 'pressing' is listed in the foundry's crafting_categories (speed 4),
+        # so it should route to foundry — not agricultural-tower, which has no
+        # crafting_categories at all in the dataset.
         s = _solver("space-age")
         s.solve("transport-belt", Fraction(60))
         s.resolve_oil(_DATA["space-age"]["data"])
-        self.assertEqual(s.steps["transport-belt"]["machine"], "agricultural-tower")
-        # Exact machine count: recipe yields 2/cycle, time=0.5s, speed=1
-        # cycles/min = 60/2 = 30; machines = 30 * 0.5 / 60 = 1/4
-        self.assertEqual(s.steps["transport-belt"]["machine_count"], Fraction(1, 4))
+        self.assertEqual(s.steps["transport-belt"]["machine"], "foundry")
+        # Exact machine count: recipe yields 2/cycle, time=0.5s, foundry speed=4
+        # effective rate per foundry = 4/0.5 * 2 * 60 = 960/min
+        # machines = 60 / 960 = 1/16
+        self.assertEqual(s.steps["transport-belt"]["machine_count"], Fraction(1, 16))
 
     def test_biter_egg_captive_spawner(self):
         # biter-egg has category 'captive-spawner-process' → captive-spawner.
@@ -2431,7 +2434,7 @@ class TestHumanReadableOutput(unittest.TestCase):
         out = cli.format_output(args, s, d["resource_info"])
         text = cli.format_human_readable(out)
         self.assertIn("Beacons:", text)
-        self.assertIn("tier-3", text)
+        self.assertIn("speed-3-legendary", text)
 
     def test_machine_quality_in_step_label(self):
         s = _solver_new(machine_quality="legendary")

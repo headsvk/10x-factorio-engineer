@@ -21,6 +21,10 @@ htmlcov/
 # Preview temp file
 dev/preview.tmp.html
 
+# Personal factory state (not committed)
+dev/my-*.json
+dev/my-*.b64
+
 # Distribution / packaging
 dist/
 build/

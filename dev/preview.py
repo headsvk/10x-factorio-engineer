@@ -27,13 +27,28 @@ if args.no_min:
 else:
     src = os.path.join(REPO_ROOT, "10x-factorio-engineer", "assets", "dashboard.html")
 
-b64_path = os.path.join(DEV_DIR, "sample-state.b64")
+my_factory_json = os.path.join(DEV_DIR, "my-factory.json")
+my_factory_b64  = os.path.join(DEV_DIR, "my-factory.b64")
+
+if os.path.exists(my_factory_b64):
+    b64_path = my_factory_b64
+elif os.path.exists(my_factory_json):
+    # Auto-encode on the fly
+    import base64, json
+    with open(my_factory_json, encoding="utf-8") as f:
+        b64_path = None
+        sample_b64 = base64.b64encode(
+            json.dumps(json.load(f), separators=(',', ':')).encode()
+        ).decode()
+else:
+    b64_path = os.path.join(DEV_DIR, "sample-state.b64")
 
 with open(src, encoding="utf-8") as f:
     html = f.read()
 
-with open(b64_path, encoding="utf-8") as f:
-    sample_b64 = f.read().strip()
+if b64_path is not None:
+    with open(b64_path, encoding="utf-8") as f:
+        sample_b64 = f.read().strip()
 
 # Inject a seed script that pre-populates localStorage before the app boots.
 # Placed just before </body> so it runs after the DOM is parsed but we inject

@@ -352,7 +352,7 @@ Negative-variable cases (surplus of one oil fraction) are handled by clamping to
 - `electronics*`, `electronics-or-assembling`, `electronics-with-fluid` → electromagnetic-plant (speed 2)
 - `metallurgy*`, `crafting-with-fluid-or-metallurgy` → foundry (speed 4)
 - `crushing` → crusher (speed 1)
-- `pressing` → agricultural-tower (speed 1)
+- `pressing` → foundry (speed 4)
 - `captive-spawner-process` → captive-spawner (speed 1)
 
 ---
@@ -361,7 +361,7 @@ Negative-variable cases (surplus of one oil fraction) are handled by clamping to
 
 | Resource category | Machine | Output metric |
 |-------------------|---------|---------------|
-| `offshore` | `offshore-pump` | `machine_count` (fixed 1200/min each) |
+| `offshore` | `offshore-pump` | `machine_count` (fixed 72 000/min each — 1200/sec) |
 | `basic-fluid` (crude-oil, heavy-oil springs) | `pumpjack` | `required_yield_pct` |
 | everything else (solid ores) | `electric-mining-drill` or `big-mining-drill` | `machine_count` |
 
@@ -402,7 +402,7 @@ python -m unittest dev.test_cli -v
 | `TestFractionArithmetic` | All `raw_resources` and `machine_count` values remain `Fraction` in beacon-free runs |
 | `TestCoalLiquefaction` | `coal-liquefaction` via `--recipe heavy-oil=coal-liquefaction`; net heavy-oil math (65/cycle); coal+steam in raw; AOP not used; cracking engaged for petgas demand |
 | `TestSimpleCoalLiquefaction` | `simple-coal-liquefaction` (Space Age); coal+calcite+sulfuric-acid in raw; no crude-oil; cracking for petgas |
-| `TestGlebaMachineRouting` | `organic` → biochamber (no assembler); `pressing` → agricultural-tower (count=1/4 for transport-belt); `captive-spawner-process` → captive-spawner with zero inputs |
+| `TestGlebaMachineRouting` | `organic` → biochamber (no assembler); `pressing` → foundry (count=1/16 for transport-belt); `captive-spawner-process` → captive-spawner with zero inputs |
 | `TestNutrientsRecipes` | Default picks `nutrients-from-yumako-mash` via `RECIPE_DEFAULTS` (not fish); no circular dependency; fish route still available via `--recipe` override; bioflux override full biochamber chain |
 | `TestBeaconConfig` | `--beacon MACHINE=COUNT:TIER:QUALITY` computes speed via sqrt formula; `beacon_speed_bonus` in step output; `machine_count` becomes float; beacon quality effectivity (1.5/1.7/1.9/2.1/2.5); per-recipe override via `--recipe-beacon` |
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |

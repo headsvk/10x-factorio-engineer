@@ -81,7 +81,7 @@ MINER_SPEED: dict[str, Fraction] = {
     "big-mining-drill":      Fraction(5, 2),   # Space Age only
     "pumpjack":              Fraction(1),
 }
-OFFSHORE_PUMP_RATE  = Fraction(1200)           # fixed 1200 items/min
+OFFSHORE_PUMP_RATE  = Fraction(72000)          # 1200 items/sec × 60 = 72 000 items/min
 PUMPJACK_CATEGORIES = frozenset(["basic-fluid"])
 
 # Assembler crafting speeds
@@ -132,7 +132,7 @@ FIXED_MACHINE_FOR_CAT: dict[str, tuple[str, Fraction]] = {
     "metallurgy-or-assembling":          ("foundry",                 Fraction(4)),
     "crafting-with-fluid-or-metallurgy": ("foundry",                 Fraction(4)),
     "crushing":                          ("crusher",                 Fraction(1)),
-    "pressing":                          ("agricultural-tower",      Fraction(1)),
+    "pressing":                          ("foundry",                 Fraction(4)),
     "captive-spawner-process":           ("captive-spawner",         Fraction(1)),
 }
 
@@ -1574,8 +1574,12 @@ def format_human_readable(out: dict) -> str:
 
     if out.get("beacon_configs"):
         for machine, spec in out["beacon_configs"].items():
+            mod_strs = ", ".join(
+                f"{m['count']}x {m['type']}-{m['tier']}-{m['quality']}"
+                for m in spec.get("modules", [])
+            )
             lines.append(
-                f"Beacons:  {machine} = {spec['count']}x tier-{spec['tier']}-{spec['quality']}"
+                f"Beacons:  {machine} = {spec['count']}x [{mod_strs}]"
             )
 
     # --- Production Steps ---
@@ -1600,7 +1604,11 @@ def format_human_readable(out: dict) -> str:
             detail_parts.append(f"modules: {', '.join(mod_strs)}")
         if step.get("beacon_spec") is not None:
             bs = step["beacon_spec"]
-            detail_parts.append(f"beacons: {bs['count']}x tier-{bs['tier']}-{bs['quality']}")
+            mod_strs = ", ".join(
+                f"{m['count']}x {m['type']}-{m['tier']}-{m['quality']}"
+                for m in bs.get("modules", [])
+            )
+            detail_parts.append(f"beacons: {bs['count']}x [{mod_strs}]")
         if step.get("beacon_speed_bonus", 0):
             detail_parts.append(f"speed bonus: +{round(step['beacon_speed_bonus'], 4)}")
         if detail_parts:
