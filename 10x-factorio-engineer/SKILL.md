@@ -210,13 +210,13 @@ working context and update it after every player message.
 ```jsonc
 {
   "save_name": "My Factory",          // player-given name, default "Main Factory"
-  "location": null,                   // null (vanilla) | "nauvis" | "vulcanus" | "fulgora" | "gleba" | "aquilo" | "space-platform"
-  "assembler": 3,                     // player's current assembler tier
-  "furnace": "electric",              // furnace type
-  "machine_quality": "normal",        // "normal"|"uncommon"|"rare"|"epic"|"legendary"
-  "beacon_quality": "normal",         // beacon housing quality (same enum)
+  "dataset": "vanilla",               // "vanilla" | "space-age"
+  "assembler": 3,                     // player's current assembler tier (shared across all locations)
+  "furnace": "electric",              // furnace type (shared)
+  "machine_quality": "normal",        // "normal"|"uncommon"|"rare"|"epic"|"legendary" (shared)
+  "beacon_quality": "normal",         // beacon housing quality (shared)
 
-  // Module/beacon configs — each entry becomes --modules/--beacon MACHINE=... on every CLI call
+  // Module/beacon configs — shared across all locations; each entry becomes --modules/--beacon MACHINE=... on every CLI call
   // Valid for both crafting machines AND mining drills (electric-mining-drill, big-mining-drill)
   "module_configs": {
     // e.g. "assembling-machine-3": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}]
@@ -231,55 +231,68 @@ working context and update it after every player message.
     // e.g. "electric-mining-drill": {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]}
   },
 
-  // Persisted CLI overrides — applied as flags on every cli.py invocation
+  // Persisted CLI overrides — applied as flags on every cli.py invocation (shared)
   "recipe_overrides": {
     // item-id → recipe-key; each entry becomes --recipe ITEM=RECIPE
     // e.g. "heavy-oil": "coal-liquefaction"
   },
-  "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — lead with this tier in answers
+  "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — lead with this tier in answers (shared)
 
-  // Items on the main bus — player-declared supply rates (items/min).
-  // Claude applies --bus-item ITEM to new CLI calls for lines that draw ITEM from the bus.
-  // This is NOT applied automatically to all lines — only when the player says a line
-  // sources a bus item from the bus. Lines with their own supply (own miners/producers)
-  // do NOT use --bus-item; the difference shows in cli_result:
-  //   bus-fed → bus_inputs: { "item": rate }
-  //   own supply → raw_resources: { "item-ore": rate }
-  "bus_items": [
-    // e.g. { "item": "iron-plate", "rate": 7200, "label": "Iron Bus — 4 red belts" }
-    // label is optional display text
-  ],
-
-  // Science pack targets — items per minute the player wants to reach
-  "targets": {
-    "automation-science-pack": 45,
-    "logistic-science-pack": 45
-  },
-
-  // One entry per production line the player has described or planned.
-  // Multiple lines for the same item are allowed — use one line per physical block.
-  "lines": [
+  // ── Per-location data ────────────────────────────────────────────────────────
+  // Each location is a planet (1 per planet) or a named space platform (unlimited).
+  // Planet ids: "nauvis" | "vulcanus" | "fulgora" | "gleba" | "aquilo"
+  // Space platform ids: "space-platform-0", "space-platform-1", etc. (auto-assigned)
+  // Use the location's id as the --location flag when calling cli.py.
+  // Space platforms use --location space-platform.
+  "locations": [
     {
-      "item": "electronic-circuit",
-      "label": "Green Circuit Block 1",  // optional; shown as card title; defaults to humanized item name
-      "target_rate": 60.0,
-      "cli_result": { /* full JSON from cli.py */ },
-      "actual_machines": {
-        // machine-key → count of placed machines as told by the player
-        "assembling-machine-3": 3,
-        "electric-furnace": 2
+      "id": "nauvis",                   // planet name or "space-platform-N"
+      "type": "planet",                 // "planet" | "space-platform"
+      "label": "Nauvis",               // display name; user-editable for space platforms
+
+      // Items on this location's main bus — player-declared supply rates (items/min).
+      // Claude applies --bus-item ITEM to CLI calls for lines that draw ITEM from the bus.
+      //   bus-fed → bus_inputs: { "item": rate }
+      //   own supply → raw_resources: { "item-ore": rate }
+      "bus_items": [
+        // e.g. { "item": "iron-plate", "rate": 7200, "label": "Iron Bus — 4 red belts" }
+      ],
+
+      // Science pack targets for this location (items/min).
+      // The dashboard aggregates targets and rates across all locations for the science overview.
+      "targets": {
+        "automation-science-pack": 45,
+        "logistic-science-pack": 45
       },
-      "player_notes": "placed 3 assemblers, still need furnaces",
-      "effective_rate": 52.0  // recalculated from actual_machines
+
+      // One entry per production line. Multiple lines for the same item are allowed (one per physical block).
+      "lines": [
+        {
+          "item": "electronic-circuit",
+          "label": "Green Circuit Block 1",  // optional; shown as card title
+          "target_rate": 60.0,
+          "cli_result": { /* full JSON from cli.py, run with --location <this location's id> */ },
+          "actual_machines": {
+            // machine-key → count of placed machines as told by the player
+            "assembling-machine-3": 3,
+            "electric-furnace": 2
+          },
+          "player_notes": "placed 3 assemblers, still need furnaces",
+          "effective_rate": 52.0  // recalculated from actual_machines
+        }
+      ],
+
+      "bottlenecks": [
+        "iron-plate: need 60/min, actual ~45/min — add 1 electric furnace"
+      ],
+
+      "next_steps": [
+        "Build copper-plate smelting: 3 electric furnaces for 90/min"
+      ]
     }
-  ],
-
-  "bottlenecks": [
-    "iron-plate: need 60/min, actual ~45/min — add 1 electric furnace"
-  ],
-
-  "next_steps": [
-    "Build copper-plate smelting: 3 electric furnaces for 90/min"
+    // Additional locations:
+    // { "id": "vulcanus", "type": "planet", "label": "Vulcanus", "lines": [], "bus_items": [], "targets": {}, "bottlenecks": [], "next_steps": [] }
+    // { "id": "space-platform-0", "type": "space-platform", "label": "Platform Alpha", "lines": [], "bus_items": [], "targets": {}, "bottlenecks": [], "next_steps": [] }
   ],
 
   "chat_log": [
@@ -293,11 +306,13 @@ working context and update it after every player message.
 
 When a player says something like:
 - *"I just placed 8 furnaces on iron"* → update `actual_machines` for
-  `iron-plate`, recalculate `effective_rate`, check `targets`, update
-  `bottlenecks` and `next_steps`.
-- *"I want 45 science packs per minute"* → run the CLI for each science pack
-  in the set, store results in `lines`, populate `targets`.
-- *"switch to Space Age"* → set `location: "nauvis"` (or the player's specific planet), re-run CLI for all lines.
+  `iron-plate` in the active location's `lines`, recalculate `effective_rate`, check `targets`, update
+  `bottlenecks` and `next_steps` for that location.
+- *"I want 45 science packs per minute"* → run the CLI for each science pack in the set
+  (using the active location's `id` as `--location`), store results in the active location's `lines`,
+  populate `targets` in that location.
+- *"I'm moving my science to Vulcanus"* → add a new location entry `{ "id": "vulcanus", "type": "planet", "label": "Vulcanus", ... }` if it doesn't exist, re-run CLI for the relevant lines with `--location vulcanus`.
+- *"I'm setting up a space platform"* → add `{ "id": "space-platform-0", "type": "space-platform", "label": "<player's name>", ... }` to `locations`. Use `--location space-platform` for CLI calls.
 - *"I'm using coal liquefaction"* → add `"heavy-oil": "coal-liquefaction"` to
   `recipe_overrides`, re-run CLI for all affected lines.
 - *"I use blue belts"* → set `preferred_belt: "blue"`.
