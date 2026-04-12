@@ -139,7 +139,8 @@
     /* ── Science section ── */
     .science-section { background: var(--bg-card); border: 1px solid var(--border-sub);
                        border-left: 3px solid var(--accent);
-                       border-radius: 4px; padding: 14px 16px; margin-bottom: 16px; }
+                       border-radius: 4px; padding: 14px 16px; margin-bottom: 10px; }
+    .loc-divider { border: none; border-top: 1px solid var(--border-sub); margin: 0 0 10px; }
     .science-grid.cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
     .science-bar { margin-bottom: 12px; }
     .science-bar:last-child { margin-bottom: 0; }
@@ -383,6 +384,23 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
     .spin { animation: spin .8s linear infinite; display: inline-block; }
+
+    /* ── Location bar ── */
+    .loc-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+    .loc-sep  { color: var(--text-dim); padding: 0 2px; font-size: 13px; }
+    .loc-btn  { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
+                border-radius: 3px; padding: 3px 10px; height: 26px;
+                font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
+                letter-spacing: .05em; text-transform: uppercase; cursor: pointer; transition: background .12s, color .12s; }
+    .loc-btn:hover:not(.active) { background: var(--border); color: var(--text); }
+    .loc-btn.active { background: var(--accent); color: #1c1508; border-color: var(--accent); }
+
+    /* ── Science location chips ── */
+    .sci-loc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .sci-loc-chip  { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+                     color: var(--text-dim); background: var(--bg-input);
+                     border: 1px solid var(--border-sub); border-radius: 2px; padding: 1px 5px;
+                     white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -410,6 +428,24 @@
   </div>
 </dialog>
 
+<dialog id="add-loc-dialog">
+  <h3>Add Location</h3>
+  <p class="desc">Add a planet or a named space platform.</p>
+  <div class="section-label" style="margin-bottom:6px">Planets</div>
+  <div id="add-loc-planets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
+  <hr style="border:none;border-top:1px solid var(--border-sub);margin-bottom:14px">
+  <div class="section-label" style="margin-bottom:6px">Space Platform</div>
+  <div style="display:flex;gap:8px">
+    <input id="add-plat-name" class="dialog-textarea"
+           style="min-height:unset;height:32px;flex:1;padding:4px 8px;font-size:13px"
+           placeholder="Platform name…" maxlength="40">
+    <button class="btn-primary" id="btn-add-plat" style="height:32px;padding:0 14px">Add</button>
+  </div>
+  <div class="dialog-actions" style="margin-top:16px">
+    <button class="btn-cancel" id="add-loc-close">Close</button>
+  </div>
+</dialog>
+
 <script>
 // ── Encode / Decode ─────────────────────────────────────────────────────────
 
@@ -434,13 +470,21 @@ function decodeState(value) {
 
 const STORAGE_KEY = 'factorio_engineer_state';
 
+const PLANET_IDS    = ['nauvis','vulcanus','fulgora','gleba','aquilo'];
+const PLANET_LABELS = { nauvis:'Nauvis', vulcanus:'Vulcanus', fulgora:'Fulgora', gleba:'Gleba', aquilo:'Aquilo' };
+
+function makeLocation(id, type, labelOverride) {
+  const lbl = labelOverride ?? PLANET_LABELS[id] ?? id;
+  return { id, type, label: lbl, lines: [], bus_items: [], targets: {}, bottlenecks: [], next_steps: [] };
+}
+
 const DEFAULT_STATE = {
   save_name: 'My Factory', dataset: 'vanilla', assembler: 3,
   furnace: 'electric', machine_quality: 'normal', beacon_quality: 'normal',
   module_configs: {}, beacon_configs: {}, recipe_overrides: {}, machine_overrides: {},
   preferred_belt: 'blue',
-  bus_items: [],
-  targets: {}, lines: [], bottlenecks: [], next_steps: [], chat_log: [],
+  locations: [makeLocation('nauvis', 'planet')],
+  chat_log: [],
 };
 
 const SCIENCE_ORDER = [
@@ -599,9 +643,34 @@ function bcnChip(b, housingQ) {
 
 let STATE = { ...DEFAULT_STATE };
 let activeTab = 'overview';
+let activeLocationIdx = 0;
 let expandedCards = new Set();
 let storageMode = 'checking';
 let chatSending = false;
+
+function currentLoc() {
+  return STATE.locations?.[activeLocationIdx] ?? STATE.locations?.[0] ?? makeLocation('nauvis', 'planet');
+}
+
+// ── Migration ─────────────────────────────────────────────────────────────────
+
+function migrateState(state) {
+  if (state.locations) return state; // already new format
+  const loc = makeLocation('nauvis', 'planet');
+  loc.lines       = state.lines       ?? [];
+  loc.bus_items   = state.bus_items   ?? [];
+  loc.targets     = state.targets     ?? {};
+  loc.bottlenecks = state.bottlenecks ?? [];
+  loc.next_steps  = state.next_steps  ?? [];
+  const migrated  = { ...state, locations: [loc] };
+  delete migrated.location;
+  delete migrated.lines;
+  delete migrated.bus_items;
+  delete migrated.targets;
+  delete migrated.bottlenecks;
+  delete migrated.next_steps;
+  return migrated;
+}
 
 // ── Storage ──────────────────────────────────────────────────────────────────
 
@@ -612,8 +681,8 @@ async function saveState() {
 }
 
 async function loadState() {
-  try { const r = await window.storage?.get(STORAGE_KEY); if (r?.value) return decodeState(r.value); } catch {}
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return decodeState(raw); } catch {}
+  try { const r = await window.storage?.get(STORAGE_KEY); if (r?.value) return migrateState(decodeState(r.value)); } catch {}
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return migrateState(decodeState(raw)); } catch {}
   return null;
 }
 
@@ -654,10 +723,11 @@ function renderHeader() {
           ${preferred_belt ? `<span class="badge">${label(preferred_belt)} Belt</span>` : ''}
           ${Object.keys(module_configs ?? {}).length ? '<span class="badge">Modules</span>' : ''}
           ${(() => {
-            const sciKeys = Object.keys(STATE.targets ?? {});
+            const targets = allSciTargets();
+            const sciKeys = Object.keys(targets);
             if (!sciKeys.length) return '';
-            const rates = sciRates();
-            const eff = Math.min(...sciKeys.map(k => rates[k] ?? 0));
+            const rates = allSciRates();
+            const eff = Math.min(...sciKeys.map(k => rates[k]?.total ?? 0));
             return `<span class="badge">${Math.round(eff)} SPM</span>`;
           })()}
         </div>
@@ -671,21 +741,41 @@ function renderHeader() {
     </div>`;
 }
 
-function sciRates() {
-  const r = {};
-  for (const line of STATE.lines)
-    if (line.item in (STATE.targets ?? {}))
-      r[line.item] = (r[line.item] ?? 0) + (line.effective_rate ?? line.target_rate ?? 0);
-  return r;
+// Aggregate science targets across all locations (max per pack)
+function allSciTargets() {
+  const t = {};
+  for (const loc of STATE.locations ?? [])
+    for (const [k, v] of Object.entries(loc.targets ?? {}))
+      t[k] = Math.max(t[k] ?? 0, v);
+  return t;
+}
+
+// Aggregate science rates across all locations; returns { packId: { total, byLoc: [{label, rate}] } }
+function allSciRates() {
+  const targets = allSciTargets();
+  const result = {};
+  for (const loc of STATE.locations ?? []) {
+    for (const line of loc.lines ?? []) {
+      if (!(line.item in targets)) continue;
+      const rate = line.effective_rate ?? line.target_rate ?? 0;
+      if (!result[line.item]) result[line.item] = { total: 0, byLoc: [] };
+      result[line.item].total += rate;
+      const entry = result[line.item].byLoc.find(e => e.label === loc.label);
+      if (entry) entry.rate += rate;
+      else result[line.item].byLoc.push({ label: loc.label, rate });
+    }
+  }
+  return result;
 }
 
 function renderScience() {
-  const keys = sortedScienceKeys(Object.keys(STATE.targets));
+  const targets = allSciTargets();
+  const keys = sortedScienceKeys(Object.keys(targets));
   if (!keys.length) return '';
-  const rates = sciRates();
+  const rates = allSciRates();
 
-  const effectiveSPM = Math.min(...keys.map(k => rates[k] ?? 0));
-  const targetSPM    = Math.min(...keys.map(k => STATE.targets[k]));
+  const effectiveSPM = Math.min(...keys.map(k => rates[k]?.total ?? 0));
+  const targetSPM    = Math.min(...keys.map(k => targets[k]));
   const spmPct = pct(effectiveSPM, targetSPM);
   const spmCol = statusColor(spmPct);
   const spmHeadline = `
@@ -695,11 +785,15 @@ function renderScience() {
     </div>`;
 
   const bars = keys.map(name => {
-    const actual = rates[name];
-    const target = STATE.targets[name];
-    const p = pct(actual ?? 0, target);
+    const info   = rates[name];
+    const actual = info?.total ?? 0;
+    const target = targets[name];
+    const p = pct(actual, target);
     const {solid, dark} = sciStyle(name);
     const col = statusColor(p);
+    const locChips = (info?.byLoc ?? []).map(e =>
+      `<span class="sci-loc-chip">${esc(e.label)} ${fmtN(e.rate)}/min</span>`
+    ).join('');
     return `
       <div class="science-bar">
         <div class="science-bar-header">
@@ -708,11 +802,12 @@ function renderScience() {
             ${esc(label(name))}
           </div>
           <div class="science-meta">
-            <span class="rate-text">${actual ?? 0}/${target} /min</span>
+            <span class="rate-text">${actual}/${target} /min</span>
             <span class="pct-text" style="color:${col}">${p}%</span>
           </div>
         </div>
-        <div class="progress-track">
+        ${locChips ? `<div class="sci-loc-chips">${locChips}</div>` : ''}
+        <div class="progress-track" style="margin-top:${locChips ? '6px' : '0'}">
           <div class="progress-fill" style="width:${p}%;background:linear-gradient(90deg,${dark},${solid})"></div>
         </div>
       </div>`;
@@ -726,27 +821,47 @@ function renderScience() {
     </div>`;
 }
 
+function renderLocationBar() {
+  const locs = STATE.locations ?? [];
+  const planets   = locs.filter(l => l.type === 'planet');
+  const platforms = locs.filter(l => l.type === 'space-platform');
+  const btnFor = (loc) => {
+    const i = locs.indexOf(loc);
+    return `<button class="loc-btn${i === activeLocationIdx ? ' active' : ''}" data-locidx="${i}">${esc(loc.label)}</button>`;
+  };
+  const planetBtns   = planets.map(btnFor).join('');
+  const platformBtns = platforms.map(btnFor).join('');
+  const sep = planets.length && platforms.length ? '<span class="loc-sep">|</span>' : '';
+  return `
+    <div class="loc-bar">
+      ${planetBtns}${sep}${platformBtns}
+      <button class="btn loc-btn" id="btn-add-loc" style="opacity:.7">+ Add</button>
+    </div>`;
+}
+
 function renderBottlenecks() {
-  if (!STATE.bottlenecks.length) return '';
+  const bn = currentLoc().bottlenecks ?? [];
+  if (!bn.length) return '';
   return `
     <div class="bottleneck-banner">
-      <div class="bottleneck-title">⚠ ${STATE.bottlenecks.length} bottleneck${STATE.bottlenecks.length !== 1 ? 's' : ''}</div>
-      ${STATE.bottlenecks.map(b => `<div class="bottleneck-item">• ${esc(humanizeText(b))}</div>`).join('')}
+      <div class="bottleneck-title">⚠ ${bn.length} bottleneck${bn.length !== 1 ? 's' : ''}</div>
+      ${bn.map(b => `<div class="bottleneck-item">• ${esc(humanizeText(b))}</div>`).join('')}
     </div>`;
 }
 
 function renderBusBalance() {
+  const loc = currentLoc();
   // Supply: explicitly declared bus_items (player-declared rates)
   const supply = {};
   const busItemMap = {};
-  for (const src of STATE.bus_items ?? []) {
+  for (const src of loc.bus_items ?? []) {
     supply[src.item] = (supply[src.item] ?? 0) + src.rate;
     busItemMap[src.item] = src;
   }
 
   // Demand: read bus_inputs from cli_result (set when --bus-item was used for this line)
   const demand = {};
-  for (const line of STATE.lines)
+  for (const line of loc.lines ?? [])
     for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {}))
       demand[item] = (demand[item] ?? 0) + rate;
 
@@ -817,10 +932,11 @@ function renderBusBalance() {
 }
 
 function renderTabs() {
+  const loc = currentLoc();
   const tabs = [
     ['overview', 'Overview'],
-    ['lines',    `Lines${STATE.lines.length ? ` (${STATE.lines.length})` : ''}`],
-    ['issues',   `Issues${STATE.bottlenecks.length ? ` (${STATE.bottlenecks.length})` : ''}`],
+    ['lines',    `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
+    ['issues',   `Actions${(loc.bottlenecks?.length || loc.next_steps?.length) ? ` (${(loc.bottlenecks?.length ?? 0) + (loc.next_steps?.length ?? 0)})` : ''}`],
     ['chat',     'Chat'],
   ];
   return `
@@ -834,48 +950,42 @@ const CIRCUIT_ITEMS     = new Set(['electronic-circuit','advanced-circuit','proc
 const SCIENCE_ITEM_SET  = new Set(SCIENCE_ORDER);
 
 function renderOverview() {
-  const sciSection = renderScience();
+  const loc = currentLoc();
+  const busSection = renderBusBalance();
 
-  const steps = STATE.next_steps.length ? `
-    <div class="next-steps">
-      <div class="section-label">Next Steps</div>
-      ${STATE.next_steps.map(s => `
-        <div class="next-step-item">
-          <span class="arrow">→</span>
-          <span>${esc(humanizeText(s))}</span>
-        </div>`).join('')}
-    </div>` : '';
-
-  const totalPowCeilMw = STATE.lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
-  const totalPowMw     = STATE.lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
+  const locLines = loc.lines ?? [];
+  const totalPowCeilMw = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
+  const totalPowMw     = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
   const powerSection = totalPowCeilMw > 0 ? `
     <div class="power-overview">
-      <div class="power-overview-label">⚡ Factory Power</div>
+      <div class="power-overview-label">⚡ Power</div>
       <div class="power-overview-values">
         <span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
         <span class="power-ceil-note">/ ${fmtPower(totalPowCeilMw * 1000)} (ceil)</span>
       </div>
     </div>` : '';
 
-  if (!sciSection) return powerSection + `
+  if (!busSection && !powerSection) return `
     <div class="empty-state">
-      <p>No science targets set yet.</p>
-      <p>Ask Claude to set targets in the Chat tab.</p>
+      <p>No production lines for ${esc(loc.label)} yet.</p>
+      <p>Ask Claude to plan one in the Chat tab.</p>
     </div>`;
 
-  return powerSection + sciSection + steps;
+  return powerSection + busSection;
 }
 
 function renderLinesTab() {
-  if (!STATE.lines.length) return `
+  const loc = currentLoc();
+  const lines = loc.lines ?? [];
+  if (!lines.length) return `
     <div class="empty-state">
       <p>No production lines yet.</p>
       <p>Ask Claude to plan one in the Chat tab.</p>
     </div>`;
 
-  const idxMap = new Map(STATE.lines.map((l, i) => [l, i]));
-  const sciLines    = STATE.lines.filter(l =>  SCIENCE_ITEM_SET.has(l.item));
-  const nonSciLines = STATE.lines.filter(l => !SCIENCE_ITEM_SET.has(l.item));
+  const idxMap = new Map(lines.map((l, i) => [l, i]));
+  const sciLines    = lines.filter(l =>  SCIENCE_ITEM_SET.has(l.item));
+  const nonSciLines = lines.filter(l => !SCIENCE_ITEM_SET.has(l.item));
 
   const groups = [['Science', sciLines], ['Smelting', []], ['Circuits', []], ['Other', []]];
   for (const line of nonSciLines) {
@@ -1037,12 +1147,20 @@ function renderLineCard(line, idx) {
 }
 
 function renderIssues() {
-  if (!STATE.bottlenecks.length && !STATE.next_steps.length)
-    return '<div class="no-issues">✓ No bottlenecks detected.</div>';
-  return [
-    ...STATE.bottlenecks.map(b => `<div class="issue-item bad"><span>⚠</span><span>${esc(humanizeText(b))}</span></div>`),
-    ...STATE.next_steps.map(s => `<div class="issue-item good"><span style="color:var(--ok);opacity:.7">→</span><span>${esc(humanizeText(s))}</span></div>`),
-  ].join('');
+  const loc = currentLoc();
+  const bn = loc.bottlenecks ?? [];
+  const ns = loc.next_steps  ?? [];
+  if (!bn.length && !ns.length)
+    return '<div class="no-issues">✓ No bottlenecks or next steps.</div>';
+  const bnHtml = bn.length ? [
+    `<div class="section-label" style="margin-bottom:8px">Bottlenecks</div>`,
+    ...bn.map(b => `<div class="issue-item bad"><span>⚠</span><span>${esc(humanizeText(b))}</span></div>`),
+  ] : [];
+  const nsHtml = ns.length ? [
+    `<div class="section-label" style="margin:${bn.length ? '14px' : '0'} 0 8px">Next Steps</div>`,
+    ...ns.map(s => `<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`),
+  ] : [];
+  return [...bnHtml, ...nsHtml].join('');
 }
 
 function renderChat() {
@@ -1074,8 +1192,9 @@ function render() {
   document.getElementById('app').innerHTML = `
     ${renderHeader()}
     <div class="main">
+      ${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
+      ${renderLocationBar()}
       ${renderBottlenecks()}
-      ${renderBusBalance()}
       ${renderTabs()}
       <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
       <div class="tab-panel${activeTab==='lines'  ?' active':''}">${renderLinesTab()}</div>
@@ -1096,6 +1215,18 @@ function scrollChat() {
 function bindEvents() {
   document.querySelectorAll('.tab-btn').forEach(btn =>
     btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); }));
+
+  document.querySelectorAll('.loc-btn[data-locidx]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      activeLocationIdx = +btn.dataset.locidx;
+      expandedCards = new Set();
+      render();
+    }));
+
+  document.getElementById('btn-add-loc')?.addEventListener('click', () => {
+    openAddLocDialog();
+    document.getElementById('add-loc-dialog').showModal();
+  });
 
   document.querySelectorAll('.card-header[data-card]').forEach(hdr =>
     hdr.addEventListener('click', e => {
@@ -1130,7 +1261,7 @@ function bindEvents() {
   const btnReset = document.getElementById('btn-reset');
   if (btnReset) btnReset.addEventListener('click', () => {
     if (confirm('Reset all factory data? This cannot be undone.')) {
-      STATE = { ...DEFAULT_STATE }; saveState(); render();
+      STATE = { ...DEFAULT_STATE }; activeLocationIdx = 0; saveState(); render();
     }
   });
 
@@ -1184,6 +1315,48 @@ async function sendChat() {
   }
 }
 
+// ── Add Location ─────────────────────────────────────────────────────────────
+
+function openAddLocDialog() {
+  const existingIds = new Set((STATE.locations ?? []).map(l => l.id));
+  const available = PLANET_IDS.filter(id => !existingIds.has(id));
+  const container = document.getElementById('add-loc-planets');
+  container.innerHTML = available.length
+    ? available.map(id =>
+        `<button class="btn" style="text-transform:uppercase;font-size:12px" data-planet="${esc(id)}">${esc(PLANET_LABELS[id])}</button>`
+      ).join('')
+    : `<span style="color:var(--text-dim);font-size:12px">All planets already added.</span>`;
+  container.querySelectorAll('[data-planet]').forEach(btn =>
+    btn.addEventListener('click', () => addPlanetLocation(btn.dataset.planet)));
+  document.getElementById('add-plat-name').value = '';
+}
+
+function addPlanetLocation(id) {
+  STATE = { ...STATE, locations: [...(STATE.locations ?? []), makeLocation(id, 'planet')] };
+  activeLocationIdx = STATE.locations.length - 1;
+  saveState(); render();
+  document.getElementById('add-loc-dialog').close();
+}
+
+function addPlatformLocation() {
+  const nameEl = document.getElementById('add-plat-name');
+  const name = nameEl?.value.trim();
+  if (!name) return;
+  const n = (STATE.locations ?? []).filter(l => l.type === 'space-platform').length;
+  const id = `space-platform-${n}`;
+  STATE = { ...STATE, locations: [...(STATE.locations ?? []), makeLocation(id, 'space-platform', name)] };
+  activeLocationIdx = STATE.locations.length - 1;
+  saveState(); render();
+  document.getElementById('add-loc-dialog').close();
+}
+
+document.getElementById('add-loc-close').addEventListener('click', () =>
+  document.getElementById('add-loc-dialog').close());
+document.getElementById('btn-add-plat').addEventListener('click', addPlatformLocation);
+document.getElementById('add-plat-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addPlatformLocation(); }
+});
+
 // ── Export / Import dialogs (outside render cycle) ───────────────────────────
 
 document.getElementById('export-close').addEventListener('click', () =>
@@ -1197,7 +1370,8 @@ document.getElementById('import-cancel').addEventListener('click', () =>
 document.getElementById('import-apply').addEventListener('click', () => {
   const text = document.getElementById('import-text').value.trim();
   try {
-    STATE = decodeState(text);
+    STATE = migrateState(decodeState(text));
+    activeLocationIdx = 0;
     saveState();
     document.getElementById('import-dialog').close();
     render();
@@ -1217,7 +1391,9 @@ document.getElementById('import-apply').addEventListener('click', () => {
   const params = new URLSearchParams(location.search);
   const tabParam = params.get('tab');
   if (tabParam && ['overview','lines','issues','chat'].includes(tabParam)) activeTab = tabParam;
-  if (params.get('expand') === 'all') expandedCards = new Set(STATE.lines.map((_, i) => i));
+  if (params.get('expand') === 'all') {
+    expandedCards = new Set((currentLoc().lines ?? []).map((_, i) => i));
+  }
   render();
 })();
 </script>
