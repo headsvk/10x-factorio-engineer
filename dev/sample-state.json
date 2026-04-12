@@ -730,9 +730,17 @@
       "id": "vulcanus",
       "type": "planet",
       "label": "Vulcanus",
-      "bus_items": [],
+      "bus_items": [
+        {
+          "item": "crude-oil",
+          "rate": 4200,
+          "label": "Crude Oil \u2014 imported from space platforms",
+          "fluid": true
+        }
+      ],
       "targets": {
-        "automation-science-pack": 90
+        "automation-science-pack": 90,
+        "metallurgic-science-pack": 30
       },
       "lines": [
         {
@@ -837,11 +845,537 @@
               "iron-gear-wheel": 30.0
             }
           }
+        },
+        {
+          "item": "metallurgic-science-pack",
+          "label": "Metallurgic Science",
+          "target_rate": 30,
+          "effective_rate": 30,
+          "player_notes": "Vulcanus native science \u2014 foundry chain: tungsten-plate + tungsten-carbide + molten-copper. Imports crude-oil for oil processing (sulfur/carbon chain).",
+          "cli_result": {
+            "item": "metallurgic-science-pack",
+            "rate_per_min": 30.0,
+            "location": "vulcanus",
+            "assembler": 3,
+            "furnace": "electric",
+            "miner": "electric",
+            "machine_quality": "normal",
+            "beacon_quality": "normal",
+            "production_steps": [
+              {
+                "recipe": "ice-melting",
+                "machine": "chemical-plant",
+                "machine_count": 12.4615,
+                "machine_count_ceil": 13,
+                "outputs": {
+                  "water": 14953.8462
+                },
+                "inputs": {
+                  "ice": 747.6923
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 2616.9231,
+                "power_kw_ceil": 2730.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "metallic-asteroid-crushing",
+                "machine": "crusher",
+                "machine_count": 23.94,
+                "machine_count_ceil": 24,
+                "outputs": {
+                  "iron-ore": 14364.0,
+                  "metallic-asteroid-chunk": 143.64
+                },
+                "inputs": {
+                  "metallic-asteroid-chunk": 718.2
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 12927.6,
+                "power_kw_ceil": 12960.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "molten-copper",
+                "machine": "foundry",
+                "machine_count": 1.6,
+                "machine_count_ceil": 2,
+                "outputs": {
+                  "molten-copper": 6000.0
+                },
+                "inputs": {
+                  "copper-ore": 600.0,
+                  "calcite": 12.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 4000.0,
+                "power_kw_ceil": 5000.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "sulfuric-acid",
+                "machine": "cryogenic-plant",
+                "machine_count": 0.6,
+                "machine_count_ceil": 1,
+                "outputs": {
+                  "sulfuric-acid": 2700.0
+                },
+                "inputs": {
+                  "water": 5400.0,
+                  "sulfur": 270.0,
+                  "iron-plate": 54.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 900.0,
+                "power_kw_ceil": 1500.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "advanced-oil-processing",
+                "machine": "oil-refinery",
+                "machine_count": 3.4615,
+                "machine_count_ceil": 4,
+                "outputs": {
+                  "petroleum-gas": 2284.6154,
+                  "light-oil": 1869.2308,
+                  "heavy-oil": 1038.4615
+                },
+                "inputs": {
+                  "crude-oil": 4153.8462,
+                  "water": 2076.9231
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 1453.8462,
+                "power_kw_ceil": 1680.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "light-oil-cracking",
+                "machine": "biochamber",
+                "machine_count": 1.9615,
+                "machine_count_ceil": 2,
+                "outputs": {
+                  "petroleum-gas": 1765.3846
+                },
+                "inputs": {
+                  "water": 2648.0769,
+                  "light-oil": 2648.0769
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "heavy-oil-cracking",
+                "machine": "biochamber",
+                "machine_count": 0.5769,
+                "machine_count_ceil": 1,
+                "outputs": {
+                  "light-oil": 778.8462
+                },
+                "inputs": {
+                  "heavy-oil": 1038.4615,
+                  "water": 778.8462
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "oxide-asteroid-crushing",
+                "machine": "crusher",
+                "machine_count": 4.9846,
+                "machine_count_ceil": 5,
+                "outputs": {
+                  "ice": 747.6923,
+                  "oxide-asteroid-chunk": 29.9077
+                },
+                "inputs": {
+                  "oxide-asteroid-chunk": 149.5385
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 2691.6923,
+                "power_kw_ceil": 2700.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "molten-iron",
+                "machine": "foundry",
+                "machine_count": 0.16,
+                "machine_count_ceil": 1,
+                "outputs": {
+                  "molten-iron": 600.0
+                },
+                "inputs": {
+                  "iron-ore": 60.0,
+                  "calcite": 1.2
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 400.0,
+                "power_kw_ceil": 2500.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "advanced-metallic-asteroid-crushing",
+                "machine": "crusher",
+                "machine_count": 12.5,
+                "machine_count_ceil": 13,
+                "outputs": {
+                  "copper-ore": 600.0,
+                  "iron-ore": 1500.0,
+                  "metallic-asteroid-chunk": 7.5
+                },
+                "inputs": {
+                  "metallic-asteroid-chunk": 150.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 6750.0,
+                "power_kw_ceil": 7020.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "sulfur",
+                "machine": "cryogenic-plant",
+                "machine_count": 1.5,
+                "machine_count_ceil": 2,
+                "outputs": {
+                  "sulfur": 270.0
+                },
+                "inputs": {
+                  "water": 4050.0,
+                  "petroleum-gas": 4050.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 2250.0,
+                "power_kw_ceil": 3000.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "carbon",
+                "machine": "cryogenic-plant",
+                "machine_count": 1.0,
+                "machine_count_ceil": 1,
+                "outputs": {
+                  "carbon": 90.0
+                },
+                "inputs": {
+                  "sulfuric-acid": 1800.0,
+                  "coal": 180.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 1500.0,
+                "power_kw_ceil": 1500.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "tungsten-carbide",
+                "machine": "assembling-machine-3",
+                "machine_count": 1.2,
+                "machine_count_ceil": 2,
+                "outputs": {
+                  "tungsten-carbide": 90.0
+                },
+                "inputs": {
+                  "sulfuric-acid": 900.0,
+                  "tungsten-ore": 180.0,
+                  "carbon": 90.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 450.0,
+                "power_kw_ceil": 750.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "tungsten-plate",
+                "machine": "foundry",
+                "machine_count": 2.5,
+                "machine_count_ceil": 3,
+                "outputs": {
+                  "tungsten-plate": 60.0
+                },
+                "inputs": {
+                  "molten-iron": 600.0,
+                  "tungsten-ore": 240.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 6250.0,
+                "power_kw_ceil": 7500.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "iron-plate",
+                "machine": "electric-furnace",
+                "machine_count": 1.44,
+                "machine_count_ceil": 2,
+                "outputs": {
+                  "iron-plate": 54.0
+                },
+                "inputs": {
+                  "iron-ore": 54.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 259.2,
+                "power_kw_ceil": 360.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "metallurgic-science-pack",
+                "machine": "foundry",
+                "machine_count": 1.25,
+                "machine_count_ceil": 2,
+                "outputs": {
+                  "metallurgic-science-pack": 30.0
+                },
+                "inputs": {
+                  "molten-copper": 6000.0,
+                  "tungsten-carbide": 90.0,
+                  "tungsten-plate": 60.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 3125.0,
+                "power_kw_ceil": 5000.0,
+                "beacon_power_kw": 0.0
+              }
+            ],
+            "raw_resources": {
+              "metallic-asteroid-chunk": 717.06,
+              "tungsten-ore": 420.0,
+              "coal": 180.0,
+              "oxide-asteroid-chunk": 119.6308,
+              "calcite": 13.2
+            },
+            "co_products": {
+              "iron-ore": 15750.0
+            },
+            "miners_needed": {
+              "tungsten-ore": {
+                "machine": "electric-mining-drill",
+                "machine_count": 70.0,
+                "machine_count_ceil": 70,
+                "rate_per_min": 420.0,
+                "power_kw": 6300.0
+              },
+              "coal": {
+                "machine": "electric-mining-drill",
+                "machine_count": 6.0,
+                "machine_count_ceil": 6,
+                "rate_per_min": 180.0,
+                "power_kw": 540.0
+              },
+              "calcite": {
+                "machine": "electric-mining-drill",
+                "machine_count": 0.44,
+                "machine_count_ceil": 1,
+                "rate_per_min": 13.2,
+                "power_kw": 39.6
+              }
+            },
+            "total_power_mw": 52.4539,
+            "total_power_mw_ceil": 61.0796,
+            "bus_inputs": {
+              "crude-oil": 4153.8462
+            }
+          }
         }
       ],
       "bottlenecks": [],
       "next_steps": [
-        "Set up metallurgic-science-pack production (Vulcanus unique science pack)"
+        "Scale metallurgic-science-pack to 60/min \u2014 need big-mining-drill on tungsten-ore",
+        "Replace asteroid-crushing copper source with foundry once lava smelting is set up"
+      ]
+    },
+    {
+      "id": "gleba",
+      "type": "planet",
+      "label": "Gleba",
+      "bus_items": [
+        {
+          "item": "yumako",
+          "rate": 207,
+          "label": "Yumako \u2014 farming towers"
+        },
+        {
+          "item": "jellynut",
+          "rate": 23,
+          "label": "Jellynut \u2014 farming towers"
+        }
+      ],
+      "targets": {
+        "agricultural-science-pack": 30
+      },
+      "lines": [
+        {
+          "item": "agricultural-science-pack",
+          "label": "Agricultural Science",
+          "target_rate": 30,
+          "effective_rate": 30,
+          "player_notes": "All-biochamber chain \u2014 pentapod-egg self-seeding loop, yumako+jellynut from farming towers. Zero electric power draw.",
+          "cli_result": {
+            "item": "agricultural-science-pack",
+            "rate_per_min": 30.0,
+            "location": "gleba",
+            "assembler": 3,
+            "furnace": "electric",
+            "miner": "electric",
+            "machine_quality": "normal",
+            "beacon_quality": "normal",
+            "production_steps": [
+              {
+                "recipe": "nutrients-from-yumako-mash",
+                "machine": "biochamber",
+                "machine_count": 3.3333,
+                "machine_count_ceil": 4,
+                "outputs": {
+                  "nutrients": 450.0
+                },
+                "inputs": {
+                  "yumako-mash": 300.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "yumako-processing",
+                "machine": "biochamber",
+                "machine_count": 2.2917,
+                "machine_count_ceil": 3,
+                "outputs": {
+                  "yumako-mash": 412.5,
+                  "yumako-seed": 4.125
+                },
+                "inputs": {
+                  "yumako": 206.25
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "jellynut-processing",
+                "machine": "biochamber",
+                "machine_count": 0.25,
+                "machine_count_ceil": 1,
+                "outputs": {
+                  "jelly": 90.0,
+                  "jellynut-seed": 0.45
+                },
+                "inputs": {
+                  "jellynut": 22.5
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "bioflux",
+                "machine": "biochamber",
+                "machine_count": 0.5,
+                "machine_count_ceil": 1,
+                "outputs": {
+                  "bioflux": 30.0
+                },
+                "inputs": {
+                  "yumako-mash": 112.5,
+                  "jelly": 90.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "pentapod-egg",
+                "machine": "biochamber",
+                "machine_count": 2.5,
+                "machine_count_ceil": 3,
+                "outputs": {
+                  "pentapod-egg": 30.0
+                },
+                "inputs": {
+                  "water": 900.0,
+                  "nutrients": 450.0,
+                  "pentapod-egg": 15.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "agricultural-science-pack",
+                "machine": "biochamber",
+                "machine_count": 1.3333,
+                "machine_count_ceil": 2,
+                "outputs": {
+                  "agricultural-science-pack": 30.0
+                },
+                "inputs": {
+                  "bioflux": 30.0,
+                  "pentapod-egg": 30.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 0.0,
+                "power_kw_ceil": 0.0,
+                "beacon_power_kw": 0.0
+              }
+            ],
+            "raw_resources": {
+              "water": 900.0,
+              "pentapod-egg": 15.0
+            },
+            "co_products": {
+              "yumako-seed": 4.125,
+              "jellynut-seed": 0.45
+            },
+            "miners_needed": {
+              "water": {
+                "machine": "offshore-pump",
+                "machine_count": 0.0125,
+                "machine_count_ceil": 1,
+                "rate_per_min": 900.0
+              }
+            },
+            "total_power_mw": 0.0,
+            "total_power_mw_ceil": 0.0,
+            "bus_inputs": {
+              "yumako": 206.25,
+              "jellynut": 22.5
+            }
+          }
+        }
+      ],
+      "bottlenecks": [],
+      "next_steps": [
+        "Expand yumako farming towers \u2014 need 207/min yumako input",
+        "Set up pentapod-egg captive spawner for sustainable egg seed supply"
       ]
     }
   ],
