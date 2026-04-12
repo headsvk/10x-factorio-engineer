@@ -821,11 +821,11 @@ function renderScience() {
 }
 
 function renderLocationBar() {
-  if ((STATE.locations ?? []).length <= 1) return ''; // hide when only one location
-  const planets   = STATE.locations.filter(l => l.type === 'planet');
-  const platforms = STATE.locations.filter(l => l.type === 'space-platform');
-  const btnFor = (loc, idx) => {
-    const i = STATE.locations.indexOf(loc);
+  const locs = STATE.locations ?? [];
+  const planets   = locs.filter(l => l.type === 'planet');
+  const platforms = locs.filter(l => l.type === 'space-platform');
+  const btnFor = (loc) => {
+    const i = locs.indexOf(loc);
     return `<button class="loc-btn${i === activeLocationIdx ? ' active' : ''}" data-locidx="${i}">${esc(loc.label)}</button>`;
   };
   const planetBtns   = planets.map(btnFor).join('');
