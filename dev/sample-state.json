@@ -43,7 +43,7 @@
         }
       ],
       "targets": {
-        "automation-science-pack": 60,
+        "automation-science-pack": 90,
         "logistic-science-pack": 60,
         "chemical-science-pack": 45
       },
@@ -732,9 +732,7 @@
       "label": "Vulcanus",
       "bus_items": [],
       "targets": {
-        "automation-science-pack": 60,
-        "logistic-science-pack": 60,
-        "chemical-science-pack": 45
+        "automation-science-pack": 90
       },
       "lines": [
         {
