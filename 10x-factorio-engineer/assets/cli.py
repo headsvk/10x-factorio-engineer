@@ -3,7 +3,7 @@
 Factorio Production Calculator
 
 Usage:
-    python cli.py --item <item-id> (--rate <N> | --machines <N>)
+    python cli.py --item <item-id> (--rate <N> | --machines <N> | --step-machines RECIPE=N)
                   [--item <item-id2> (--rate <N2> | --machines <N2>) ...]
                   [--assembler 1|2|3]
                   [--furnace stone|steel|electric]
@@ -1733,6 +1733,20 @@ def format_human_readable(out: dict) -> str:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+def _parse_step_machines(raw: str) -> tuple[str, float]:
+    """Parse 'RECIPE=N' for --step-machines and exit with an error on bad format."""
+    if "=" not in raw:
+        sys.exit(f"--step-machines requires RECIPE=N format, got: {raw!r}")
+    recipe_key, n_str = raw.split("=", 1)
+    try:
+        n = float(n_str.strip())
+    except ValueError:
+        sys.exit(f"--step-machines N must be a number, got: {n_str.strip()!r}")
+    if n <= 0:
+        sys.exit(f"--step-machines N must be positive, got: {n!r}")
+    return recipe_key.strip(), n
+
+
 def _parse_kv(raw: str, flag: str) -> tuple[str, str]:
     """Parse 'KEY=VALUE' and exit with an error message on bad format."""
     if "=" not in raw:
@@ -1809,6 +1823,16 @@ Examples:
                        "Number of machines for the target item (fractional ok). Repeatable; "
                        "pairs with --item by position. Use --rate or --machines, not both."
                    ))
+    p.add_argument(
+        "--step-machines",
+        action="append", default=[], dest="step_machines", metavar="RECIPE=N",
+        help=(
+            "Constrain an intermediate step to N machines and derive the top-level "
+            "rate from that. RECIPE is the recipe key in production_steps. Repeatable; "
+            "if multiple constraints conflict the most constraining (min scale) wins. "
+            "Mutually exclusive with --rate and --machines. Requires exactly one --item."
+        ),
+    )
     p.add_argument("--assembler", default=3, type=int, choices=[1, 2, 3],
                    help="Assembling machine level (default: 3).")
     p.add_argument("--furnace",  default="electric",
@@ -1904,12 +1928,15 @@ Examples:
     args = p.parse_args()
     if not args.items:
         p.error("At least one --item must be provided.")
-    has_rate     = len(args.rates) > 0
-    has_machines = len(args.machines_list) > 0
-    if has_rate and has_machines:
-        p.error("Cannot mix --rate and --machines; use one mode across all targets.")
-    if not has_rate and not has_machines:
-        p.error("Exactly one of --rate or --machines must be provided.")
+    has_rate          = len(args.rates) > 0
+    has_machines      = len(args.machines_list) > 0
+    has_step_machines = len(args.step_machines) > 0
+    if sum([has_rate, has_machines, has_step_machines]) > 1:
+        p.error("Cannot mix --rate, --machines, and --step-machines; use exactly one.")
+    if not any([has_rate, has_machines, has_step_machines]):
+        p.error("Exactly one of --rate, --machines, or --step-machines must be provided.")
+    if has_step_machines and len(args.items) != 1:
+        p.error("--step-machines requires exactly one --item.")
     n = len(args.items)
     if has_rate and len(args.rates) != n:
         p.error(
@@ -2003,13 +2030,54 @@ def main() -> None:
     )
 
     targets: list[tuple[str, Fraction]] = []
-    has_machines = len(args.machines_list) > 0
-    for i, item in enumerate(args.items):
-        if has_machines:
-            rate = solver.rate_for_machines(item, args.machines_list[i])
-        else:
-            rate = Fraction(str(args.rates[i]))
-        targets.append((item, rate))
+    has_machines      = len(args.machines_list) > 0
+    has_step_machines = len(args.step_machines) > 0
+
+    if has_step_machines:
+        constraints = [_parse_step_machines(r) for r in args.step_machines]
+
+        # Reference run at rate=1 to get proportional machine counts
+        ref = Solver(
+            solver.recipe_idx, solver.raw_set,
+            solver.assembler_level, solver.furnace_type,
+            module_configs=solver.module_configs or None,
+            beacon_configs=solver.beacon_configs or None,
+            default_beacon_config=solver.default_beacon_config,
+            machine_module_slots=solver.machine_module_slots or None,
+            machine_quality=solver.machine_quality,
+            beacon_quality=solver.beacon_quality,
+            recipe_overrides=solver.recipe_overrides or None,
+            recipe_machine_overrides=solver.recipe_machine_overrides or None,
+            recipe_module_overrides=solver.recipe_module_overrides or None,
+            recipe_beacon_overrides=solver.recipe_beacon_overrides or None,
+            bus_items=solver.bus_items or None,
+            planet_props=solver.planet_props or None,
+            location=solver.location,
+        )
+        ref.solve(args.item, Fraction(1))
+
+        scale: float | None = None
+        for recipe_key, n in constraints:
+            if recipe_key not in ref.steps:
+                available = ", ".join(sorted(ref.steps))
+                sys.exit(
+                    f"error: --step-machines recipe '{recipe_key}' not found in chain "
+                    f"for '{args.item}'. Available: {available}"
+                )
+            ref_count = float(ref.steps[recipe_key]["machine_count"])
+            candidate = n / ref_count
+            if scale is None or candidate < scale:
+                scale = candidate
+
+        actual_rate = Fraction(str(round(scale, 10)))  # type: ignore[arg-type]
+        targets.append((args.item, actual_rate))
+
+    elif has_machines:
+        for i, item in enumerate(args.items):
+            targets.append((item, solver.rate_for_machines(item, args.machines_list[i])))
+    else:
+        for i, item in enumerate(args.items):
+            targets.append((item, Fraction(str(args.rates[i]))))
 
     for item, rate in targets:
         solver.solve(item, rate)

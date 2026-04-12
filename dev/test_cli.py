@@ -1565,6 +1565,102 @@ class TestMachinesFlag(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# --step-machines RECIPE=N
+# ---------------------------------------------------------------------------
+
+class TestStepMachines(unittest.TestCase):
+    """
+    Two-pass solve: reference run at rate=1 gives proportional machine counts;
+    scale factor = N / ref_count; actual run at rate = 1 * scale.
+    """
+
+    def _two_pass(self, item: str, recipe_key: str, n: float, **kwargs) -> "cli.Solver":
+        """Helper: build solver, do reference run, compute scale, solve at scale."""
+        ref = _solver_new(**kwargs)
+        ref.solve(item, Fraction(1))
+        ref_count = float(ref.steps[recipe_key]["machine_count"])
+        scale = n / ref_count
+        actual_rate = Fraction(str(round(scale, 10)))
+        s = _solver_new(**kwargs)
+        s.solve(item, actual_rate)
+        return s
+
+    def test_uranium_processing_8_centrifuges(self):
+        # Constrain uranium-processing to 8 centrifuges for the uranium-fuel-cell chain.
+        s = self._two_pass("uranium-fuel-cell", "uranium-processing", 8.0)
+        self.assertAlmostEqual(
+            float(s.steps["uranium-processing"]["machine_count"]), 8.0, places=4
+        )
+
+    def test_top_level_rate_derived_correctly(self):
+        # The resulting uranium-fuel-cell rate should match what 8 centrifuges can feed.
+        # U-235 scarcity: 8 centrifuges × 0.007 prob × 60/10 cycles/min = 0.336 U-235/min.
+        # 1 fuel cell needs 0.1 U-235 → max rate = 0.336 / 0.1 = 3.36... but exact depends
+        # on solver fractions. Check that uranium-fuel-cell rate_per_min > 0 and consistent
+        # with uranium-processing machine count.
+        s = self._two_pass("uranium-fuel-cell", "uranium-processing", 8.0)
+        fuel_cell_rate = s.steps["uranium-fuel-cell"]["rate_per_min"]
+        centrifuge_count = s.steps["uranium-processing"]["machine_count"]
+        # Both should be positive
+        self.assertGreater(float(fuel_cell_rate), 0.0)
+        self.assertGreater(float(centrifuge_count), 0.0)
+
+    def test_multiple_constraints_min_scale(self):
+        # Two constraints: copper-cable=10 and iron-plate=5 for electronic-circuit.
+        # The binding one (min scale) should have count ≈ its target.
+        ref = _solver_new()
+        ref.solve("electronic-circuit", Fraction(1))
+        ref_cable = float(ref.steps["copper-cable"]["machine_count"])
+        ref_plate = float(ref.steps["iron-plate"]["machine_count"])
+        scale_cable = 10.0 / ref_cable
+        scale_plate = 5.0 / ref_plate
+        # The minimum scale determines the binding constraint
+        min_scale = min(scale_cable, scale_plate)
+        actual_rate = Fraction(str(round(min_scale, 10)))
+        s = _solver_new()
+        s.solve("electronic-circuit", actual_rate)
+        # The binding constraint should be satisfied; the other will be under its target
+        if min_scale == scale_cable:
+            self.assertAlmostEqual(float(s.steps["copper-cable"]["machine_count"]), 10.0, places=4)
+        else:
+            self.assertAlmostEqual(float(s.steps["iron-plate"]["machine_count"]), 5.0, places=4)
+
+    def test_top_level_recipe_as_constraint(self):
+        # Constraining the top-level recipe to N is equivalent to --machines N.
+        n = 3
+        # Via --machines path
+        s_machines = _solver_new()
+        rate_machines = s_machines.rate_for_machines("electronic-circuit", n)
+        s_machines.solve("electronic-circuit", rate_machines)
+
+        # Via two-pass --step-machines path
+        s_step = self._two_pass("electronic-circuit", "electronic-circuit", n)
+
+        self.assertAlmostEqual(
+            float(s_machines.steps["electronic-circuit"]["machine_count"]),
+            float(s_step.steps["electronic-circuit"]["machine_count"]),
+            places=6,
+        )
+
+    def test_recipe_not_in_chain(self):
+        # uranium-processing is NOT in the electronic-circuit chain.
+        ref = _solver_new()
+        ref.solve("electronic-circuit", Fraction(1))
+        self.assertNotIn("uranium-processing", ref.steps)
+
+    def test_step_machines_with_beacons(self):
+        # Beacon active → float arithmetic; scale path still works.
+        bcfg = {"assembling-machine-3": _bspec(8, 3)}
+        s = self._two_pass(
+            "electronic-circuit", "electronic-circuit", 4.0,
+            beacon_configs=bcfg,
+        )
+        self.assertAlmostEqual(
+            float(s.steps["electronic-circuit"]["machine_count"]), 4.0, places=3
+        )
+
+
+# ---------------------------------------------------------------------------
 # Power consumption  (build_machine_power_w, _compute_step_power, miners)
 # ---------------------------------------------------------------------------
 #

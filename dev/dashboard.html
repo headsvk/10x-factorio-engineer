@@ -1050,7 +1050,6 @@ function renderLineCard(line, idx) {
         <td>${esc(label(s.recipe))}</td>
         <td class="name-col">${esc(machineLabel(s.machine))}${qualDot}${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
         <td class="r">${s.machine_count_ceil}</td>
-        <td class="r">${s.rate_per_min != null ? fmtRate(s.rate_per_min, STATE.preferred_belt) : ''}</td>
         <td class="r" style="color:var(--text-dim)">${powCell}</td>
       </tr>`;
     }).join('');
@@ -1063,7 +1062,7 @@ function renderLineCard(line, idx) {
       <div class="card-section">
         <div class="section-label">Machines${totalPowStr ? ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px">⚡ ${totalPowStr} total (ceil)</span>` : ''}</div>
         <table>
-          <thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Rate</th><th class="r">Power</th></tr></thead>
+          <thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Power</th></tr></thead>
           <tbody>${machineRows}</tbody>
         </table>
       </div>` : '';

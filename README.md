@@ -24,13 +24,14 @@ A Factorio factory co-pilot built on two components:
 dev/
   dashboard.html            # Dashboard source — single vanilla HTML, no build deps
   build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html
-  preview.py                # Opens dashboard in browser with sample state pre-loaded
-  gen_sample_state.py       # Encodes sample-state.json → sample-state.b64
-  sample-state.json         # Sample factory state source JSON
-  sample-state.b64          # Sample factory state base64-encoded — paste into Import dialog to test
-  test_cli.py               # unittest suite (158 tests, stdlib only)
-  artifact-api-test.html    # claude.ai runtime API test suite
-  artifact-api.md           # Field research doc for claude.ai artifact APIs
+  preview.py                # Generates preview.tmp.html with factory state pre-loaded; use Claude Preview MCP to view
+  sample/
+    state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
+  my-factory.json           # Dev factory state for local testing
+  test_cli.py               # unittest suite (182 tests, stdlib only)
+  artifact-api/
+    test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
+    research.md             # Field research doc for claude.ai artifact APIs
 ```
 
 Data files are vendored; auto-downloaded from KirkMcDonald's GitHub on first run.
@@ -144,7 +145,7 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 python -m unittest dev.test_cli -v
 ```
 
-158 tests, stdlib only.
+182 tests, stdlib only.
 
 ---
 

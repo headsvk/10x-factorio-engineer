@@ -34,7 +34,7 @@ involving machine counts, raw resource rates, belt counts, or throughput.
 ### Invocation pattern
 
 ```bash
-python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [--item <item-id2> (--rate <N2> | --machines <N2>) ...] [OPTIONS]
+python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --step-machines RECIPE=N) [--item <item-id2> (--rate <N2> | --machines <N2>) ...] [OPTIONS]
 ```
 
 | Option | Default | Notes |
@@ -42,6 +42,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N>) [--i
 | `--item ITEM-ID` | required, repeatable | Item ID (e.g. `electronic-circuit`). Repeat for multi-target. |
 | `--rate N` | _(one required)_ | Target items/minute. Repeatable; pairs with `--item` by position. |
 | `--machines N` | _(one required)_ | Number of machines for the target item; fractional OK. Repeatable; pairs with `--item` by position. Use `--rate` or `--machines`, not both. |
+| `--step-machines RECIPE=N` | _(one required)_ | Constrain an **intermediate** step to N machines and derive the top-level rate from that. RECIPE is the recipe key (e.g. `uranium-processing`). Repeatable; if multiple constraints conflict, the most constraining (min scale) wins. Mutually exclusive with `--rate` and `--machines`. Requires exactly one `--item`. Use this when the bottleneck is an intermediate machine, not the final product. |
 | `--assembler 1/2/3` | `3` | Assembling machine tier |
 | `--furnace stone/steel/electric` | `electric` | Furnace type |
 | `--miner electric/big` | `electric` | `big` = Space Age big mining drill |
@@ -101,6 +102,9 @@ python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-
 
 # Multi-target: solve for two items at once (shared sub-recipes merged)
 python assets/cli.py --item electronic-circuit --rate 60 --item automation-science-pack --rate 30
+
+# Constrain intermediate step: 8 centrifuges for uranium processing, derive fuel cell rate
+python assets/cli.py --item uranium-fuel-cell --step-machines uranium-processing=8
 ```
 
 ### Reading the output
