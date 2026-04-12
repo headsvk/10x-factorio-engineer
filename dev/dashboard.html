@@ -139,7 +139,8 @@
     /* ── Science section ── */
     .science-section { background: var(--bg-card); border: 1px solid var(--border-sub);
                        border-left: 3px solid var(--accent);
-                       border-radius: 4px; padding: 14px 16px; margin-bottom: 16px; }
+                       border-radius: 4px; padding: 14px 16px; margin-bottom: 10px; }
+    .loc-divider { border: none; border-top: 1px solid var(--border-sub); margin: 0 0 10px; }
     .science-grid.cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
     .science-bar { margin-bottom: 12px; }
     .science-bar:last-child { margin-bottom: 0; }
@@ -950,7 +951,7 @@ const SCIENCE_ITEM_SET  = new Set(SCIENCE_ORDER);
 
 function renderOverview() {
   const loc = currentLoc();
-  const sciSection = renderScience();
+  const busSection = renderBusBalance();
 
   const steps = (loc.next_steps ?? []).length ? `
     <div class="next-steps">
@@ -974,13 +975,13 @@ function renderOverview() {
       </div>
     </div>` : '';
 
-  if (!sciSection) return powerSection + `
+  if (!busSection && !powerSection && !steps) return `
     <div class="empty-state">
-      <p>No science targets set yet.</p>
-      <p>Ask Claude to set targets in the Chat tab.</p>
+      <p>No production lines for ${esc(loc.label)} yet.</p>
+      <p>Ask Claude to plan one in the Chat tab.</p>
     </div>`;
 
-  return powerSection + sciSection + steps;
+  return busSection + powerSection + steps;
 }
 
 function renderLinesTab() {
@@ -1196,9 +1197,9 @@ function render() {
   document.getElementById('app').innerHTML = `
     ${renderHeader()}
     <div class="main">
+      ${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
       ${renderLocationBar()}
       ${renderBottlenecks()}
-      ${renderBusBalance()}
       ${renderTabs()}
       <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
       <div class="tab-panel${activeTab==='lines'  ?' active':''}">${renderLinesTab()}</div>
