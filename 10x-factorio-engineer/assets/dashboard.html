@@ -854,7 +854,7 @@ const loc = currentLoc();
 const tabs = [
 ['overview', 'Overview'],
 ['lines',    `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
-['issues',   `Issues${loc.bottlenecks?.length ? ` (${loc.bottlenecks.length})` : ''}`],
+['issues',   `Actions${(loc.bottlenecks?.length || loc.next_steps?.length) ? ` (${(loc.bottlenecks?.length ?? 0) + (loc.next_steps?.length ?? 0)})` : ''}`],
 ['chat',     'Chat'],
 ];
 return `
@@ -868,15 +868,6 @@ const SCIENCE_ITEM_SET  = new Set(SCIENCE_ORDER);
 function renderOverview() {
 const loc = currentLoc();
 const busSection = renderBusBalance();
-const steps = (loc.next_steps ?? []).length ? `
-<div class="next-steps">
-<div class="section-label">Next Steps</div>
-${loc.next_steps.map(s => `
-<div class="next-step-item">
-<span class="arrow">→</span>
-<span>${esc(humanizeText(s))}</span>
-</div>`).join('')}
-</div>` : '';
 const locLines = loc.lines ?? [];
 const totalPowCeilMw = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
 const totalPowMw     = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
@@ -888,12 +879,12 @@ const powerSection = totalPowCeilMw > 0 ? `
 <span class="power-ceil-note">/ ${fmtPower(totalPowCeilMw * 1000)} (ceil)</span>
 </div>
 </div>` : '';
-if (!busSection && !powerSection && !steps) return `
+if (!busSection && !powerSection) return `
 <div class="empty-state">
 <p>No production lines for ${esc(loc.label)} yet.</p>
 <p>Ask Claude to plan one in the Chat tab.</p>
 </div>`;
-return busSection + steps + powerSection;
+return powerSection + busSection;
 }
 function renderLinesTab() {
 const loc = currentLoc();
@@ -1053,11 +1044,16 @@ const loc = currentLoc();
 const bn = loc.bottlenecks ?? [];
 const ns = loc.next_steps  ?? [];
 if (!bn.length && !ns.length)
-return '<div class="no-issues">✓ No bottlenecks detected.</div>';
-return [
+return '<div class="no-issues">✓ No bottlenecks or next steps.</div>';
+const bnHtml = bn.length ? [
+`<div class="section-label" style="margin-bottom:8px">Bottlenecks</div>`,
 ...bn.map(b => `<div class="issue-item bad"><span>⚠</span><span>${esc(humanizeText(b))}</span></div>`),
-...ns.map(s => `<div class="issue-item good"><span style="color:var(--ok);opacity:.7">→</span><span>${esc(humanizeText(s))}</span></div>`),
-].join('');
+] : [];
+const nsHtml = ns.length ? [
+`<div class="section-label" style="margin:${bn.length ? '14px' : '0'} 0 8px">Next Steps</div>`,
+...ns.map(s => `<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`),
+] : [];
+return [...bnHtml, ...nsHtml].join('');
 }
 function renderChat() {
 const avail = typeof window.claude?.complete === 'function';
