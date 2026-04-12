@@ -968,7 +968,7 @@ function renderOverview() {
   const totalPowMw     = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
   const powerSection = totalPowCeilMw > 0 ? `
     <div class="power-overview">
-      <div class="power-overview-label">⚡ ${esc(loc.label)} Power</div>
+      <div class="power-overview-label">⚡ Power</div>
       <div class="power-overview-values">
         <span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
         <span class="power-ceil-note">/ ${fmtPower(totalPowCeilMw * 1000)} (ceil)</span>
@@ -981,7 +981,7 @@ function renderOverview() {
       <p>Ask Claude to plan one in the Chat tab.</p>
     </div>`;
 
-  return busSection + powerSection + steps;
+  return busSection + steps + powerSection;
 }
 
 function renderLinesTab() {
