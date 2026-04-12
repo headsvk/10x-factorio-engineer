@@ -2618,6 +2618,108 @@ class TestLocationFilter(unittest.TestCase):
         result = cli.format_output(args, s, d["resource_info"])
         self.assertEqual(result["location"], "vulcanus")
 
+    def test_vulcanus_lava_recipes_default(self):
+        """--location vulcanus should auto-pick lava recipes for molten-copper/molten-iron."""
+        d = _DATA["vulcanus"]
+        s = _solver("vulcanus")
+        s.solve("molten-copper", Fraction(600))
+        s.resolve_oil(d["data"])
+        recipes = [step["recipe"] for step in s.steps.values()]
+        self.assertIn("molten-copper-from-lava", recipes,
+                      "molten-copper-from-lava should be auto-selected on vulcanus")
+        self.assertNotIn("molten-copper", recipes,
+                         "ore-based molten-copper should not be selected on vulcanus")
+
+    def test_vulcanus_lava_iron_default(self):
+        """--location vulcanus should auto-pick molten-iron-from-lava."""
+        d = _DATA["vulcanus"]
+        s = _solver("vulcanus")
+        s.solve("molten-iron", Fraction(600))
+        s.resolve_oil(d["data"])
+        recipes = [step["recipe"] for step in s.steps.values()]
+        self.assertIn("molten-iron-from-lava", recipes,
+                      "molten-iron-from-lava should be auto-selected on vulcanus")
+        self.assertNotIn("molten-iron", recipes,
+                         "ore-based molten-iron should not be selected on vulcanus")
+
+    def test_vulcanus_water_uses_steam_condensation(self):
+        """--location vulcanus should route water via steam-condensation+acid-neutralisation."""
+        d = _DATA["vulcanus"]
+        s = _solver("vulcanus")
+        s.solve("water", Fraction(100))
+        s.resolve_oil(d["data"])
+        recipes = [step["recipe"] for step in s.steps.values()]
+        self.assertIn("steam-condensation", recipes,
+                      "steam-condensation should be used for water on vulcanus")
+        self.assertIn("acid-neutralisation", recipes,
+                      "acid-neutralisation should supply steam on vulcanus")
+        self.assertNotIn("ice-melting", recipes,
+                         "ice-melting should not be used on vulcanus (no ice)")
+        # sulfuric-acid must be a raw resource (from geyser), not produced by recipe
+        self.assertIn("sulfuric-acid", s.raw_resources,
+                      "sulfuric-acid should be raw on vulcanus (geyser)")
+
+    def test_vulcanus_sulfuric_acid_raw(self):
+        """sulfuric-acid should be in raw_set on vulcanus (geyser resource)."""
+        d = _DATA["vulcanus"]
+        self.assertIn("sulfuric-acid", d["raw_set"],
+                      "sulfuric-acid should be a raw resource on vulcanus")
+
+    def test_gleba_plastic_uses_bioplastic(self):
+        """--location gleba should auto-pick bioplastic (not petroleum-based plastic-bar)."""
+        d = _DATA["gleba"]
+        s = _solver("gleba")
+        s.solve("plastic-bar", Fraction(60))
+        s.resolve_oil(d["data"])
+        recipes = [step["recipe"] for step in s.steps.values()]
+        self.assertIn("bioplastic", recipes,
+                      "bioplastic should be auto-selected on gleba")
+        self.assertNotIn("plastic-bar", recipes,
+                         "petroleum-based plastic-bar should not be used on gleba")
+
+    def test_gleba_sulfur_uses_biosulfur(self):
+        """--location gleba should auto-pick biosulfur."""
+        d = _DATA["gleba"]
+        s = _solver("gleba")
+        s.solve("sulfur", Fraction(60))
+        s.resolve_oil(d["data"])
+        recipes = [step["recipe"] for step in s.steps.values()]
+        self.assertIn("biosulfur", recipes,
+                      "biosulfur should be auto-selected on gleba")
+
+    def test_gleba_lubricant_uses_biolubricant(self):
+        """--location gleba should auto-pick biolubricant."""
+        d = _DATA["gleba"]
+        s = _solver("gleba")
+        s.solve("lubricant", Fraction(60))
+        s.resolve_oil(d["data"])
+        recipes = [step["recipe"] for step in s.steps.values()]
+        self.assertIn("biolubricant", recipes,
+                      "biolubricant should be auto-selected on gleba")
+
+    def test_gleba_yumako_is_raw(self):
+        """yumako and jellynut should be raw resources on Gleba (agricultural tower harvest)."""
+        d = _DATA["gleba"]
+        self.assertIn("yumako", d["raw_set"], "yumako should be raw on gleba")
+        self.assertIn("jellynut", d["raw_set"], "jellynut should be raw on gleba")
+
+    def test_gleba_spoilage_is_raw(self):
+        """spoilage should be raw on Gleba (omnipresent waste product)."""
+        d = _DATA["gleba"]
+        self.assertIn("spoilage", d["raw_set"], "spoilage should be raw on gleba")
+
+    def test_aquilo_ice_uses_ammoniacal_separation(self):
+        """--location aquilo should route ice via ammoniacal-solution-separation."""
+        d = _DATA["aquilo"]
+        s = _solver("aquilo")
+        s.solve("ice", Fraction(60))
+        s.resolve_oil(d["data"])
+        recipes = [step["recipe"] for step in s.steps.values()]
+        self.assertIn("ammoniacal-solution-separation", recipes,
+                      "ammoniacal-solution-separation should be used for ice on aquilo")
+        self.assertNotIn("oxide-asteroid-crushing", recipes,
+                         "oxide-asteroid-crushing should not be used for ice on aquilo")
+
     def test_no_location_gives_null_in_output(self):
         import argparse
         d = _DATA["vanilla"]

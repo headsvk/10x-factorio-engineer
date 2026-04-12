@@ -186,8 +186,24 @@ RECIPE_DEFAULTS: dict[str, str] = {
     # ammoniacal-solution-separation sorts first for ice (order a[ammonia] < b-a-c)
     # but ammoniacal-solution is only a raw resource on Aquilo. On space platforms
     # and elsewhere, oxide-asteroid-crushing is the correct automatable source.
-    # On Aquilo, ice is mined directly so this default is never reached there.
+    # On Aquilo, the location override below redirects ice to ammoniacal-solution-separation.
     "ice": "oxide-asteroid-crushing",
+}
+
+# Maps agricultural-tower plant entity names (from dataset planets[].resources.plants)
+# to the item keys harvested by the agricultural tower. The dataset stores entity names,
+# but the solver works with item keys — build_raw_set uses this to add the correct items.
+PLANT_HARVESTS: dict[str, str] = {
+    "yumako-tree": "yumako",
+    "jellystem": "jellynut",
+}
+
+# Extra raw items that are not in the planet's resource list but are effectively
+# available as free inputs on that planet (abundant waste / ambient products).
+PLANET_EXTRA_RAWS: dict[str, list[str]] = {
+    # Spoilage is produced by any organic item expiring. It accumulates constantly
+    # on Gleba and is freely available as an input for biosulfur and other recipes.
+    "gleba": ["spoilage"],
 }
 
 # Location-specific recipe overrides. Checked before exact-key-match so that
@@ -199,6 +215,31 @@ RECIPE_DEFAULTS_BY_LOCATION: dict[str, dict[str, str]] = {
         # Nauvis route but coal and sulfuric-acid are unavailable on platforms.
         # carbonic-asteroid-chunk is a platform raw resource; use it directly.
         "carbon": "carbonic-asteroid-crushing",
+    },
+    "vulcanus": {
+        # Order-sort picks the generic ore-based molten recipes, but Vulcanus
+        # has abundant lava — the lava variants are the correct automatable default.
+        "molten-copper": "molten-copper-from-lava",
+        "molten-iron": "molten-iron-from-lava",
+        # RECIPE_DEFAULTS sends water to ice-melting, but Vulcanus has no ice.
+        # The correct Vulcanus route: acid-neutralisation (sulfuric-acid + calcite
+        # → steam, Vulcanus-only) + steam-condensation (steam → water).
+        # We override water→steam-condensation; steam then resolves via
+        # acid-neutralisation (the only recipe for steam, surface_conditions pressure=4000).
+        "water": "steam-condensation",
+    },
+    "gleba": {
+        # Gleba has no crude oil, so the standard petroleum-based routes crash.
+        # The bio-substitute recipes are the correct automatable defaults.
+        "plastic-bar": "bioplastic",
+        "sulfur": "biosulfur",
+        "lubricant": "biolubricant",
+    },
+    "aquilo": {
+        # RECIPE_DEFAULTS sends ice to oxide-asteroid-crushing (platform-centric),
+        # but on Aquilo ammoniacal-solution is an offshore-pump raw resource and
+        # ammoniacal-solution-separation (→ ammonia + ice) is the correct local source.
+        "ice": "ammoniacal-solution-separation",
     },
 }
 
@@ -353,11 +394,17 @@ def build_raw_set(data: dict, location: str | None = None) -> frozenset:
     location=None  → original behaviour (all planets' resources)
     location=str   → only resources available at that specific planet
     """
+    # Build a lookup from resource entity key → result item names.
+    # Some resources have entity keys that differ from their output item name
+    # (e.g. sulfuric-acid-geyser → sulfuric-acid, fluorine-vent → fluorine).
+    resource_results: dict[str, list[str]] = {}
+    for res in data.get("resources", []):
+        resource_results[res["key"]] = [r["name"] for r in res.get("results", [])]
+
     raw: set[str] = set()
     if location is None:
-        for res in data.get("resources", []):
-            for r in res.get("results", []):
-                raw.add(r["name"])
+        for names in resource_results.values():
+            raw.update(names)
         for planet in data.get("planets", []):
             pres = planet.get("resources", {})
             raw.update(pres.get("resource", []))
@@ -366,10 +413,23 @@ def build_raw_set(data: dict, location: str | None = None) -> frozenset:
         for planet in data.get("planets", []):
             if planet["key"] == location:
                 pres = planet.get("resources", {})
-                raw.update(pres.get("resource", []))
-                raw.update(pres.get("offshore", []))
+                for entity_key in pres.get("resource", []):
+                    # Resolve entity key to result item names; fall back to key itself
+                    resolved = resource_results.get(entity_key, [entity_key])
+                    raw.update(resolved)
+                for entity_key in pres.get("offshore", []):
+                    resolved = resource_results.get(entity_key, [entity_key])
+                    raw.update(resolved)
                 raw.update(pres.get("plants", []))
+                # Map plant entity names → harvested item keys (agricultural tower)
+                for plant in pres.get("plants", []):
+                    harvested = PLANT_HARVESTS.get(plant)
+                    if harvested:
+                        raw.add(harvested)
                 break
+        # Ambient / waste items that are effectively free on specific planets
+        for extra in PLANET_EXTRA_RAWS.get(location, []):
+            raw.add(extra)
         # Asteroid collectors are not modeled in the dataset — chunks are the
         # raw inputs for space platforms, gathered externally by collectors.
         if location == "space-platform":

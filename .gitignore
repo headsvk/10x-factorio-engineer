@@ -23,12 +23,13 @@ dev/preview.tmp.html
 
 # Personal factory state (not committed)
 dev/my-*.json
-dev/my-*.b64
+dev/sample/my-*.json
 
 # Distribution / packaging
 dist/
 build/
 *.egg-info/
 
-# Wiki corpus — regeneratable via `python dev/wiki.py crawl` (~30MB, ~15 min)
+# Wiki corpus — regeneratable via `python dev/wiki/crawl.py crawl` (~30MB, ~15 min)
 dev/wiki/*.md
+dev/wiki/errors.log

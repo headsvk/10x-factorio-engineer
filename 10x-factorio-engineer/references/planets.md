@@ -287,8 +287,8 @@ rail infrastructure.
 - Lithium brine (pumpjack)
 - Fluorine (pumpjack)
 - Crude oil (pumpjack)
-- Ice (mined from lithium ice formations, or crafted)
-- Lithium (mined or crafted from lithium brine)
+- Ice: limited amounts **gathered** (not mined) from lithium ice formations; primarily obtained by crafting via ammoniacal solution separation or ice melting
+- Lithium: limited amounts **gathered** from lithium ice formations; primarily crafted from lithium brine (pumpjack)
 
 **Must import:** Stone, iron ore, copper ore, coal — none are available on-planet.
 

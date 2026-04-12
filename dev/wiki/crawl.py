@@ -1,14 +1,14 @@
 """
-wiki.py — Factorio wiki crawler and monthly updater.
+crawl.py — Factorio wiki crawler and monthly updater.
 
 Commands:
-    python dev/wiki.py crawl   [--workers N] [--dry-run]
-        Crawl all pages in wiki_crawl_urls.json → references/wiki/*.md
+    python dev/wiki/crawl.py crawl   [--workers N] [--dry-run]
+        Crawl all pages in dev/wiki/urls.json → dev/wiki/*.md
         Skips pages already written (resume-safe).
 
-    python dev/wiki.py update  [--days N] [--workers N] [--dry-run]
+    python dev/wiki/crawl.py update  [--days N] [--workers N] [--dry-run]
         Monthly maintenance: query MediaWiki RecentChanges, re-crawl changed pages.
-        Automatically cross-references against wiki_crawl_urls.json.
+        Automatically cross-references against dev/wiki/urls.json.
 
 Credentials: env vars CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN
              (also checks .env, .env.local, ~/.env)
@@ -32,9 +32,9 @@ from threading import Lock
 # Config
 # ---------------------------------------------------------------------------
 
-URLS_FILE  = "dev/wiki_crawl_urls.json"
+URLS_FILE  = "dev/wiki/urls.json"
 OUT_DIR    = "dev/wiki"
-ERROR_LOG  = "dev/wiki_errors.log"
+ERROR_LOG  = "dev/wiki/errors.log"
 WIKI_BASE  = "https://wiki.factorio.com/"
 CF_BASE    = "https://api.cloudflare.com/client/v4/accounts/{account_id}/browser-rendering"
 

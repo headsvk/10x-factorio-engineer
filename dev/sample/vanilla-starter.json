@@ -1,0 +1,200 @@
+{
+  "save_name": "Vanilla Starter",
+  "dataset": "vanilla",
+  "assembler": 1,
+  "furnace": "stone",
+  "machine_quality": "normal",
+  "beacon_quality": "normal",
+  "module_configs": {},
+  "beacon_configs": {},
+  "recipe_overrides": {},
+  "machine_overrides": {},
+  "preferred_belt": "yellow",
+  "chat_log": [],
+  "locations": [
+    {
+      "id": "nauvis",
+      "type": "planet",
+      "label": "Nauvis",
+      "bus_items": [
+        {
+          "item": "iron-plate",
+          "rate": 1200
+        },
+        {
+          "item": "copper-plate",
+          "rate": 600
+        }
+      ],
+      "targets": {
+        "automation-science-pack": 15,
+        "logistic-science-pack": 15
+      },
+      "bottlenecks": [],
+      "next_steps": [
+        "Upgrade to assembler-2 and steel furnaces",
+        "Add military science for gun turret research"
+      ],
+      "lines": [
+        {
+          "item": "automation-science-pack",
+          "label": "Automation Science",
+          "target_rate": 15,
+          "effective_rate": 15,
+          "cli_result": {
+            "item": "automation-science-pack",
+            "rate_per_min": 15.0,
+            "location": null,
+            "assembler": 1,
+            "furnace": "stone",
+            "miner": "electric",
+            "machine_quality": "normal",
+            "beacon_quality": "normal",
+            "production_steps": [
+              {
+                "recipe": "iron-gear-wheel",
+                "machine": "assembling-machine-1",
+                "machine_count": 0.25,
+                "machine_count_ceil": 1,
+                "outputs": {"iron-gear-wheel": 15.0},
+                "inputs": {"iron-plate": 30.0},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 18.75,
+                "power_kw_ceil": 75.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "automation-science-pack",
+                "machine": "assembling-machine-1",
+                "machine_count": 2.5,
+                "machine_count_ceil": 3,
+                "outputs": {"automation-science-pack": 15.0},
+                "inputs": {"copper-plate": 15.0, "iron-gear-wheel": 15.0},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 187.5,
+                "power_kw_ceil": 225.0,
+                "beacon_power_kw": 0.0
+              }
+            ],
+            "raw_resources": {},
+            "co_products": {},
+            "miners_needed": {},
+            "total_power_mw": 0.2062,
+            "total_power_mw_ceil": 0.3,
+            "bus_inputs": {
+              "iron-plate": 30.0,
+              "copper-plate": 15.0
+            }
+          }
+        },
+        {
+          "item": "logistic-science-pack",
+          "label": "Logistic Science",
+          "target_rate": 15,
+          "effective_rate": 15,
+          "cli_result": {
+            "item": "logistic-science-pack",
+            "rate_per_min": 15.0,
+            "location": null,
+            "assembler": 1,
+            "furnace": "stone",
+            "miner": "electric",
+            "machine_quality": "normal",
+            "beacon_quality": "normal",
+            "production_steps": [
+              {
+                "recipe": "copper-cable",
+                "machine": "assembling-machine-1",
+                "machine_count": 0.375,
+                "machine_count_ceil": 1,
+                "outputs": {"copper-cable": 45.0},
+                "inputs": {"copper-plate": 22.5},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 28.125,
+                "power_kw_ceil": 75.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "iron-gear-wheel",
+                "machine": "assembling-machine-1",
+                "machine_count": 0.375,
+                "machine_count_ceil": 1,
+                "outputs": {"iron-gear-wheel": 22.5},
+                "inputs": {"iron-plate": 45.0},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 28.125,
+                "power_kw_ceil": 75.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "electronic-circuit",
+                "machine": "assembling-machine-1",
+                "machine_count": 0.25,
+                "machine_count_ceil": 1,
+                "outputs": {"electronic-circuit": 15.0},
+                "inputs": {"copper-cable": 45.0, "iron-plate": 15.0},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 18.75,
+                "power_kw_ceil": 75.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "inserter",
+                "machine": "assembling-machine-1",
+                "machine_count": 0.25,
+                "machine_count_ceil": 1,
+                "outputs": {"inserter": 15.0},
+                "inputs": {"electronic-circuit": 15.0, "iron-gear-wheel": 15.0, "iron-plate": 15.0},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 18.75,
+                "power_kw_ceil": 75.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "transport-belt",
+                "machine": "assembling-machine-1",
+                "machine_count": 0.125,
+                "machine_count_ceil": 1,
+                "outputs": {"transport-belt": 15.0},
+                "inputs": {"iron-plate": 7.5, "iron-gear-wheel": 7.5},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 9.375,
+                "power_kw_ceil": 75.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "logistic-science-pack",
+                "machine": "assembling-machine-1",
+                "machine_count": 3.0,
+                "machine_count_ceil": 3,
+                "outputs": {"logistic-science-pack": 15.0},
+                "inputs": {"inserter": 15.0, "transport-belt": 15.0},
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 225.0,
+                "power_kw_ceil": 225.0,
+                "beacon_power_kw": 0.0
+              }
+            ],
+            "raw_resources": {},
+            "co_products": {},
+            "miners_needed": {},
+            "total_power_mw": 0.3281,
+            "total_power_mw_ceil": 0.6,
+            "bus_inputs": {
+              "iron-plate": 82.5,
+              "copper-plate": 22.5
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

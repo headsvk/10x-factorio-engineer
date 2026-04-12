@@ -162,7 +162,8 @@ See [SKILL.md §3](10x-factorio-engineer/SKILL.md) for the factory state schema 
 ```bash
 python dev/build_dashboard.py    # minify dev/dashboard.html → assets/dashboard.html
 python dev/build_dashboard.py --open    # build and open in browser
-python dev/preview.py            # open dev/dashboard.html in browser with sample state pre-loaded
+python dev/preview.py            # preview with dev/sample/state.json pre-loaded
+python dev/preview.py --state PATH/TO/x.json  # preview with a custom state file
 ```
 
 ---

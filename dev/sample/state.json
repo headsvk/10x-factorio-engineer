@@ -40,6 +40,14 @@
           "item": "petroleum-gas",
           "rate": 400,
           "fluid": true
+        },
+        {
+          "item": "plastic-bar",
+          "rate": 1800
+        },
+        {
+          "item": "sulfur",
+          "rate": 300
         }
       ],
       "targets": {
@@ -253,24 +261,6 @@
                 "beacon_power_kw": 0.0
               },
               {
-                "recipe": "plastic-bar",
-                "machine": "chemical-plant",
-                "machine_count": 1.125,
-                "machine_count_ceil": 2,
-                "outputs": {
-                  "plastic-bar": 135.0
-                },
-                "inputs": {
-                  "petroleum-gas": 1350.0,
-                  "coal": 67.5
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 236.25,
-                "power_kw_ceil": 420.0,
-                "beacon_power_kw": 0.0
-              },
-              {
                 "recipe": "pipe",
                 "machine": "assembling-machine-3",
                 "machine_count": 0.6,
@@ -360,53 +350,19 @@
                 "power_kw": 2700.0,
                 "power_kw_ceil": 3000.0,
                 "beacon_power_kw": 0.0
-              },
-              {
-                "recipe": "sulfur",
-                "machine": "chemical-plant",
-                "machine_count": 0.1875,
-                "machine_count_ceil": 1,
-                "outputs": {
-                  "sulfur": 22.5
-                },
-                "inputs": {
-                  "water": 337.5,
-                  "petroleum-gas": 337.5
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 39.375,
-                "power_kw_ceil": 210.0,
-                "beacon_power_kw": 0.0
               }
             ],
-            "raw_resources": {
-              "water": 337.5,
-              "coal": 67.5
-            },
+            "raw_resources": {},
             "co_products": {},
-            "miners_needed": {
-              "coal": {
-                "machine": "electric-mining-drill",
-                "machine_count": 2.25,
-                "machine_count_ceil": 3,
-                "rate_per_min": 67.5,
-                "power_kw": 202.5
-              },
-              "water": {
-                "machine": "offshore-pump",
-                "machine_count": 0.0047,
-                "machine_count_ceil": 1,
-                "rate_per_min": 337.5
-              }
-            },
-            "total_power_mw": 8.9719,
-            "total_power_mw_ceil": 10.5825,
+            "miners_needed": {},
+            "total_power_mw": 8.4938,
+            "total_power_mw_ceil": 9.75,
             "bus_inputs": {
-              "petroleum-gas": 1687.5,
               "copper-plate": 337.5,
               "iron-plate": 315.0,
-              "steel-plate": 45.0
+              "plastic-bar": 135.0,
+              "steel-plate": 45.0,
+              "sulfur": 22.5
             }
           }
         },
@@ -732,9 +688,8 @@
       "label": "Vulcanus",
       "bus_items": [
         {
-          "item": "crude-oil",
-          "rate": 4200,
-          "label": "Crude Oil \u2014 imported via space platform",
+          "item": "sulfuric-acid",
+          "rate": 3600,
           "fluid": true
         }
       ],
@@ -887,7 +842,7 @@
           "label": "Metallurgic Science",
           "target_rate": 30,
           "effective_rate": 30,
-          "player_notes": "Full foundry chain \u2014 lava \u2192 molten-copper/molten-iron, oxide asteroids \u2192 ice \u2192 water (Vulcanus has no natural water). Tungsten-ore mined locally. Crude-oil imported for sulfur/carbon/tungsten-carbide chain.",
+          "player_notes": "Foundry chain \u2014 lava \u2192 molten-copper/molten-iron. Tungsten-ore mined locally. Sulfuric acid piped in for carbon and tungsten-carbide.",
           "cli_result": {
             "item": "metallurgic-science-pack",
             "rate_per_min": 30.0,
@@ -897,42 +852,14 @@
             "miner": "electric",
             "machine_quality": "normal",
             "beacon_quality": "normal",
-            "recipe_overrides": {
-              "molten-copper": "molten-copper-from-lava",
-              "molten-iron": "molten-iron-from-lava",
-              "iron-plate": "casting-iron"
-            },
             "production_steps": [
-              {
-                "recipe": "ice-melting",
-                "machine": "chemical-plant",
-                "machine_count": 12.4615,
-                "machine_count_ceil": 13,
-                "outputs": {
-                  "water": 14953.8462
-                },
-                "inputs": {
-                  "ice": 747.6923
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 2616.9231,
-                "power_kw_ceil": 2730.0,
-                "beacon_power_kw": 0.0
-              },
               {
                 "recipe": "molten-copper-from-lava",
                 "machine": "foundry",
                 "machine_count": 1.6,
                 "machine_count_ceil": 2,
-                "outputs": {
-                  "molten-copper": 6000.0,
-                  "stone": 360.0
-                },
-                "inputs": {
-                  "lava": 12000.0,
-                  "calcite": 24.0
-                },
+                "outputs": {"molten-copper": 6000.0, "stone": 360.0},
+                "inputs": {"lava": 12000.0, "calcite": 24.0},
                 "machine_quality": "normal",
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 4000.0,
@@ -940,133 +867,16 @@
                 "beacon_power_kw": 0.0
               },
               {
-                "recipe": "sulfuric-acid",
-                "machine": "cryogenic-plant",
-                "machine_count": 0.6,
-                "machine_count_ceil": 1,
-                "outputs": {
-                  "sulfuric-acid": 2700.0
-                },
-                "inputs": {
-                  "water": 5400.0,
-                  "sulfur": 270.0,
-                  "iron-plate": 54.0
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 900.0,
-                "power_kw_ceil": 1500.0,
-                "beacon_power_kw": 0.0
-              },
-              {
-                "recipe": "advanced-oil-processing",
-                "machine": "oil-refinery",
-                "machine_count": 3.4615,
-                "machine_count_ceil": 4,
-                "outputs": {
-                  "petroleum-gas": 2284.6154,
-                  "light-oil": 1869.2308,
-                  "heavy-oil": 1038.4615
-                },
-                "inputs": {
-                  "crude-oil": 4153.8462,
-                  "water": 2076.9231
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 1453.8462,
-                "power_kw_ceil": 1680.0,
-                "beacon_power_kw": 0.0
-              },
-              {
-                "recipe": "light-oil-cracking",
-                "machine": "biochamber",
-                "machine_count": 1.9615,
-                "machine_count_ceil": 2,
-                "outputs": {
-                  "petroleum-gas": 1765.3846
-                },
-                "inputs": {
-                  "water": 2648.0769,
-                  "light-oil": 2648.0769
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 0.0,
-                "power_kw_ceil": 0.0,
-                "beacon_power_kw": 0.0
-              },
-              {
                 "recipe": "molten-iron-from-lava",
                 "machine": "foundry",
-                "machine_count": 0.304,
+                "machine_count": 0.16,
                 "machine_count_ceil": 1,
-                "outputs": {
-                  "molten-iron": 1140.0,
-                  "stone": 45.6
-                },
-                "inputs": {
-                  "lava": 2280.0,
-                  "calcite": 4.56
-                },
+                "outputs": {"molten-iron": 600.0, "stone": 24.0},
+                "inputs": {"lava": 1200.0, "calcite": 2.4},
                 "machine_quality": "normal",
                 "beacon_speed_bonus": 0.0,
-                "power_kw": 760.0,
+                "power_kw": 400.0,
                 "power_kw_ceil": 2500.0,
-                "beacon_power_kw": 0.0
-              },
-              {
-                "recipe": "heavy-oil-cracking",
-                "machine": "biochamber",
-                "machine_count": 0.5769,
-                "machine_count_ceil": 1,
-                "outputs": {
-                  "light-oil": 778.8462
-                },
-                "inputs": {
-                  "heavy-oil": 1038.4615,
-                  "water": 778.8462
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 0.0,
-                "power_kw_ceil": 0.0,
-                "beacon_power_kw": 0.0
-              },
-              {
-                "recipe": "oxide-asteroid-crushing",
-                "machine": "crusher",
-                "machine_count": 4.9846,
-                "machine_count_ceil": 5,
-                "outputs": {
-                  "ice": 747.6923,
-                  "oxide-asteroid-chunk": 29.9077
-                },
-                "inputs": {
-                  "oxide-asteroid-chunk": 149.5385
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 2691.6923,
-                "power_kw_ceil": 2700.0,
-                "beacon_power_kw": 0.0
-              },
-              {
-                "recipe": "sulfur",
-                "machine": "cryogenic-plant",
-                "machine_count": 1.5,
-                "machine_count_ceil": 2,
-                "outputs": {
-                  "sulfur": 270.0
-                },
-                "inputs": {
-                  "water": 4050.0,
-                  "petroleum-gas": 4050.0
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 2250.0,
-                "power_kw_ceil": 3000.0,
                 "beacon_power_kw": 0.0
               },
               {
@@ -1074,13 +884,8 @@
                 "machine": "cryogenic-plant",
                 "machine_count": 1.0,
                 "machine_count_ceil": 1,
-                "outputs": {
-                  "carbon": 90.0
-                },
-                "inputs": {
-                  "sulfuric-acid": 1800.0,
-                  "coal": 180.0
-                },
+                "outputs": {"carbon": 90.0},
+                "inputs": {"sulfuric-acid": 1800.0, "coal": 180.0},
                 "machine_quality": "normal",
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 1500.0,
@@ -1092,14 +897,8 @@
                 "machine": "assembling-machine-3",
                 "machine_count": 1.2,
                 "machine_count_ceil": 2,
-                "outputs": {
-                  "tungsten-carbide": 90.0
-                },
-                "inputs": {
-                  "sulfuric-acid": 900.0,
-                  "tungsten-ore": 180.0,
-                  "carbon": 90.0
-                },
+                "outputs": {"tungsten-carbide": 90.0},
+                "inputs": {"sulfuric-acid": 900.0, "tungsten-ore": 180.0, "carbon": 90.0},
                 "machine_quality": "normal",
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 450.0,
@@ -1111,13 +910,8 @@
                 "machine": "foundry",
                 "machine_count": 2.5,
                 "machine_count_ceil": 3,
-                "outputs": {
-                  "tungsten-plate": 60.0
-                },
-                "inputs": {
-                  "molten-iron": 600.0,
-                  "tungsten-ore": 240.0
-                },
+                "outputs": {"tungsten-plate": 60.0},
+                "inputs": {"molten-iron": 600.0, "tungsten-ore": 240.0},
                 "machine_quality": "normal",
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 6250.0,
@@ -1125,35 +919,12 @@
                 "beacon_power_kw": 0.0
               },
               {
-                "recipe": "casting-iron",
-                "machine": "foundry",
-                "machine_count": 0.36,
-                "machine_count_ceil": 1,
-                "outputs": {
-                  "iron-plate": 54.0
-                },
-                "inputs": {
-                  "molten-iron": 540.0
-                },
-                "machine_quality": "normal",
-                "beacon_speed_bonus": 0.0,
-                "power_kw": 900.0,
-                "power_kw_ceil": 2500.0,
-                "beacon_power_kw": 0.0
-              },
-              {
                 "recipe": "metallurgic-science-pack",
                 "machine": "foundry",
                 "machine_count": 1.25,
                 "machine_count_ceil": 2,
-                "outputs": {
-                  "metallurgic-science-pack": 30.0
-                },
-                "inputs": {
-                  "molten-copper": 6000.0,
-                  "tungsten-carbide": 90.0,
-                  "tungsten-plate": 60.0
-                },
+                "outputs": {"metallurgic-science-pack": 30.0},
+                "inputs": {"molten-copper": 6000.0, "tungsten-carbide": 90.0, "tungsten-plate": 60.0},
                 "machine_quality": "normal",
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 3125.0,
@@ -1162,14 +933,13 @@
               }
             ],
             "raw_resources": {
-              "lava": 14280.0,
+              "lava": 13200.0,
               "tungsten-ore": 420.0,
               "coal": 180.0,
-              "oxide-asteroid-chunk": 119.6308,
-              "calcite": 28.56
+              "calcite": 26.4
             },
             "co_products": {
-              "stone": 405.6
+              "stone": 384.0
             },
             "miners_needed": {
               "tungsten-ore": {
@@ -1179,31 +949,31 @@
                 "rate_per_min": 420.0,
                 "power_kw": 6300.0
               },
-              "lava": {
-                "machine": "offshore-pump",
-                "machine_count": 0.1983,
-                "machine_count_ceil": 1,
-                "rate_per_min": 14280.0
-              },
-              "calcite": {
-                "machine": "electric-mining-drill",
-                "machine_count": 0.952,
-                "machine_count_ceil": 1,
-                "rate_per_min": 28.56,
-                "power_kw": 85.68
-              },
               "coal": {
                 "machine": "electric-mining-drill",
                 "machine_count": 6.0,
                 "machine_count_ceil": 6,
                 "rate_per_min": 180.0,
                 "power_kw": 540.0
+              },
+              "lava": {
+                "machine": "offshore-pump",
+                "machine_count": 0.1833,
+                "machine_count_ceil": 1,
+                "rate_per_min": 13200.0
+              },
+              "calcite": {
+                "machine": "electric-mining-drill",
+                "machine_count": 0.88,
+                "machine_count_ceil": 1,
+                "rate_per_min": 26.4,
+                "power_kw": 79.2
               }
             },
-            "total_power_mw": 33.8231,
-            "total_power_mw_ceil": 43.2857,
+            "total_power_mw": 22.6442,
+            "total_power_mw_ceil": 29.1692,
             "bus_inputs": {
-              "crude-oil": 4153.8462
+              "sulfuric-acid": 2700.0
             }
           }
         }

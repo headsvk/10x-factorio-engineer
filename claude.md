@@ -40,7 +40,7 @@ in `10x-factorio-engineer/references/` are loaded on demand per topic.
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. The JSON example must include every field that appears in real CLI output — run the CLI and copy actual values rather than inventing them. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. Verify by grepping SKILL.md for each new field name and confirming it appears in both the example block and the field table. |
 | CLI flag added, removed, or changed | 1. Update the module-level docstring at the top of `cli.py` (Usage block). 2. Update the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) OR `--format human` output layout changes | Update the sample `--format human` output block in `README.md`. Run the CLI with `--format human` and copy actual output rather than editing manually. |
-| Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample-state.json` to match the new schema. 4. Run `python dev/gen_sample_state.py` to regenerate `dev/sample-state.b64`. 5. Run `python dev/build_dashboard.py` to rebuild the artifact. |
+| Factory state schema changes (SKILL.md §3 fields added/removed/renamed) | 1. Update `10x-factorio-engineer/SKILL.md` §3. 2. Update `dev/dashboard.html` to reflect the new schema. 3. Update `dev/sample/state.json` to match the new schema. 4. Run `python dev/build_dashboard.py` to rebuild the artifact. |
 | New CLI flag or solver behaviour added | Add tests to `dev/test_cli.py` covering the new feature. Run `python -m unittest dev.test_cli -v` and fix any failures before finishing. Update the test count in `README.md` and in the Tests section of `CLAUDE.md`. |
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
@@ -67,18 +67,18 @@ This returns all English main-namespace pages edited in the last 30 days. Filter
 translations (`/zh`, `/ru`, `/de`, etc.) and non-article pages (`Special:`, `File:`, etc.).
 
 **Step 2 — Cross-reference against our crawled page list:**
-Our 417-page list is in `dev/wiki_crawl_urls.json`. Check which recently-changed wiki pages
+Our 417-page list is in `dev/wiki/urls.json`. Check which recently-changed wiki pages
 appear in that list — those are the ones to re-crawl.
 
 Also check which split reference files embed facts from those changed pages — if any of those changed,
 update the embedded summaries too (Step 4).
 
-**Step 3 — Re-crawl changed pages using `dev/wiki.py`:**
+**Step 3 — Re-crawl changed pages using `dev/wiki/crawl.py`:**
 ```bash
-python dev/wiki.py update [--days 30] [--dry-run]
+python dev/wiki/crawl.py update [--days 30] [--dry-run]
 ```
 This automates Steps 1–3: queries RecentChanges, cross-references against
-`wiki_crawl_urls.json`, deletes stale files, and re-crawls via Cloudflare.
+`dev/wiki/urls.json`, deletes stale files, and re-crawls via Cloudflare.
 Credentials come from env vars `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`.
 
 > **Note:** Do NOT use Cloudflare's `modifiedSince` parameter for this — tested and confirmed
@@ -91,16 +91,16 @@ Compare newly crawled content against what's embedded in the split reference fil
 Update any facts that changed. Focus on **mechanics, strategic constraints, and planning guidance** — not raw stats or recipe ingredients (the CLI provides those on demand). Prioritise: spoilage timers, planet-specific constraints, combat mechanics, circuit patterns, and infrastructure ratios (solar/nuclear/fusion) that the CLI doesn't model.
 
 **Step 5 — Also check for new high-value pages:**
-Filter the full RecentChanges list for pages not yet in `wiki_crawl_urls.json` but relevant
-to players (new buildings, mechanics, Space Age content). Add them to `wiki_crawl_urls.json`
-and run `python dev/wiki.py crawl` to fetch them.
+Filter the full RecentChanges list for pages not yet in `dev/wiki/urls.json` but relevant
+to players (new buildings, mechanics, Space Age content). Add them to `dev/wiki/urls.json`
+and run `python dev/wiki/crawl.py crawl` to fetch them.
 
 ### Notes
 - The 30-day window is a hard limit of the MediaWiki API — do not skip months
 - `render: false` crawls won't follow links between unrelated pages — crawl each target URL directly
 - `findings.md` in the repo root tracks crawl history
 - Cloudflare paid plan: no daily job limit, 600 req/min REST API; use 30 workers
-- `dev/wiki/` is gitignored — regenerate with `python dev/wiki.py crawl` (~15 min)
+- `dev/wiki/` is gitignored — regenerate with `python dev/wiki/crawl.py crawl` (~15 min)
 
 ---
 
@@ -115,17 +115,15 @@ and run `python dev/wiki.py crawl` to fetch them.
 | `10x-factorio-engineer/references/` | Split strategy reference files (11 topic files): early-game, factory-layouts, trains, megabase, planets, space-platforms, power, combat-defense, logistics-circuits, quality, resources |
 | `dev/dashboard.html` | Dashboard source — single vanilla HTML file, no build dependencies |
 | `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
-| `dev/preview.py` | Opens `dev/dashboard.html` in browser with `dev/sample-state.b64` pre-loaded into localStorage; writes `dev/preview.tmp.html` |
+| `dev/preview.py` | Generates `dev/preview.tmp.html` with factory state pre-loaded; defaults to `dev/sample/state.json`; use `--state PATH` for a custom JSON file; use `--no-min` for the unminified source dashboard |
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
-| `dev/sample-state.b64` | Sample factory state base64-encoded — paste into the Import dialog to test |
-| `dev/sample-state.json` | Source JSON for the sample state — edit this, then run `python dev/gen_sample_state.py` to rebuild `sample-state.b64` |
-| `dev/gen_sample_state.py` | Encodes `dev/sample-state.json` → `dev/sample-state.b64` (minified JSON → UTF-8 → base64) |
-| `dev/wiki_crawl_urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
-| `dev/wiki.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
-| `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki.py crawl` (~15 min) |
-| `dev/test_cli.py` | `unittest` suite (158 tests, stdlib only) — dev only |
-| `dev/artifact-api-test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
-| `dev/artifact-api.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
+| `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
+| `dev/test_cli.py` | `unittest` suite (176 tests, stdlib only) — dev only |
+| `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
+| `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
+| `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki/crawl.py crawl` (~15 min) |
+| `dev/artifact-api/test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
+| `dev/artifact-api/research.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
 Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missing.
 
@@ -140,7 +138,7 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | Function | Role |
 |----------|------|
 | `load_data(location)` | Load JSON; `location=None` → vanilla, location string → space-age; auto-download if missing |
-| `build_raw_set(data, location)` | Items with no recipe; `location=None` → all planets, location string → specific planet only |
+| `build_raw_set(data, location)` | Raw input items (mined/pumped); `location=None` → all planets, location string → specific planet only. Resolves resource entity keys → result item names (e.g. `sulfuric-acid-geyser` → `sulfuric-acid`), maps plant entity names via `PLANT_HARVESTS` (e.g. `yumako-tree` → `yumako`), and adds `PLANET_EXTRA_RAWS` (e.g. `spoilage` on Gleba) |
 | `get_planet_props(data, location)` | Return `surface_properties` dict for the given planet, or `{}` if not found/None |
 | `_recipe_valid_for_planet(recipe, planet_props)` | Return True if all recipe surface_conditions are satisfied |
 | `build_recipe_index(data)` | `{item_key: [recipe, ...]}`, skips recycling + barrel subgroups |
@@ -283,10 +281,26 @@ Priority (in `pick_recipe`):
 2. Planet filtering: when `planet_props` given, remove candidates whose `surface_conditions` are not satisfied. If all candidates are filtered out, return `None`.
 3. Recipe whose `key == item_key` (exact match).
 4. `advanced-oil-processing` (legacy fallback for oil products).
+4.5. Entry in `RECIPE_DEFAULTS_BY_LOCATION[location]` — location-specific preferred recipe (wins over exact-key-match heuristic and order-sort).
 5. Entry in `RECIPE_DEFAULTS` (hard-coded preferred recipes that override the order-sort default when the order-sort winner is un-automatable or causes circular dependencies in the solver).
 6. First candidate after sorting all candidates by the game's `order` field.
 
 Step 5's sort ensures the game-preferred variant is chosen when no exact match exists (e.g. `solid-fuel-from-petroleum-gas` over the less-efficient heavy-oil and petroleum-gas variants).
+
+### `RECIPE_DEFAULTS_BY_LOCATION`
+
+A module-level dict mapping `location → {item_key → recipe_key}` for items where the order-sort default is wrong for a specific planet:
+
+| Location | Item | Default recipe | Reason |
+|----------|------|---------------|--------|
+| `space-platform` | `carbon` | `carbonic-asteroid-crushing` | Coal+sulfuric-acid route is unavailable on platforms; carbonic asteroid chunks are a platform raw resource |
+| `vulcanus` | `molten-copper` | `molten-copper-from-lava` | Order-sort picks ore-based recipe; lava is Vulcanus's primary smelting resource |
+| `vulcanus` | `molten-iron` | `molten-iron-from-lava` | Same — lava is always preferred over importing iron ore on Vulcanus |
+| `vulcanus` | `water` | `steam-condensation` | RECIPE_DEFAULTS sends water to ice-melting but Vulcanus has no ice; steam comes from acid-neutralisation (Vulcanus-only, pressure=4000) |
+| `gleba` | `plastic-bar` | `bioplastic` | Exact-key-match picks petroleum route which crashes (no crude oil on Gleba); bioplastic is the correct bio-substitute |
+| `gleba` | `sulfur` | `biosulfur` | Same — petroleum sulfur route crashes on Gleba |
+| `gleba` | `lubricant` | `biolubricant` | Same — heavy-oil lubricant route crashes on Gleba |
+| `aquilo` | `ice` | `ammoniacal-solution-separation` | RECIPE_DEFAULTS sends ice to oxide-asteroid-crushing; on Aquilo ammoniacal-solution is a raw offshore resource and is the correct source |
 
 ### `RECIPE_DEFAULTS`
 
@@ -295,6 +309,8 @@ A module-level dict that maps `item_key → recipe_key` for items where the orde
 | Item | Default recipe | Reason |
 |------|---------------|--------|
 | `nutrients` | `nutrients-from-yumako-mash` | `nutrients-from-fish` sorts first but is un-automatable (raw-fish not minable) and causes a circular dependency via `fish-breeding → nutrients` |
+| `water` | `ice-melting` | `steam-condensation` sorts first (order `b < c`) but steam is never a raw resource — ice-melting is the correct automatable default |
+| `ice` | `oxide-asteroid-crushing` | `ammoniacal-solution-separation` sorts first but ammoniacal-solution is only raw on Aquilo; asteroid crushing is the correct default elsewhere |
 
 ### Why this matters
 
@@ -386,7 +402,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 158 tests covering:
+`dev/test_cli.py` contains 176 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -415,7 +431,7 @@ python -m unittest dev.test_cli -v
 | `TestStepInputs` | `inputs` dict present on every production step; ingredient consumption rates correct; reduced by productivity modules; bus items appear in step inputs; oil steps have crude-oil input; multi-target inputs accumulate |
 | `TestStepConfig` | `machine_quality` always present per step; `module_specs` present only when modules configured (global or per-recipe override); `beacon_spec`+`beacon_quality` present only when beacon configured; per-recipe override wins over global |
 | `TestHumanReadableOutput` | `format_human_readable()` returns non-JSON text; header contains item+rate; sections present (Production Steps, Raw Resources, Miners Needed, Power); machine names in steps; module/beacon config in header and detail lines; machine quality in step label; pumpjack shows yield%; bus inputs section when bus items present |
-| `TestLocationFilter` | `--location` raw_set filtering (vulcanus has tungsten-ore, not iron-ore; gleba has plants; space-platform is empty); planet surface_conditions filtering (acid-neutralisation valid on vulcanus, not nauvis); explicit `--recipe` override bypasses planet filter; `location` field in JSON output (`null` for vanilla, planet key when given) |
+| `TestLocationFilter` | `--location` raw_set filtering (vulcanus has tungsten-ore+sulfuric-acid, not iron-ore; gleba has yumako+jellynut+spoilage as raw; space-platform is empty); planet surface_conditions filtering; explicit `--recipe` override bypasses planet filter; `location` field in JSON output; Vulcanus water→steam-condensation+acid-neutralisation; Gleba plastic/sulfur/lubricant→bio-substitutes; Aquilo ice→ammoniacal-solution-separation |
 
 ---
 

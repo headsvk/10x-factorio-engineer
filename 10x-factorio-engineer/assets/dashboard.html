@@ -78,7 +78,7 @@ font-family: 'Barlow Condensed', system-ui, sans-serif;
 --bad-border:   rgba(220,38,38,.2);
 }
 }
-body { background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+body { background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; overflow-y: scroll; }
 /* ── Layout ── */
 .header {
 border-bottom: 1px solid var(--border-sub);
@@ -707,7 +707,7 @@ const keys = sortedScienceKeys(Object.keys(targets));
 if (!keys.length) return '';
 const rates = allSciRates();
 const effectiveSPM = Math.min(...keys.map(k => rates[k]?.total ?? 0));
-const targetSPM    = Math.min(...keys.map(k => targets[k]));
+const targetSPM    = Math.max(...keys.map(k => targets[k]));
 const spmPct = pct(effectiveSPM, targetSPM);
 const spmCol = statusColor(spmPct);
 const spmHeadline = `
@@ -719,21 +719,20 @@ const bars = keys.map(name => {
 const info   = rates[name];
 const actual = info?.total ?? 0;
 const target = targets[name];
-const p = pct(actual, target);
+const p = pct(actual, targetSPM);
 const {solid, dark} = sciStyle(name);
 const col = statusColor(p);
-const locChips = (info?.byLoc ?? []).map(e =>
+const locChips = (STATE.dataset ?? 'vanilla') === 'vanilla' ? '' : (info?.byLoc ?? []).map(e =>
 `<span class="sci-loc-chip">${esc(e.label)} ${fmtN(e.rate)}/min</span>`
 ).join('');
 return `
 <div class="science-bar">
 <div class="science-bar-header">
 <div class="science-name">
-${sciIcon(solid)}
 ${esc(label(name))}
 </div>
 <div class="science-meta">
-<span class="rate-text">${actual}/${target} /min</span>
+<span class="rate-text">${actual}/min</span>
 <span class="pct-text" style="color:${col}">${p}%</span>
 </div>
 </div>
@@ -761,10 +760,11 @@ return `<button class="loc-btn${i === activeLocationIdx ? ' active' : ''}" data-
 const planetBtns   = planets.map(btnFor).join('');
 const platformBtns = platforms.map(btnFor).join('');
 const sep = planets.length && platforms.length ? '<span class="loc-sep">|</span>' : '';
+const isVanilla = (STATE.dataset ?? 'vanilla') === 'vanilla';
 return `
 <div class="loc-bar">
 ${planetBtns}${sep}${platformBtns}
-<button class="btn loc-btn" id="btn-add-loc" style="opacity:.7">+ Add</button>
+${isVanilla ? '' : '<button class="btn loc-btn" id="btn-add-loc" style="opacity:.7">+ Add</button>'}
 </div>`;
 }
 function renderBottlenecks() {
@@ -1000,7 +1000,7 @@ const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
 return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ⚡${powStr}` : ''}</span></span>`;
 }).join('')}</div>
 </div>` : '';
-const coProds = Object.entries(line.co_products ?? {});
+const coProds = Object.entries(line.cli_result?.co_products ?? {});
 const primaryRate = line.effective_rate ?? line.target_rate ?? 0;
 const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, STATE.preferred_belt);
 const outputChips = [
@@ -1084,7 +1084,7 @@ document.getElementById('app').innerHTML = `
 ${renderHeader()}
 <div class="main">
 ${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
-${renderLocationBar()}
+${(STATE.dataset ?? 'vanilla') !== 'vanilla' ? renderLocationBar() : ''}
 ${renderBottlenecks()}
 ${renderTabs()}
 <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
