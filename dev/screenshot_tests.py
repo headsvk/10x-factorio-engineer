@@ -42,6 +42,18 @@ BEACON_CONFIGS = {
     "legendary": {"count": 3, "modules": [{"count": 2, "type": "speed",      "tier": 3, "quality": "normal"}]},
 }
 
+# Machine module configs vary by machine quality: different combos + matching quality tier.
+def _m(count, mtype, quality):
+    return {"count": count, "type": mtype, "tier": 3, "quality": quality}
+
+MACHINE_MODULE_CONFIGS = {
+    "normal":    [_m(4, "prod",       "normal")],
+    "uncommon":  [_m(3, "prod",       "uncommon"), _m(1, "speed",      "uncommon")],
+    "rare":      [_m(2, "prod",       "rare"),     _m(2, "speed",      "rare")],
+    "epic":      [_m(2, "prod",       "epic"),     _m(1, "speed",      "epic"),  _m(1, "efficiency", "epic")],
+    "legendary": [_m(4, "speed",      "legendary")],
+}
+
 
 def make_state(machine_quality: str, beacon_quality: str, with_beacon: bool) -> dict:
     if with_beacon:
@@ -80,7 +92,7 @@ def make_state(machine_quality: str, beacon_quality: str, with_beacon: bool) -> 
         "machine_quality": machine_quality,
         "beacon_quality": beacon_quality,
         "default_beacon": default_beacon,
-        "module_configs": {},
+        "module_configs": {"assembling-machine-3": MACHINE_MODULE_CONFIGS[machine_quality]},
         "beacon_configs": {},
         "recipe_module_overrides": {},
         "recipe_beacon_overrides": {},
