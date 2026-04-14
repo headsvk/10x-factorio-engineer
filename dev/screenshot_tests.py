@@ -25,18 +25,36 @@ SCREENSHOTS_DIR = os.path.join(DEV_DIR, "screenshots")
 
 QUALITIES = ["normal", "uncommon", "rare", "epic", "legendary"]
 
-# Beacon spec used for all "with-beacon" cases.
-# 4 beacons × 2 speed-3-normal modules — isolates housing-quality visually.
-BEACON_SPEC = {
-    "count": 4,
-    "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}],
+# From cli.py constants
+BEACON_EFFECTIVITY = {"normal": 1.5, "uncommon": 1.7, "rare": 1.9, "epic": 2.1, "legendary": 2.5}
+BEACON_POWER_KW    = {"normal": 480, "uncommon": 400, "rare": 320, "epic": 240, "legendary": 80}
+SPEED3_BONUS = 0.5  # speed-3 bonus per module
+
+# Beacon configs vary by quality: fewer beacons for higher effectivity,
+# some with efficiency modules to show visual variety.
+BEACON_CONFIGS = {
+    "normal":    {"count": 8, "modules": [{"count": 2, "type": "speed",      "tier": 3, "quality": "normal"}]},
+    "uncommon":  {"count": 6, "modules": [{"count": 2, "type": "speed",      "tier": 3, "quality": "normal"}]},
+    "rare":      {"count": 5, "modules": [{"count": 1, "type": "speed",      "tier": 3, "quality": "normal"},
+                                          {"count": 1, "type": "efficiency",  "tier": 3, "quality": "normal"}]},
+    "epic":      {"count": 4, "modules": [{"count": 1, "type": "speed",      "tier": 3, "quality": "normal"},
+                                          {"count": 1, "type": "efficiency",  "tier": 3, "quality": "normal"}]},
+    "legendary": {"count": 3, "modules": [{"count": 2, "type": "speed",      "tier": 3, "quality": "normal"}]},
 }
 
 
 def make_state(machine_quality: str, beacon_quality: str, with_beacon: bool) -> dict:
-    default_beacon   = BEACON_SPEC if with_beacon else None
-    beacon_speed_bonus = 6.0   if with_beacon else 0.0
-    beacon_power_kw    = 1920.0 if with_beacon else 0.0
+    if with_beacon:
+        spec = BEACON_CONFIGS[beacon_quality]
+        effectivity = BEACON_EFFECTIVITY[beacon_quality]
+        speed_mods = sum(m["count"] for m in spec["modules"] if m["type"] == "speed")
+        beacon_speed_bonus = spec["count"] * speed_mods * SPEED3_BONUS * effectivity
+        beacon_power_kw    = spec["count"] * BEACON_POWER_KW[beacon_quality]
+        default_beacon     = spec
+    else:
+        beacon_speed_bonus = 0.0
+        beacon_power_kw    = 0.0
+        default_beacon     = None
 
     step = {
         "recipe": "electronic-circuit",
