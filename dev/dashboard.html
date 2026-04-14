@@ -638,7 +638,7 @@ function bcnChip(b, housingQ) {
     const qdot  = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
     return `<span style="color:${color}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
   }).join(' ');
-  return `<span class="bcn-chip">${b.count}${houseDot}×beacon<span class="bcn-sep">/</span>${modsHtml}</span>`;
+  return `<span class="bcn-chip">${b.count}${houseDot} beacon<span class="bcn-sep">/</span>${modsHtml}</span>`;
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
