@@ -30,17 +30,29 @@ BEACON_EFFECTIVITY = {"normal": 1.5, "uncommon": 1.7, "rare": 1.9, "epic": 2.1, 
 BEACON_POWER_KW    = {"normal": 480, "uncommon": 400, "rare": 320, "epic": 240, "legendary": 80}
 SPEED3_BONUS = 0.5  # speed-3 bonus per module
 
-# Beacon configs vary by quality: fewer beacons for higher effectivity,
-# some with efficiency modules to show visual variety.
-BEACON_CONFIGS = {
-    "normal":    {"count": 8, "modules": [{"count": 2, "type": "speed",      "tier": 3, "quality": "normal"}]},
-    "uncommon":  {"count": 6, "modules": [{"count": 2, "type": "speed",      "tier": 3, "quality": "normal"}]},
-    "rare":      {"count": 5, "modules": [{"count": 1, "type": "speed",      "tier": 3, "quality": "normal"},
-                                          {"count": 1, "type": "efficiency",  "tier": 3, "quality": "normal"}]},
-    "epic":      {"count": 4, "modules": [{"count": 1, "type": "speed",      "tier": 3, "quality": "normal"},
-                                          {"count": 1, "type": "efficiency",  "tier": 3, "quality": "normal"}]},
-    "legendary": {"count": 3, "modules": [{"count": 2, "type": "speed",      "tier": 3, "quality": "normal"}]},
+# Beacon layout configs (count + module types) vary by housing quality.
+# Module quality is assigned independently using a +2 offset so it never
+# matches the housing quality and gives a spread across all 5 tiers.
+BEACON_LAYOUTS = {
+    "normal":    {"count": 8, "module_types": [("speed", 2)]},
+    "uncommon":  {"count": 6, "module_types": [("speed", 2)]},
+    "rare":      {"count": 5, "module_types": [("speed", 1), ("efficiency", 1)]},
+    "epic":      {"count": 4, "module_types": [("speed", 1), ("efficiency", 1)]},
+    "legendary": {"count": 3, "module_types": [("speed", 2)]},
 }
+
+def beacon_module_quality(beacon_quality: str) -> str:
+    """Return a module quality that differs from the housing quality (+2 offset)."""
+    return QUALITIES[(QUALITIES.index(beacon_quality) + 2) % len(QUALITIES)]
+
+def make_beacon_spec(beacon_quality: str) -> dict:
+    layout = BEACON_LAYOUTS[beacon_quality]
+    mq = beacon_module_quality(beacon_quality)
+    return {
+        "count": layout["count"],
+        "modules": [{"count": c, "type": t, "tier": 3, "quality": mq}
+                    for t, c in layout["module_types"]],
+    }
 
 # Machine module configs vary by machine quality: different combos + matching quality tier.
 def _m(count, mtype, quality):
@@ -57,7 +69,7 @@ MACHINE_MODULE_CONFIGS = {
 
 def make_state(machine_quality: str, beacon_quality: str, with_beacon: bool) -> dict:
     if with_beacon:
-        spec = BEACON_CONFIGS[beacon_quality]
+        spec = make_beacon_spec(beacon_quality)
         effectivity = BEACON_EFFECTIVITY[beacon_quality]
         speed_mods = sum(m["count"] for m in spec["modules"] if m["type"] == "speed")
         beacon_speed_bonus = spec["count"] * speed_mods * SPEED3_BONUS * effectivity
