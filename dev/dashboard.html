@@ -316,7 +316,7 @@
       background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); color: #94a3b8;
       white-space: nowrap; line-height: 1.6; vertical-align: middle;
     }
-    .qdot { font-size: 7px; vertical-align: middle; }
+    .qdot { font-size: 7px; line-height: 1; vertical-align: middle; }
     .qdot.q-uncommon  { color: #6DFF6D; }
     .qdot.q-rare      { color: #6DA8FF; }
     .qdot.q-epic      { color: #C87DFF; }
@@ -636,7 +636,7 @@ function bcnChip(b, housingQ) {
     const qdot  = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
     return `<span style="color:${color}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
   }).join(' ');
-  return `<span class="bcn-chip">${b.count}${houseDot}×beacon · ${modsHtml}</span>`;
+  return `<span class="bcn-chip">${b.count}${houseDot}×beacon / ${modsHtml}</span>`;
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
