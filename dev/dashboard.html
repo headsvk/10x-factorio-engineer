@@ -628,7 +628,7 @@ function modChip(m) {
   const abbr = {prod: 'P', speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
   const tCls = {prod: 'type-prod', speed: 'type-speed', efficiency: 'type-eff'}[m.type] ?? '';
   const qdot = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
-  return `<span class="mod-chip ${tCls}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
+  return `<span class="mod-chip ${tCls}"><span>${m.count}×${abbr}${m.tier}${qdot}</span></span>`;
 }
 function bcnChip(b, housingQ) {
   const houseDot = housingQ !== 'normal' ? `<span class="qdot q-${housingQ}">◆</span>` : '';
@@ -638,7 +638,7 @@ function bcnChip(b, housingQ) {
     const qdot  = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
     return `<span style="color:${color}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
   }).join('');
-  return `<span class="bcn-chip">${b.count}×beacon${houseDot}<span class="bcn-sep">/</span><span style="display:inline-flex;align-items:center;gap:3px">${modsHtml}</span></span>`;
+  return `<span class="bcn-chip"><span>${b.count}×beacon${houseDot}</span><span class="bcn-sep">/</span><span style="display:inline-flex;align-items:center;gap:3px">${modsHtml}</span></span>`;
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
