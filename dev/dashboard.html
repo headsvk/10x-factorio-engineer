@@ -316,11 +316,14 @@
       background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); color: #94a3b8;
       white-space: nowrap; line-height: 1.6; vertical-align: middle;
     }
-    .qdot { font-size: 7px; vertical-align: middle; }
+    .qdot { font-size: 7px; line-height: 1; vertical-align: middle; }
     .qdot.q-uncommon  { color: #6DFF6D; }
     .qdot.q-rare      { color: #6DA8FF; }
     .qdot.q-epic      { color: #C87DFF; }
     .qdot.q-legendary { color: #FFB347; }
+    .bcn-chip .qdot, .mod-chip .qdot, td.name-col .qdot { font-size: 9px; }
+    .bcn-chip .qdot, .mod-chip .qdot { margin-left: 1px; }
+    .bcn-sep { margin: 0 3px; }
 
     /* ── Issues ── */
     .issue-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px;
@@ -626,7 +629,7 @@ function modChip(m) {
   const abbr = {prod: 'P', speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
   const tCls = {prod: 'type-prod', speed: 'type-speed', efficiency: 'type-eff'}[m.type] ?? '';
   const qdot = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
-  return `<span class="mod-chip ${tCls}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
+  return `<span class="mod-chip ${tCls}"><span>${m.count}×${abbr}${m.tier}${qdot}</span></span>`;
 }
 function bcnChip(b, housingQ) {
   const houseDot = housingQ !== 'normal' ? `<span class="qdot q-${housingQ}">◆</span>` : '';
@@ -635,8 +638,8 @@ function bcnChip(b, housingQ) {
     const color = {speed: '#009FFF', efficiency: '#4CAF50'}[m.type] ?? '#aaa';
     const qdot  = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
     return `<span style="color:${color}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
-  }).join(' ');
-  return `<span class="bcn-chip">${b.count}${houseDot}×beacon · ${modsHtml}</span>`;
+  }).join('');
+  return `<span class="bcn-chip"><span>${b.count}×beacon${houseDot}</span><span class="bcn-sep">/</span><span style="display:inline-flex;align-items:center;gap:3px">${modsHtml}</span></span>`;
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -1044,11 +1047,11 @@ function renderLineCard(line, idx) {
         ? `<span style="font-size:9px;color:var(--text-dim)">+${(s.beacon_speed_bonus * 100).toFixed(1)}%</span>`
         : '';
       const chipRow = [modHtml, bcnHtml, bonusHtml].filter(Boolean).join(' ');
-      const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}" style="margin-left:3px">◆</span>` : '';
+      const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}">◆</span>` : '';
 
       return `<tr>
         <td>${esc(label(s.recipe))}</td>
-        <td class="name-col">${esc(machineLabel(s.machine))}${qualDot}${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
+        <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
         <td class="r">${s.machine_count_ceil}</td>
         <td class="r" style="color:var(--text-dim)">${powCell}</td>
       </tr>`;
