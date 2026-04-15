@@ -83,7 +83,7 @@ This file covers combat and defense in Factorio, including turret types, enemy m
 ### Gleba (Pentapods)
 **Wiki:** https://wiki.factorio.com/Enemies (Pentapod section — Stomper info is on the Enemies page, no separate Stomper article)
 **Key points:**
-- Three enemy types: Wrigglers (small), Strafers (ranged), Stompers (massive)
+- Three enemy types: Wrigglers (small), Strafers (ranged, updated ranges: small 25, medium 28, big 31), Stompers (massive)
 - Stompers simply walk over walls — walls are not a viable containment strategy. Brute force firepower is required
 - Rocket turrets for Stompers, Tesla to slow them so rockets can connect
 - Artillery is effective for clearing nests within your spore cloud — fewer nests means fewer attack waves
@@ -107,7 +107,7 @@ Every electric building freezes and stops working unless it is within 1 tile (or
 - Railgun turrets can also be shipped back to Nauvis or other planets for ground defense there — they are not Aquilo-exclusive in use, only in unlock.
 
 **Bots on Aquilo:**
-- Robots consume **500% energy** compared to Nauvis. Factor this into power planning — a roboport cluster that barely worked on Nauvis will drain significant power here.
+- Robots consume **500% energy** compared to Nauvis (due to high gravity-to-atmospheric-pressure ratio, not the cold). Factor this into power planning — a roboport cluster that barely worked on Nauvis will drain significant power here.
 - Construction bots are still essential for building on the ice — avoid manual placement wherever possible.
 - Keep roboport networks small and power-stable; large bot swarms significantly stress the power grid.
 
@@ -121,6 +121,19 @@ Every electric building freezes and stops working unless it is within 1 tile (or
 - Ammo supply on platforms is a logistics puzzle — belt-fed turrets from
   onboard production is the reliable approach
 - Ice-heavy asteroid zones (near Aquilo) can starve metal production — plan for mixed asteroid chunk collection
+
+### Combat Research Breakpoints
+**Wiki:** https://wiki.factorio.com/Technologies (§ Infinite research breakpoints)
+
+Certain infinite research levels provide notable efficiency jumps — useful planning targets.
+
+| Technology | Key breakpoints |
+|---|---|
+| Physical projectile damage | Level 1: Gun turrets loaded with firearm magazines kill basic biters in 3 shots instead of 4 — greatly conserves iron plates. |
+| Stronger explosives | Level 2: Grenades destroy trees in one hit. Level 7 (Space Age): Rockets one-shot medium asteroids. Level 12 (Space Age): Rockets two-shot large asteroids. Level 16 (Space Age): Explosive rockets two-shot large asteroids with direct damage. |
+| Laser weapons damage (Space Age) | Level 11: Laser turrets destroy small asteroids in one damage cycle. |
+| Railgun damage (Space Age) | Level 2: Railguns destroy all asteroid sizes in one shot — conserves ammo significantly. |
+| Artillery shell damage (Space Age) | Level 9: Artillery shells defeat Nauvis spawners and behemoth worms in one hit — greatly conserves shells. |
 
 ### Turret Creep
 **Community reference:** **Michael Hendriks** (YouTube) — "Ultimate Deathworld" series is the definitive guide to optimised early-to-mid-game combat; the most thorough Factorio combat strategy content available. **Trupen** (YouTube) — concise, fast-paced turret pushing and combat mechanic tutorials.
@@ -148,6 +161,9 @@ Worms are stationary and fire acid at long range (small worm: 25 tiles, big worm
 | Flamethrower | Devastates dense biter crowds; great for nest clearing | Needs light oil supply; large AoE can hit your own turrets |
 | Laser | No ammo logistics; reliable unmanned outposts | High power draw; idle drain; needs power infrastructure extended to front |
 
+**Personal combat against nests:**
+The submachine gun (SMG) has increased range and high fire rate but struggles to kill nests quickly alone. Effective technique: use the SMG against approaching biters, then switch to a shotgun for close-range blasts against the nest itself. Toggling between the two weapons is much more ammo-efficient than trying to destroy a nest with the SMG alone.
+
 **Ammo supply:**
 Ammo depletion is the most common failure mode.
 - **Early game trick:** Hold **Z** while dragging across a row of gun turrets — this rapidly inserts a half-stack of ammo into each turret from your inventory. Fastest way to arm a new frontline in seconds.
@@ -159,6 +175,9 @@ Create a **blueprint** of laser turrets grouped around a medium power pole or su
 
 **Tesla turrets in creep:**
 Tesla turrets arc between enemies, slow them, and push them back — excellent for buying time while gun/laser turrets reload. Place 1–2 Tesla turrets at the frontline to stun counterattack waves so they can be finished off before they close to melee range.
+
+**Artillery targeting remote (as of 2.0.7):**
+The artillery targeting remote is now a **shortcut bar tool**, not a craftable inventory item. It is available for free in the shortcut bar at any time once artillery is researched. It can still be placed in the quickbar if desired. No need to craft or carry it.
 
 **When Artillery replaces turret creep:**
 Once **Artillery turrets** are researched (requires military 4, Vulcanus or late Nauvis), turret creep becomes mostly obsolete:

@@ -46,6 +46,7 @@ in `10x-factorio-engineer/references/` are loaded on demand per topic.
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
 | Before spawning a subagent to implement CLI or dashboard changes | Include in the subagent prompt: (1) an instruction to read and follow all maintenance rules in `CLAUDE.md` before finishing, and (2) an explicit end-of-task checklist derived from those rules — e.g. "grep SKILL.md for every new JSON field added to cli.py output and confirm each appears in both the example block and the field table in §2". Subagents do not automatically load `CLAUDE.md`. |
 | Every 30 days | Run the wiki maintenance workflow (see below) to update the split reference files in `10x-factorio-engineer/references/`. The MediaWiki RecentChanges API only goes back 30 days — running less frequently means changes fall out of the window undetected. |
+| On every project open | If `dev/wiki/findings.md` exists, read it and check the date of the last completed wiki update (lines matching `wiki update complete`). If that date is more than 20 days ago, suggest running `python dev/wiki/crawl.py update --workers 1`. If the file doesn't exist, skip the check — the wiki cache may not be set up in this environment. |
 
 The goal is that `claude.md` always accurately describes the codebase.
 
@@ -98,9 +99,9 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 ### Notes
 - The 30-day window is a hard limit of the MediaWiki API — do not skip months
 - `render: false` crawls won't follow links between unrelated pages — crawl each target URL directly
-- `findings.md` in the repo root tracks crawl history
-- Cloudflare paid plan: no daily job limit, 600 req/min REST API; use 30 workers
-- `dev/wiki/` is gitignored — regenerate with `python dev/wiki/crawl.py crawl` (~15 min)
+- `dev/wiki/findings.md` tracks crawl history (gitignored, local only)
+- Cloudflare free tier: 10 min browser hours/day, 1 new browser/20s — use `--workers 1`
+- `dev/wiki/pages/` is gitignored — regenerate with `python dev/wiki/crawl.py crawl` (~15 min)
 
 ---
 

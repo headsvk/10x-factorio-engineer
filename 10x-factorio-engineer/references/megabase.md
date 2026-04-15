@@ -100,3 +100,20 @@ These benchmark results are the basis for most UPS advice in the community.
 - **Diminishing returns:** the transmission strength per beacon decreases as more beacons overlap the same machine. Surrounding machines around beacons (not beacons around machines) is more efficient. The wiki's multi-row array math gives optimum row count for large production blocks.
 - **Don't over-beacon without productivity:** beacon speed increases machine rate, which increases raw material consumption proportionally. Only beacon machines that also run productivity modules (in the machine itself) — otherwise you're just spending more resources faster.
 - **Space Age quality stacking:** beacon housing quality raises distribution effectivity (1.5→1.7→1.9→2.1→2.5 for normal→legendary). Machine quality raises crafting speed (+30%/+60%/+90%/+150%). Both stack multiplicatively with module bonuses.
+
+### Infinite Research Breakpoints
+**Wiki:** https://wiki.factorio.com/Technologies (§ Infinite research breakpoints)
+
+While infinite research can be leveled forever, certain levels provide practical caps or notable efficiency gains — these are useful factory milestone targets.
+
+**Productivity research breakpoints (Space Age):**
+
+| Technology | Key breakpoints |
+|---|---|
+| Processing unit productivity | Level 13: EM plants with legendary prod modules hit the 300% productivity cap. Level 25: EM plants hit 300% cap with no modules. |
+| Low density structure productivity | Level 15: Foundries with legendary prod modules hit 300% cap. Level 25: Foundries hit 300% cap with no modules. |
+| Steel plate productivity | Level 15: Foundries with legendary prod modules hit 300% cap. Level 25: Foundries hit 300% cap with no modules. |
+| Plastic bar productivity | Level 10: Cryogenic plants with legendary prod modules hit 300% cap. Level 15: Biochambers with legendary prod modules hit 300% cap. Level 25: Biochambers hit 300% cap with no modules. Level 30: Cryogenic plants hit 300% cap with no modules. |
+| Rocket fuel productivity | Level 10: Cryogenic plants with legendary prod modules hit 300% cap. Level 15: Biochambers with legendary prod modules hit 300% cap. Level 25: Biochambers hit 300% cap with no modules. Level 30: Cryogenic plants hit 300% cap with no modules. |
+| Rocket part productivity | Level 20: Rocket silos with legendary prod modules hit 300% cap. Level 30: Rocket silos hit 300% cap with no modules. |
+| Mining productivity | Level 50: Big mining drills mining scrap saturate **one side** of a turbo belt. Level 110: Big mining drills saturate an **entire** turbo belt. |

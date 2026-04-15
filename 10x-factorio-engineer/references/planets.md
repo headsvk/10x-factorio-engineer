@@ -274,7 +274,7 @@ rail infrastructure.
 **Planet stats:**
 - Solar power: **0.6 kW peak (1% of Nauvis)** — effectively useless, plan for nuclear or fusion
 - Day/night cycle: **20 minutes**
-- Robot energy usage: **500%** — bots drain power fast; factor into power planning
+- Robot energy usage: **500%** — due to Aquilo's high gravity-to-atmospheric-pressure ratio (5× other planets), airborne construction and logistic robots consume 5× more power than normal; factor into power planning
 - No pollution
 
 **Terrain:**
