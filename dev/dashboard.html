@@ -1046,11 +1046,11 @@ function renderLineCard(line, idx) {
         ? `<span style="font-size:9px;color:var(--text-dim)">+${(s.beacon_speed_bonus * 100).toFixed(1)}%</span>`
         : '';
       const chipRow = [modHtml, bcnHtml, bonusHtml].filter(Boolean).join(' ');
-      const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}" style="margin-left:3px">◆</span>` : '';
+      const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}">◆</span>` : '';
 
       return `<tr>
         <td>${esc(label(s.recipe))}</td>
-        <td class="name-col">${esc(machineLabel(s.machine))}${qualDot}${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
+        <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
         <td class="r">${s.machine_count_ceil}</td>
         <td class="r" style="color:var(--text-dim)">${powCell}</td>
       </tr>`;
