@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* ── Theme variables: dark (default) ── */
     :root {
@@ -43,7 +44,7 @@
       --border-sub:   #f0e8d5;
       --text:         #1c1608;
       --text-muted:   #6b5f42;
-      --text-dim:     #9c8f6e;
+      --text-dim:     #7a6d4d;
       --accent:       #b45309;
       --accent-hover: #92400e;
       --ok:           #16a34a;
@@ -67,7 +68,7 @@
         --border-sub:   #f0e8d5;
         --text:         #1c1608;
         --text-muted:   #6b5f42;
-        --text-dim:     #9c8f6e;
+        --text-dim:     #7a6d4d;
         --accent:       #b45309;
         --accent-hover: #92400e;
         --ok:           #16a34a;
@@ -95,13 +96,15 @@
     .header-title-row { display: flex; align-items: center; gap: 8px; }
     .header-title { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900;
                     color: var(--accent); letter-spacing: .06em; text-transform: uppercase; }
-    .header-save  { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+    .header-save  { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
     .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .main { padding: 16px; }
+    .main-inner { max-width: 1280px; margin-inline: auto; }
 
     /* ── Storage pill ── */
-    .storage-pill { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 6px;
-                    font-family: 'JetBrains Mono', monospace; }
+    .storage-pill { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 0 8px;
+                    height: 28px; display: inline-flex; align-items: center; line-height: 1;
+                    font-family: 'JetBrains Mono', monospace; letter-spacing: .02em; }
     .storage-pill.cloud { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-border); }
     .storage-pill.local { background: transparent; color: var(--text-muted); border-color: var(--border); }
     .storage-pill.none  { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-border); }
@@ -123,7 +126,7 @@
     .btn:hover { background: var(--border); color: var(--text); }
     .btn-ghost { background: transparent; border: none; color: var(--text-dim);
                  border-radius: 3px; padding: 3px 8px; height: 28px; }
-    .btn-ghost:hover { background: var(--bg-input); color: var(--bad); }
+    .btn-ghost:hover { background: var(--bg-input); color: var(--text); }
     .btn-primary { background: var(--accent); border: none; color: #1c1508;
                    border-radius: 3px; padding: 4px 16px; font-weight: 900; text-transform: uppercase; }
     .btn-primary:hover { background: var(--accent-hover); }
@@ -132,9 +135,14 @@
                   border-radius: 3px; padding: 4px 12px; text-transform: uppercase; }
     .btn-cancel:hover { background: var(--bg-input); }
 
-    /* ── Section label ── */
+    /* ── Section label (two tiers) ── */
+    /* sub-label: column headers, card meta, inline labels */
     .section-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
                      text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); margin-bottom: 10px; }
+    /* group-label: top-level group headings (Science Targets, Bus Balance, Bottlenecks, etc.) */
+    .group-label { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+                   text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted);
+                   margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-sub); }
 
     /* ── Science section ── */
     .science-section { background: var(--bg-card); border: 1px solid var(--border-sub);
@@ -151,7 +159,9 @@
     .science-meta { display: flex; align-items: center; gap: 12px; }
     .rate-text    { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
     .pct-text     { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
-    .progress-track { height: 12px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
+    /* Bar sizing: --bar-primary (science targets), --bar-unit (all other bars) */
+    :root { --bar-primary: 10px; --bar-unit: 4px; }
+    .progress-track { height: var(--bar-primary); background: var(--bg-input); border-radius: 3px; overflow: hidden; }
     .progress-fill  { height: 100%; border-radius: 3px; transition: width .5s ease; }
 
     /* ── Bottleneck banner ── */
@@ -179,8 +189,11 @@
     .spm-headline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px; }
     .spm-number   { font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 700;
                     font-variant-numeric: tabular-nums; line-height: 1; }
+    .spm-target   { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 500;
+                    font-variant-numeric: tabular-nums; line-height: 1; color: var(--text-muted); }
+    .spm-sep      { font-family: 'JetBrains Mono', monospace; font-size: 24px; color: var(--text-dim); line-height: 1; }
     .spm-label    { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900;
-                    letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
+                    letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
 
     /* ── Overview ── */
     .overview-line { padding: 10px 12px; border-radius: 4px; border: 1px solid; margin-bottom: 6px; }
@@ -193,7 +206,7 @@
     .overview-stats       { display: flex; align-items: center; gap: 12px; }
     .pct-lg { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700;
               font-variant-numeric: tabular-nums; width: 40px; text-align: right; }
-    .mini-bar      { height: 4px; background: var(--bg-input); border-radius: 2px; margin-top: 6px; }
+    .mini-bar      { height: var(--bar-unit); background: var(--bg-input); border-radius: 2px; margin-top: 6px; }
     .mini-bar-fill { height: 100%; border-radius: 2px; transition: width .5s; }
 
     /* ── Bus balance ── */
@@ -203,8 +216,8 @@
     .bus-group-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800;
                        text-transform: uppercase; letter-spacing: .12em; margin-bottom: 5px;
                        padding-left: 10px; }
-    .bus-group-label--belt { color: var(--accent); opacity: .7; }
-    .bus-group-label--pipe { color: #5b9fd4; opacity: .8; }
+    .bus-group-label--belt { color: var(--accent); border-bottom: 1px solid var(--border-sub); padding-bottom: 4px; }
+    .bus-group-label--pipe { color: #5b9fd4; border-bottom: 1px solid var(--border-sub); padding-bottom: 4px; }
     .bus-row { padding: 9px 12px; border-radius: 4px; border: 1px solid var(--border-sub);
                background: var(--bg-card); margin-bottom: 4px; }
     .bus-row--fluid { border-left: 2px solid #3a7ab8; }
@@ -216,7 +229,7 @@
     .bus-net { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; }
     .bus-belt-tag { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800;
                     letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
-    .bus-bar-track { height: 5px; border-radius: 3px; overflow: hidden; margin-bottom: 5px;
+    .bus-bar-track { height: var(--bar-unit); border-radius: 3px; overflow: hidden; margin-bottom: 5px;
                      display: flex; }
     .bus-bar-consumed { height: 100%; transition: width .4s ease; }
     .bus-bar-free { height: 100%; flex: 1; transition: background .4s ease; }
@@ -237,7 +250,8 @@
     .line-card.ok   { border-color: var(--ok-border);   border-left: 3px solid var(--ok);   }
     .line-card.warn { border-color: var(--warn-border);  border-left: 3px solid var(--warn);  }
     .line-card.bad  { border-color: var(--bad-border);   border-left: 3px solid var(--bad);   }
-    .line-card.wip  { border-color: var(--warn-border);  border-left: 3px dashed var(--warn); opacity: .75; }
+    .line-card.wip  { border-color: var(--warn-border);  border-left: 3px dashed var(--warn); }
+    .line-card.wip .card-header { opacity: .75; }
     .wip-badge { display: inline-flex; align-items: center; font-family: 'Barlow Condensed', sans-serif;
                  font-size: 9px; font-weight: 700; letter-spacing: .08em; color: var(--warn);
                  background: var(--warn-bg); border: 1px solid var(--warn-border);
@@ -250,8 +264,9 @@
     .card-header-left  { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .card-title-group  { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
     .card-subtitle     { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600;
-                         text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); opacity: .7; }
-    .card-chevron      { color: var(--text-dim); font-size: 10px; width: 12px; }
+                         text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); }
+    .card-chevron      { color: var(--text-muted); font-size: 12px; width: 14px; transition: transform .15s ease; }
+    .card-header:hover .card-chevron { color: var(--text); }
     .card-title        { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px;
                          letter-spacing: .02em; color: var(--text); }
     .card-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
@@ -278,13 +293,14 @@
     .ext-link { color: var(--text-dim); font-size: 11px; text-decoration: none; line-height: 1; }
     .ext-link:hover { color: var(--text-muted); }
 
-    .card-progress      { height: 4px; background: var(--bg-input); }
+    .card-progress      { height: var(--bar-unit); background: var(--bg-input); }
     .card-progress-fill { height: 100%; transition: width .5s; }
     .card-body { padding: 14px 16px; }
     .card-section { margin-bottom: 16px; }
     .card-section:last-child { margin-bottom: 0; }
 
     table { width: 100%; font-size: 12px; border-collapse: collapse; }
+    thead { position: sticky; top: 0; background: var(--bg-card); z-index: 1; }
     thead tr { border-bottom: 1px solid var(--border-sub); }
     th { text-align: left; padding-bottom: 6px; padding-right: 16px; font-weight: 700;
          font-family: 'Barlow Condensed', sans-serif; font-size: 11px;
@@ -306,9 +322,9 @@
       font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
       border: 1px solid; white-space: nowrap; line-height: 1.6; vertical-align: middle;
     }
-    .mod-chip.type-prod  { background: rgba(255, 77,  0,.13); border-color: rgba(255, 77,  0,.4);  color: #FF4D00; }
-    .mod-chip.type-speed { background: rgba(  0,159,255,.13); border-color: rgba(  0,159,255,.4);  color: #009FFF; }
-    .mod-chip.type-eff   { background: rgba( 73,255,  0,.10); border-color: rgba( 73,255,  0,.35); color: #49FF00; }
+    .mod-chip.type-prod  { background: rgba(210, 90,  30,.09); border-color: rgba(210, 90,  30,.35);  color: #d06020; }
+    .mod-chip.type-speed { background: rgba( 30,130,210,.09); border-color: rgba( 30,130,210,.35);  color: #3a9fd4; }
+    .mod-chip.type-eff   { background: rgba( 60,180, 60,.08); border-color: rgba( 60,180, 60,.30); color: #50b850; }
     .bcn-chip {
       display: inline-flex; align-items: center; gap: 1px;
       padding: 1px 4px; border-radius: 2px;
@@ -316,13 +332,15 @@
       background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); color: #94a3b8;
       white-space: nowrap; line-height: 1.6; vertical-align: middle;
     }
-    .qdot { font-size: 7px; line-height: 1; vertical-align: middle; }
+    /* CSS-drawn diamond — avoids glyph-metric variance across Chromium versions/fallback fonts */
+    .qdot { display: inline-block; width: 4px; height: 4px; transform: rotate(45deg);
+            background: currentColor; vertical-align: middle; margin: 0 0 .15em .3em;
+            text-indent: -9999px; overflow: hidden; color: var(--text-dim); }
     .qdot.q-uncommon  { color: #6DFF6D; }
     .qdot.q-rare      { color: #6DA8FF; }
     .qdot.q-epic      { color: #C87DFF; }
     .qdot.q-legendary { color: #FFB347; }
-    .bcn-chip .qdot, .mod-chip .qdot, td.name-col .qdot { font-size: 9px; }
-    .bcn-chip .qdot, .mod-chip .qdot { margin-left: 1px; }
+    .bcn-chip .qdot, .mod-chip .qdot, td.name-col .qdot { width: 5px; height: 5px; }
     .bcn-sep { margin: 0 3px; }
 
     /* ── Issues ── */
@@ -364,7 +382,9 @@
 
     /* ── Dialog ── */
     dialog { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
-             color: var(--text); padding: 20px; width: 480px; max-width: 90vw; font-family: inherit; }
+             color: var(--text); padding: 20px; width: 480px; max-width: 90vw; font-family: inherit;
+             box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+    [data-theme="light"] dialog { box-shadow: 0 20px 50px rgba(0,0,0,.18); }
     dialog::backdrop { background: rgba(0,0,0,.6); }
     dialog h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900;
                 letter-spacing: .05em; text-transform: uppercase; margin-bottom: 6px; color: var(--text); }
@@ -396,7 +416,7 @@
                 font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
                 letter-spacing: .05em; text-transform: uppercase; cursor: pointer; transition: background .12s, color .12s; }
     .loc-btn:hover:not(.active) { background: var(--border); color: var(--text); }
-    .loc-btn.active { background: var(--accent); color: #1c1508; border-color: var(--accent); }
+    .loc-btn.active { background: var(--bg-input); color: var(--accent); border-color: var(--accent); border-bottom: 2px solid var(--accent); }
 
     /* ── Science location chips ── */
     .sci-loc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -572,7 +592,7 @@ function label(id) {
 function machineLabel(id) { return MACHINE_NAMES[id] || label(id); }
 function humanizeText(text) {
   return String(text).replace(
-    /\bAM[123]\b|assembling-machine-[123]|[a-z]+(?:-[a-z0-9]+)+/g,
+    /\bAM[123]\b|assembling-machine-[123]|\b[a-z]+(?:-[a-z0-9]+)+/g,
     t => MACHINE_NAMES[t] || label(t),
   );
 }
@@ -713,7 +733,6 @@ function renderHeader() {
       <div class="header-left">
         <div class="header-title-row">
           <span class="header-title">10x Factorio Engineer</span>
-          ${renderStoragePill()}
         </div>
         <div class="header-save">${esc(save_name)}</div>
       </div>
@@ -738,6 +757,7 @@ function renderHeader() {
           <button class="btn" id="btn-export">↓ Export</button>
           <button class="btn" id="btn-import">↑ Import</button>
           <button class="btn" id="btn-theme" title="Toggle light/dark mode">${document.documentElement.getAttribute('data-theme') === 'light' ? '☾ Dark' : '☀ Light'}</button>
+          ${renderStoragePill()}
           <button class="btn-ghost" id="btn-reset" title="Reset all factory data">↺</button>
         </div>
       </div>
@@ -783,7 +803,9 @@ function renderScience() {
   const spmCol = statusColor(spmPct);
   const spmHeadline = `
     <div class="spm-headline">
-      <span class="spm-number" style="color:${spmCol}">${Math.round(effectiveSPM)} / ${targetSPM}</span>
+      <span class="spm-number" style="color:${spmCol}">${Math.round(effectiveSPM)}</span>
+      <span class="spm-sep">/</span>
+      <span class="spm-target">${targetSPM}</span>
       <span class="spm-label">SPM</span>
     </div>`;
 
@@ -794,7 +816,8 @@ function renderScience() {
     const p = pct(actual, targetSPM);
     const {solid, dark} = sciStyle(name);
     const col = statusColor(p);
-    const locChips = (STATE.dataset ?? 'vanilla') === 'vanilla' ? '' : (info?.byLoc ?? []).map(e =>
+    const locCount = (STATE.locations ?? []).length;
+    const locChips = locCount <= 1 ? '' : (info?.byLoc ?? []).map(e =>
       `<span class="sci-loc-chip">${esc(e.label)} ${fmtN(e.rate)}/min</span>`
     ).join('');
     return `
@@ -817,7 +840,7 @@ function renderScience() {
 
   return `
     <div class="science-section">
-      <div class="section-label">Science Targets</div>
+      <div class="group-label">Science Targets</div>
       ${spmHeadline}
       <div class="science-grid${keys.length >= 4 ? ' cols-2' : ''}">${bars}</div>
     </div>`;
@@ -929,7 +952,7 @@ function renderBusBalance() {
 
   return `
     <div class="bus-section">
-      <div class="section-label">Bus Balance</div>
+      <div class="group-label">Bus Balance</div>
       ${solidGroup}${fluidGroup}
     </div>`;
 }
@@ -939,7 +962,7 @@ function renderTabs() {
   const tabs = [
     ['overview', 'Overview'],
     ['lines',    `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
-    ['issues',   `Actions${(loc.bottlenecks?.length || loc.next_steps?.length) ? ` (${(loc.bottlenecks?.length ?? 0) + (loc.next_steps?.length ?? 0)})` : ''}`],
+    ['issues',   `Actions${loc.next_steps?.length ? ` (${loc.next_steps.length})` : ''}`],
     ['chat',     'Chat'],
   ];
   return `
@@ -1001,7 +1024,7 @@ function renderLinesTab() {
   let html = '';
   for (const [name, lines] of groups) {
     if (!lines.length) continue;
-    html += `<div class="section-label" style="margin:12px 0 8px">${name}</div>`;
+    html += `<div class="group-label" style="margin:12px 0 8px">${name}</div>`;
     html += lines.map(l => renderLineCard(l, idxMap.get(l))).join('');
   }
   return html;
@@ -1131,7 +1154,7 @@ function renderLineCard(line, idx) {
   const displayRate = line.wip ? (line.target_rate ?? 0) : actual;
   return `
     <div class="line-card ${cardClass}">
-      <div class="card-header ${cardClass}" data-card="${idx}">
+      <div class="card-header ${cardClass}" data-card="${idx}" aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'}">
         <div class="card-header-left">
           <span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
           <div class="card-title-group">
@@ -1150,24 +1173,20 @@ function renderLineCard(line, idx) {
 
 function renderIssues() {
   const loc = currentLoc();
-  const bn = loc.bottlenecks ?? [];
-  const ns = loc.next_steps  ?? [];
-  if (!bn.length && !ns.length)
-    return '<div class="no-issues">✓ No bottlenecks or next steps.</div>';
-  const bnHtml = bn.length ? [
-    `<div class="section-label" style="margin-bottom:8px">Bottlenecks</div>`,
-    ...bn.map(b => `<div class="issue-item bad"><span>⚠</span><span>${esc(humanizeText(b))}</span></div>`),
-  ] : [];
-  const nsHtml = ns.length ? [
-    `<div class="section-label" style="margin:${bn.length ? '14px' : '0'} 0 8px">Next Steps</div>`,
+  const ns = loc.next_steps ?? [];
+  if (!ns.length)
+    return '<div class="no-issues">✓ No next steps.</div>';
+  const nsHtml = [
+    `<div class="group-label" style="margin-bottom:8px">Next Steps</div>`,
     ...ns.map(s => `<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`),
-  ] : [];
-  return [...bnHtml, ...nsHtml].join('');
+  ];
+  return nsHtml.join('');
 }
 
 function renderChat() {
   const avail = typeof window.claude?.complete === 'function';
-  const warning = avail ? '' : `<div class="chat-warning">window.claude.complete is not available — sign into Claude.ai for chat to work.</div>`;
+  const warnDismissed = localStorage.getItem('chat_warn_dismissed') === '1';
+  const warning = (avail || warnDismissed) ? '' : `<div class="chat-warning" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><span>window.claude.complete is not available — sign into Claude.ai for chat to work.</span><button class="btn-cancel" style="padding:0 6px;height:auto;font-size:10px;flex-shrink:0" id="btn-dismiss-chat-warn">✕</button></div>`;
   const msgs = STATE.chat_log.length
     ? STATE.chat_log.map(e => `
         <div class="chat-msg ${e.from}">
@@ -1194,14 +1213,16 @@ function render() {
   document.getElementById('app').innerHTML = `
     ${renderHeader()}
     <div class="main">
-      ${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
-      ${(STATE.dataset ?? 'vanilla') !== 'vanilla' ? renderLocationBar() : ''}
-      ${renderBottlenecks()}
-      ${renderTabs()}
-      <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
-      <div class="tab-panel${activeTab==='lines'  ?' active':''}">${renderLinesTab()}</div>
-      <div class="tab-panel${activeTab==='issues' ?' active':''}">${renderIssues()}</div>
-      <div class="tab-panel${activeTab==='chat'   ?' active':''}">${renderChat()}</div>
+      <div class="main-inner">
+        ${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
+        ${(STATE.dataset ?? 'vanilla') !== 'vanilla' ? renderLocationBar() : ''}
+        ${renderBottlenecks()}
+        ${renderTabs()}
+        <div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
+        <div class="tab-panel${activeTab==='lines'  ?' active':''}">${renderLinesTab()}</div>
+        <div class="tab-panel${activeTab==='issues' ?' active':''}">${renderIssues()}</div>
+        <div class="tab-panel${activeTab==='chat'   ?' active':''}">${renderChat()}</div>
+      </div>
     </div>`;
   bindEvents();
   if (activeTab === 'chat') scrollChat();
@@ -1265,6 +1286,12 @@ function bindEvents() {
     if (confirm('Reset all factory data? This cannot be undone.')) {
       STATE = { ...DEFAULT_STATE }; activeLocationIdx = 0; saveState(); render();
     }
+  });
+
+  const btnDismissChatWarn = document.getElementById('btn-dismiss-chat-warn');
+  if (btnDismissChatWarn) btnDismissChatWarn.addEventListener('click', () => {
+    localStorage.setItem('chat_warn_dismissed', '1');
+    render();
   });
 
   const btnSend  = document.getElementById('btn-send');

@@ -393,8 +393,8 @@ def make_state_with_bottleneck() -> dict:
         "nauvis", "Nauvis",
         lines=lines,
         bottlenecks=[
-            "Petroleum-gas bus at 400/min; processing-unit line needs 510/min — 110/min short.",
-            "Iron-plate bus undersupplied by 240/min during peak hours.",
+            "petroleum-gas bus at 400/min; processing-unit line needs 510/min — 110/min short.",
+            "iron-plate bus undersupplied by 240/min during peak hours.",
         ],
         next_steps=[
             "Expand pumpjack field or add heavy-oil cracking to close petroleum-gas gap.",
@@ -551,6 +551,7 @@ async def capture_section(context, state, selector, tab, out_path,
         page = await context.new_page()
         await page.goto(f"file://{tmp_path}?tab={tab}{url_suffix}")
         await page.wait_for_selector(selector, timeout=10_000)
+        await page.evaluate("document.fonts.ready")
         await page.wait_for_timeout(200)
         await page.locator(selector).first.screenshot(path=out_path)
         await page.close()
@@ -576,6 +577,7 @@ async def run_quality_combinations(context):
             page = await context.new_page()
             await page.goto(f"file://{tmp_path}?tab=lines&expand=all")
             await page.wait_for_selector(".line-card", timeout=10_000)
+            await page.evaluate("document.fonts.ready")
             await page.wait_for_timeout(200)
 
             card = page.locator(".line-card").first
