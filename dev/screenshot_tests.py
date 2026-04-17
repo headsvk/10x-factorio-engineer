@@ -627,7 +627,7 @@ async def capture_full_page(context, state, tab, out_path, light_theme=False):
         await page.wait_for_selector(".tab-panel.active", timeout=10_000)
         await page.evaluate("document.fonts.ready")
         await page.wait_for_timeout(300)
-        await page.screenshot(path=out_path)
+        await page.screenshot(path=out_path, full_page=True)
         await page.close()
     finally:
         os.unlink(tmp_path)
