@@ -82,7 +82,7 @@ def build_html(state: dict, light_theme: bool = False) -> str:
     encoded = encode_state(state)
     with open(DASHBOARD_SRC, encoding="utf-8") as f:
         html = f.read()
-    theme_line = "localStorage.setItem('theme', 'light');\n" if light_theme else ""
+    theme_line = f"localStorage.setItem('theme', '{'light' if light_theme else 'dark'}');\n"
     seed = (
         f"<script>\n"
         f"{theme_line}"
