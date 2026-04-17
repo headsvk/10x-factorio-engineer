@@ -158,6 +158,12 @@ python -m unittest dev.test_cli -v
 
 See [SKILL.md §3](10x-factorio-engineer/SKILL.md) for the factory state schema shared by the skill and the dashboard.
 
+### Dashboard screenshots
+
+| Dark theme | Light theme |
+|:----------:|:-----------:|
+| ![Dashboard dark](dev/screenshots/readme__dark.png) | ![Dashboard light](dev/screenshots/readme__light.png) |
+
 ### Building the dashboard
 
 ```bash
@@ -182,16 +188,9 @@ the same data that powers <https://kirkmcdonald.github.io/calc.html>.
 ### CLI / Calculator
 
 - **Quality recycling loops** — model the throughput cost of quality recycling lines for legendary production
-- **Multi-target solve** — one CLI call for a full science block with shared intermediates deduplicated
-
-### Dashboard
-
-- **Factorio icons** — item and machine icons throughout the UI
-- **Per-location tabs** — separate production lines, miners, and power totals per planet (Nauvis, Vulcanus, Gleba, Fulgora, Aquilo) and per space platform; players can have multiple named platforms
 
 ### Skill / Workflow
 
-- **Structured onboarding** — ask dataset → assembler → furnace → prod module tier upfront
 - **GitHub Actions: skill zip** — bundle `SKILL.md`, `assets/`, and `references/` into a `.zip` for claude.ai project knowledge
 
 ### Infra

@@ -6,6 +6,7 @@ Groups:
   1. 30 machine-quality × beacon-quality combinations (line cards, expanded)
   2. 13 dashboard section / tab screenshots (header, science, location bar, etc.)
   3. 7 expanded line card variants from real CLI data (planet-specific machines)
+  4. 2 full-page README screenshots (dark + light theme)
 
 Usage:
     pip install playwright
@@ -81,7 +82,7 @@ def build_html(state: dict, light_theme: bool = False) -> str:
     encoded = encode_state(state)
     with open(DASHBOARD_SRC, encoding="utf-8") as f:
         html = f.read()
-    theme_line = "localStorage.setItem('theme', 'light');\n" if light_theme else ""
+    theme_line = f"localStorage.setItem('theme', '{'light' if light_theme else 'dark'}');\n"
     seed = (
         f"<script>\n"
         f"{theme_line}"
@@ -536,6 +537,58 @@ LINE_CARD_SCENARIOS = [
 ]
 
 
+# ── Group 4: README full-page screenshots ────────────────────────────────────
+
+def make_state_readme() -> dict:
+    """Rich multi-planet state that showcases science overview, bus balance, and a bottleneck."""
+    state = _base_state("Mid-Game Factory")
+    state["module_configs"] = {"assembling-machine-3": MACHINE_MODULE_CONFIGS["normal"]}
+    bus_items = [
+        {"item": "iron-plate",    "rate": 7200},
+        {"item": "copper-plate",  "rate": 10800},
+        {"item": "steel-plate",   "rate": 1800},
+        {"item": "petroleum-gas", "rate": 400, "fluid": True},
+    ]
+    lines = [
+        make_minimal_line("automation-science-pack",  "Automation Science",  90,  90,
+                          bus_inputs={"iron-plate": 90}),
+        make_minimal_line("logistic-science-pack",    "Logistic Science",    90,  72,
+                          bus_inputs={"iron-plate": 72, "copper-plate": 72}),
+        make_minimal_line("chemical-science-pack",    "Chemical Science",    90,  45,
+                          bus_inputs={"copper-plate": 135, "petroleum-gas": 405}),
+        make_minimal_line("military-science-pack",    "Military Science",    90,   0),
+        make_minimal_line("electronic-circuit",       "Green Circuits",     1800, 1800,
+                          bus_inputs={"iron-plate": 1800, "copper-plate": 5400}),
+    ]
+    state["locations"] = [
+        _loc("nauvis", "Nauvis",
+             lines=lines,
+             bus_items=bus_items,
+             targets={
+                 "automation-science-pack": 90,
+                 "logistic-science-pack": 90,
+                 "chemical-science-pack": 90,
+                 "military-science-pack": 90,
+             },
+             bottlenecks=[
+                 "petroleum-gas bus at 400/min; chemical-science-pack needs 405/min — 5/min short.",
+             ],
+             next_steps=[
+                 "Add 1 more oil refinery or expand cracking to close petroleum-gas gap.",
+                 "Build military-science-pack line: 6 assembling-machine-3s.",
+             ]),
+        _loc("vulcanus", "Vulcanus", lines=[]),
+    ]
+    return state
+
+
+README_SCENARIOS = [
+    # (filename,             state_factory,    tab,        light)
+    ("readme__dark.png",   make_state_readme, "overview", False),
+    ("readme__light.png",  make_state_readme, "overview", True),
+]
+
+
 # ── Playwright helpers ────────────────────────────────────────────────────────
 
 async def capture_section(context, state, selector, tab, out_path,
@@ -554,6 +607,27 @@ async def capture_section(context, state, selector, tab, out_path,
         await page.evaluate("document.fonts.ready")
         await page.wait_for_timeout(200)
         await page.locator(selector).first.screenshot(path=out_path)
+        await page.close()
+    finally:
+        os.unlink(tmp_path)
+
+
+async def capture_full_page(context, state, tab, out_path, light_theme=False):
+    """Render state and screenshot the full viewport (header + tabs + content)."""
+    html = build_html(state, light_theme=light_theme)
+    with tempfile.NamedTemporaryFile(
+        suffix=".html", mode="w", encoding="utf-8", delete=False
+    ) as tmp:
+        tmp.write(html)
+        tmp_path = tmp.name
+    try:
+        page = await context.new_page()
+        await page.set_viewport_size({"width": 900, "height": 720})
+        await page.goto(f"file://{tmp_path}?tab={tab}")
+        await page.wait_for_selector(".tab-panel.active", timeout=10_000)
+        await page.evaluate("document.fonts.ready")
+        await page.wait_for_timeout(300)
+        await page.screenshot(path=out_path, full_page=True)
         await page.close()
     finally:
         os.unlink(tmp_path)
@@ -633,6 +707,21 @@ async def run_line_card_variants(context):
     return total
 
 
+async def run_readme_screenshots(context):
+    total = 0
+    for filename, state_factory, tab, light_theme in README_SCENARIOS:
+        state    = state_factory()
+        out_path = os.path.join(SCREENSHOTS_DIR, filename)
+        theme_tag = " [light]" if light_theme else " [dark]"
+        try:
+            await capture_full_page(context, state, tab, out_path, light_theme=light_theme)
+            total += 1
+            print(f"  readme   {filename}{theme_tag}")
+        except Exception as exc:
+            print(f"  SKIP     {filename} — {exc}")
+    return total
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def run():
@@ -654,9 +743,12 @@ async def run():
         print("\n── Group 3: line card variants ──")
         n3 = await run_line_card_variants(context)
 
+        print("\n── Group 4: README screenshots ──")
+        n4 = await run_readme_screenshots(context)
+
         await browser.close()
 
-    total = n1 + n2 + n3
+    total = n1 + n2 + n3 + n4
     print(f"\nDone — {total} screenshots saved to {SCREENSHOTS_DIR}/")
 
 
