@@ -552,7 +552,7 @@ const DEFAULT_STATE = {
 const PRODUCTIVITY_RESEARCH = {
   'mining-productivity':                { label: 'Mining',              recipes: [],                                                                  sa: false },
   'steel-productivity':                 { label: 'Steel',               recipes: ['steel-plate', 'casting-steel'],                                    sa: true  },
-  'low-density-structure-productivity': { label: 'Low-Density Struct.', recipes: ['low-density-structure', 'casting-low-density-structure'],          sa: true  },
+  'low-density-structure-productivity': { label: 'Low-Density Structure', recipes: ['low-density-structure', 'casting-low-density-structure'],          sa: true  },
   'scrap-recycling-productivity':       { label: 'Scrap Recycling',     recipes: ['scrap-recycling'],                                                 sa: true  },
   'processing-unit-productivity':       { label: 'Processing Unit',     recipes: ['processing-unit'],                                                 sa: true  },
   'plastic-bar-productivity':           { label: 'Plastic Bar',         recipes: ['plastic-bar', 'bioplastic'],                                       sa: true  },
@@ -958,7 +958,7 @@ function renderResearch() {
     <div class="research-body">
       <div class="research-grid">
         ${mining}
-        ${isSA ? `<div class="research-subgroup-label">Space Age — Recipe Prod (capped at +300%)</div>${saRows}` : ''}
+        ${isSA ? `<div class="research-subgroup-label">Space Age — Recipe Productivity (capped at +300%)</div>${saRows}` : ''}
       </div>
     </div>` : '';
 

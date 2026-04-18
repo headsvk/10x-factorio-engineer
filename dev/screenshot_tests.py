@@ -4,8 +4,8 @@ Generate screenshots of the dashboard across all major visual states.
 
 Groups:
   1. 30 machine-quality × beacon-quality combinations (line cards, expanded)
-  2. 13 dashboard section / tab screenshots (header, science, location bar, etc.)
-  3. 7 expanded line card variants from real CLI data (planet-specific machines)
+  2. 15 dashboard section / tab screenshots (header, science, research, location bar, etc.)
+  3. 9 expanded line card variants (planet-specific machines + research stale/capped chips)
   4. 2 full-page README screenshots (dark + light theme)
 
 Usage:
@@ -233,6 +233,7 @@ def _base_state(save_name="Test Factory", dataset="space-age") -> dict:
         "beacon_configs": {},
         "recipe_overrides": {},
         "machine_overrides": {},
+        "research_levels": {},
         "preferred_belt": "blue",
         "chat_log": [],
     }
@@ -422,21 +423,117 @@ def make_state_chat() -> dict:
     return state
 
 
+def make_state_research() -> dict:
+    """Research section with 2 active levels — mining=5, steel=3 (space-age)."""
+    state = _base_state("Research Tracking", dataset="space-age")
+    state["research_levels"] = {
+        "mining-productivity": 5,
+        "steel-productivity": 3,
+    }
+    state["locations"] = [_loc(
+        "nauvis", "Nauvis",
+        lines=[make_minimal_line("steel-plate", "Steel Plate", 60, 60)],
+    )]
+    return state
+
+
+def make_state_line_research_stale() -> dict:
+    """Line card showing ⟳ stale chip — mining-prod level changed since CLI run."""
+    state = _base_state("Stale Research")
+    state["research_levels"] = {"mining-productivity": 5}
+    cli_result = {
+        "item": "iron-ore",
+        "rate_per_min": 120.0,
+        "production_steps": [],
+        "raw_resources": {"iron-ore": 120.0},
+        "co_products": {},
+        "miners_needed": {
+            "iron-ore": {
+                "machine": "electric-mining-drill",
+                "machine_count": 12.0,
+                "machine_count_ceil": 12,
+                "power_kw": 540.0,
+                "beacon_power_kw": 0.0,
+            }
+        },
+        "total_power_mw": 0.54,
+        "total_power_mw_ceil": 0.54,
+        "bus_inputs": {},
+        "research_levels": {},
+    }
+    state["locations"] = [_loc(
+        "nauvis", "Nauvis",
+        lines=[{
+            "item": "iron-ore",
+            "label": "Iron Ore Mining",
+            "target_rate": 120,
+            "effective_rate": 120,
+            "cli_result": cli_result,
+        }],
+    )]
+    return state
+
+
+def make_state_line_research_capped() -> dict:
+    """Line card showing @300% cap chip — a recipe step is at the prod cap."""
+    state = _base_state("Capped Research", dataset="space-age")
+    state["research_levels"] = {"steel-productivity": 50}
+    step = {
+        "recipe": "steel-plate",
+        "machine": "electric-furnace",
+        "machine_count": 4.0,
+        "machine_count_ceil": 4,
+        "outputs": {"steel-plate": 30.0},
+        "inputs": {"iron-plate": 150.0},
+        "machine_quality": "normal",
+        "beacon_speed_bonus": 0.0,
+        "power_kw": 360.0,
+        "power_kw_ceil": 360.0,
+        "beacon_power_kw": 0.0,
+    }
+    cli_result = {
+        "item": "steel-plate",
+        "rate_per_min": 30.0,
+        "production_steps": [step],
+        "raw_resources": {"iron-plate": 150.0},
+        "co_products": {},
+        "miners_needed": {},
+        "total_power_mw": 0.36,
+        "total_power_mw_ceil": 0.36,
+        "bus_inputs": {},
+        "research_levels": {"steel-productivity": 50},
+        "research_prod_capped": True,
+    }
+    state["locations"] = [_loc(
+        "nauvis", "Nauvis",
+        lines=[{
+            "item": "steel-plate",
+            "label": "Steel Plate",
+            "target_rate": 30,
+            "effective_rate": 30,
+            "cli_result": cli_result,
+        }],
+    )]
+    return state
+
+
 SECTION_SCENARIOS = [
-    # (filename,                            state_factory,               selector,             tab,       light)
-    ("section__header-badges.png",          make_state_header_badges,    ".header",            "overview", False),
-    ("section__science-vanilla.png",        make_state_science_vanilla,  ".science-section",   "overview", False),
-    ("section__science-space-age.png",      make_state_science_space_age,".science-section",   "overview", False),
-    ("section__location-bar.png",           make_state_location_bar,     ".loc-bar",           "overview", False),
-    ("section__bottleneck-banner.png",      make_state_with_bottleneck,  ".bottleneck-banner", "overview", False),
-    ("section__tab-list.png",               make_state_with_bottleneck,  ".tab-list",          "overview", False),
-    ("section__bus-balance.png",            make_state_bus_balance,      ".bus-section",       "overview", False),
-    ("tab__overview.png",                   make_state_overview,         ".tab-panel.active",  "overview", False),
-    ("tab__lines-collapsed.png",            make_state_lines_statuses,   ".tab-panel.active",  "lines",    False),
-    ("tab__actions.png",                    make_state_with_bottleneck,  ".tab-panel.active",  "issues",   False),
-    ("tab__chat.png",                       make_state_chat,             ".tab-panel.active",  "chat",     False),
-    ("light__tab-lines-collapsed.png",      make_state_lines_statuses,   ".tab-panel.active",  "lines",    True),
-    ("light__section-science-vanilla.png",  make_state_science_vanilla,  ".science-section",   "overview", True),
+    # (filename,                            state_factory,               selector,             tab,       light,  pre_click)
+    ("section__header-badges.png",          make_state_header_badges,    ".header",            "overview", False,  None),
+    ("section__science-vanilla.png",        make_state_science_vanilla,  ".science-section",   "overview", False,  None),
+    ("section__science-space-age.png",      make_state_science_space_age,".science-section",   "overview", False,  None),
+    ("section__location-bar.png",           make_state_location_bar,     ".loc-bar",           "overview", False,  None),
+    ("section__bottleneck-banner.png",      make_state_with_bottleneck,  ".bottleneck-banner", "overview", False,  None),
+    ("section__tab-list.png",               make_state_with_bottleneck,  ".tab-list",          "overview", False,  None),
+    ("section__bus-balance.png",            make_state_bus_balance,      ".bus-section",       "overview", False,  None),
+    ("section__research-collapsed.png",     make_state_research,         ".research-section",  "overview", False,  None),
+    ("section__research-expanded.png",      make_state_research,         ".research-section",  "overview", False,  "#research-toggle"),
+    ("tab__overview.png",                   make_state_overview,         ".tab-panel.active",  "overview", False,  None),
+    ("tab__lines-collapsed.png",            make_state_lines_statuses,   ".tab-panel.active",  "lines",    False,  None),
+    ("tab__actions.png",                    make_state_with_bottleneck,  ".tab-panel.active",  "issues",   False,  None),
+    ("tab__chat.png",                       make_state_chat,             ".tab-panel.active",  "chat",     False,  None),
+    ("light__tab-lines-collapsed.png",      make_state_lines_statuses,   ".tab-panel.active",  "lines",    True,   None),
+    ("light__section-science-vanilla.png",  make_state_science_vanilla,  ".science-section",   "overview", True,   None),
 ]
 
 
@@ -534,21 +631,49 @@ LINE_CARD_SCENARIOS = [
     ("line-card__holmium-fulgora.png",     make_state_line_holmium_fulgora),
     ("line-card__cryogenic-aquilo.png",    make_state_line_cryogenic_aquilo),
     ("line-card__space-crusher.png",       make_state_line_space_crusher),
+    ("line-card__research-stale.png",      make_state_line_research_stale),
+    ("line-card__research-capped.png",     make_state_line_research_capped),
 ]
 
 
 # ── Group 4: README full-page screenshots ────────────────────────────────────
 
 def make_state_readme() -> dict:
-    """Rich multi-planet state that showcases science overview, bus balance, and a bottleneck."""
+    """Rich multi-planet state showcasing science, research, bus balance, and a bottleneck."""
     state = _base_state("Mid-Game Factory")
     state["module_configs"] = {"assembling-machine-3": MACHINE_MODULE_CONFIGS["normal"]}
+    state["research_levels"] = {
+        "mining-productivity": 12,
+        "steel-productivity":  5,
+    }
     bus_items = [
         {"item": "iron-plate",    "rate": 7200},
         {"item": "copper-plate",  "rate": 10800},
         {"item": "steel-plate",   "rate": 1800},
         {"item": "petroleum-gas", "rate": 400, "fluid": True},
     ]
+    # Iron ore line with stale chip: cli_result was computed at mining-prod 0,
+    # but STATE now has level 12 → triggers ⟳ stale on the card.
+    iron_ore_cli = {
+        "item": "iron-ore",
+        "rate_per_min": 1800.0,
+        "production_steps": [],
+        "raw_resources": {"iron-ore": 1800.0},
+        "co_products": {},
+        "miners_needed": {
+            "iron-ore": {
+                "machine": "electric-mining-drill",
+                "machine_count": 180.0,
+                "machine_count_ceil": 180,
+                "power_kw": 8100.0,
+                "beacon_power_kw": 0.0,
+            }
+        },
+        "total_power_mw": 8.1,
+        "total_power_mw_ceil": 8.1,
+        "bus_inputs": {},
+        "research_levels": {},
+    }
     lines = [
         make_minimal_line("automation-science-pack",  "Automation Science",  90,  90,
                           bus_inputs={"iron-plate": 90}),
@@ -559,6 +684,13 @@ def make_state_readme() -> dict:
         make_minimal_line("military-science-pack",    "Military Science",    90,   0),
         make_minimal_line("electronic-circuit",       "Green Circuits",     1800, 1800,
                           bus_inputs={"iron-plate": 1800, "copper-plate": 5400}),
+        {
+            "item": "iron-ore",
+            "label": "Iron Ore Mining",
+            "target_rate": 1800,
+            "effective_rate": 1800,
+            "cli_result": iron_ore_cli,
+        },
     ]
     state["locations"] = [
         _loc("nauvis", "Nauvis",
@@ -583,16 +715,16 @@ def make_state_readme() -> dict:
 
 
 README_SCENARIOS = [
-    # (filename,             state_factory,    tab,        light)
-    ("readme__dark.png",   make_state_readme, "overview", False),
-    ("readme__light.png",  make_state_readme, "overview", True),
+    # (filename,             state_factory,    tab,        light,  pre_click)
+    ("readme__dark.png",   make_state_readme, "overview", False,  "#research-toggle"),
+    ("readme__light.png",  make_state_readme, "overview", True,   "#research-toggle"),
 ]
 
 
 # ── Playwright helpers ────────────────────────────────────────────────────────
 
 async def capture_section(context, state, selector, tab, out_path,
-                           light_theme=False, url_suffix=""):
+                           light_theme=False, url_suffix="", pre_click=None):
     """Render state, navigate to tab, and screenshot the first matching element."""
     html = build_html(state, light_theme=light_theme)
     with tempfile.NamedTemporaryFile(
@@ -606,13 +738,16 @@ async def capture_section(context, state, selector, tab, out_path,
         await page.wait_for_selector(selector, timeout=10_000)
         await page.evaluate("document.fonts.ready")
         await page.wait_for_timeout(200)
+        if pre_click:
+            await page.locator(pre_click).first.click()
+            await page.wait_for_timeout(150)
         await page.locator(selector).first.screenshot(path=out_path)
         await page.close()
     finally:
         os.unlink(tmp_path)
 
 
-async def capture_full_page(context, state, tab, out_path, light_theme=False):
+async def capture_full_page(context, state, tab, out_path, light_theme=False, pre_click=None):
     """Render state and screenshot the full viewport (header + tabs + content)."""
     html = build_html(state, light_theme=light_theme)
     with tempfile.NamedTemporaryFile(
@@ -627,6 +762,9 @@ async def capture_full_page(context, state, tab, out_path, light_theme=False):
         await page.wait_for_selector(".tab-panel.active", timeout=10_000)
         await page.evaluate("document.fonts.ready")
         await page.wait_for_timeout(300)
+        if pre_click:
+            await page.locator(pre_click).first.click()
+            await page.wait_for_timeout(150)
         await page.screenshot(path=out_path, full_page=True)
         await page.close()
     finally:
@@ -670,13 +808,13 @@ async def run_quality_combinations(context):
 
 async def run_sections(context):
     total = 0
-    for filename, state_factory, selector, tab, light_theme in SECTION_SCENARIOS:
+    for filename, state_factory, selector, tab, light_theme, pre_click in SECTION_SCENARIOS:
         state    = state_factory()
         out_path = os.path.join(SCREENSHOTS_DIR, filename)
         theme_tag = " [light]" if light_theme else ""
         try:
             await capture_section(context, state, selector, tab, out_path,
-                                   light_theme=light_theme)
+                                   light_theme=light_theme, pre_click=pre_click)
             total += 1
             print(f"  section  {filename}{theme_tag}")
         except Exception as exc:
@@ -709,12 +847,13 @@ async def run_line_card_variants(context):
 
 async def run_readme_screenshots(context):
     total = 0
-    for filename, state_factory, tab, light_theme in README_SCENARIOS:
+    for filename, state_factory, tab, light_theme, pre_click in README_SCENARIOS:
         state    = state_factory()
         out_path = os.path.join(SCREENSHOTS_DIR, filename)
         theme_tag = " [light]" if light_theme else " [dark]"
         try:
-            await capture_full_page(context, state, tab, out_path, light_theme=light_theme)
+            await capture_full_page(context, state, tab, out_path,
+                                    light_theme=light_theme, pre_click=pre_click)
             total += 1
             print(f"  readme   {filename}{theme_tag}")
         except Exception as exc:
@@ -724,11 +863,23 @@ async def run_readme_screenshots(context):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def _find_chromium() -> dict:
+    """Return kwargs for p.chromium.launch() with a working executable path."""
+    candidates = [
+        "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+        "/opt/pw-browsers/chromium/chrome-linux/chrome",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return {"executable_path": path}
+    return {}
+
+
 async def run():
     os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        browser = await p.chromium.launch(**_find_chromium())
         context = await browser.new_context(
             viewport={"width": 900, "height": 600},
             device_scale_factor=2,
