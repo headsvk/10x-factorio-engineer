@@ -9,6 +9,10 @@
   "beacon_configs": {},
   "recipe_overrides": {},
   "machine_overrides": {},
+  "research_levels": {
+    "mining-productivity": 3,
+    "steel-productivity": 2
+  },
   "preferred_belt": "blue",
   "locations": [
     {

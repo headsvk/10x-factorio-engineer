@@ -34,7 +34,7 @@ involving machine counts, raw resource rates, belt counts, or throughput.
 ### Invocation pattern
 
 ```bash
-python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --step-machines RECIPE=N) [--item <item-id2> (--rate <N2> | --machines <N2>) ...] [OPTIONS]
+python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --step-machines RECIPE=N) [--item <item-id2> (--rate <N2> | --machines <N2>) ...] [--research NAME=LEVEL ...] [OPTIONS]
 ```
 
 | Option | Default | Notes |
@@ -56,6 +56,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --s
 | `--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Per-recipe module override; repeatable |
 | `--recipe-beacon RECIPE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY[+...]` | _(none)_ | Per-recipe beacon override; same value format as `--beacon`. Repeatable. |
 | `--bus-item ITEM-ID` | _(none)_ | Treat item as a bus input (raw resource); stops recursion at this item; repeatable |
+| `--research NAME=LEVEL` | _(none)_ | Infinite productivity research level. `NAME` is one of `mining-productivity`, `steel-productivity`, `low-density-structure-productivity`, `scrap-recycling-productivity`, `processing-unit-productivity`, `plastic-bar-productivity`, `rocket-fuel-productivity`, `asteroid-productivity`, `rocket-part-productivity`. `LEVEL` is an integer ≥ 0, each level = +10 % prod. `mining-productivity` multiplies every drill/pumpjack yield (not `offshore-pump`) and is uncapped. The other techs add to recipe prod on the recipes listed in §3.1 and are capped at **+300 % total machine prod** (sum of module prod + research prod). Repeatable. |
 | `--format json/human` | `json` | Output format. **Always omit this flag** (defaults to `json`) — `--format human` is for human terminal reading only, not for Claude's programmatic use. |
 
 **Module TYPE values (machine modules):** `prod` / `speed` / `efficiency`
@@ -105,6 +106,9 @@ python assets/cli.py --item electronic-circuit --rate 60 --item automation-scien
 
 # Constrain intermediate step: 8 centrifuges for uranium processing, derive fuel cell rate
 python assets/cli.py --item uranium-fuel-cell --step-machines uranium-processing=8
+
+# Infinite research: mining prod L5 + steel prod L3 (applies to every affected line)
+python assets/cli.py --item steel-plate --rate 60 --research mining-productivity=5 --research steel-productivity=3
 ```
 
 ### Reading the output
@@ -152,7 +156,9 @@ The CLI emits JSON to stdout. Example:
   "recipe_overrides": { "heavy-oil": "coal-liquefaction" },
   "recipe_machine_overrides": { "iron-gear-wheel": "foundry" },
   "recipe_module_overrides": { "iron-gear-wheel": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}] },
-  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]} }
+  "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]} },
+  "research_levels": { "mining-productivity": 5, "steel-productivity": 3 },
+  "research_prod_capped": true
 }
 ```
 
@@ -161,7 +167,7 @@ The CLI emits JSON to stdout. Example:
 | `item` + `rate_per_min` | Present in single-target output; the requested item and rate |
 | `targets` | Present in multi-target output (2+ `--item` flags); array of `{item, rate_per_min}` objects instead of top-level `item`/`rate_per_min` |
 | `location` | string or null | `"vulcanus"` / `null` (vanilla) | Location passed via `--location`; `null` means vanilla (no planet filtering) |
-| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `inputs` (ingredient consumption rates in items/min), `machine_quality` (always), `module_specs` (if modules applied), `beacon_spec` + `beacon_quality` (if beacon applied), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw` |
+| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `inputs` (ingredient consumption rates in items/min), `machine_quality` (always), `module_specs` (if modules applied), `beacon_spec` + `beacon_quality` (if beacon applied), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw`, `prod_capped` (`true` when total machine prod for this step was clamped to +300 %; omitted otherwise) |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw`; `module_specs` present when modules applied to the drill |
 | `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |
@@ -173,6 +179,8 @@ The CLI emits JSON to stdout. Example:
 | `recipe_machine_overrides` | Present when `--recipe-machine` was passed |
 | `recipe_module_overrides` | Present when `--recipe-modules` was passed |
 | `recipe_beacon_overrides` | Present when `--recipe-beacon` was passed |
+| `research_levels` | Present when `--research` was passed; `{name: level_int}` echoing the non-zero research levels applied to the solve |
+| `research_prod_capped` | `true` when any crafting step hit the +300 % total-prod cap (module + research); omitted when no cap was hit. Useful UX signal that more research levels won't help those steps. |
 | `bus_inputs` | Present when `--bus-item` was passed; `{item: rate_per_min}` for items sourced from the bus (separate from `raw_resources`, which contains only true raws like ores) |
 
 Notes:
@@ -240,6 +248,16 @@ working context and update it after every player message.
     // item-id → recipe-key; each entry becomes --recipe ITEM=RECIPE
     // e.g. "heavy-oil": "coal-liquefaction"
   },
+
+  // Infinite productivity research levels — account-wide, shared across all locations.
+  // Each non-zero entry becomes --research NAME=LEVEL on every cli.py invocation.
+  // Absent key or 0 = no bonus. See §3.1 for the research → recipe map.
+  "research_levels": {
+    // e.g. "mining-productivity": 5,
+    //      "steel-productivity": 3,
+    //      "processing-unit-productivity": 10
+  },
+
   "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — lead with this tier in answers (shared)
 
   // ── Per-location data ────────────────────────────────────────────────────────
@@ -328,6 +346,10 @@ When a player says something like:
 - *"I have N red belts of iron plate on the bus"* → add/update `bus_items` entry: `{ "item": "iron-plate", "rate": N × 1800 }`. Belt throughputs: yellow=900, red=1800, blue=2700, turbo=3600 items/min. For new lines that draw iron-plate from the bus, add `--bus-item iron-plate` to the CLI call so `bus_inputs` is populated in the cli_result. If the player says a block has its own supply for an item that's also on the bus, run WITHOUT `--bus-item` for that item — the item appears in `raw_resources` instead and Bus Balance is unaffected.
 - When adding any new line where bus_items exist: apply `--bus-item ITEM` for ingredients the player says come from the bus. Mention the assumption once: *"I'll assume X, Y come from the bus since they're declared as bus items — let me know if any have their own miners/supply."*
 - When a new **production line** is added for a manufactured intermediate (plates, circuits, plastic, etc.), automatically add it to `bus_items` with the line's `effective_rate` as the rate. Exception: science packs and other end-product lines are not added to the bus.
+- *"I just finished mining productivity level 5"* → set `research_levels["mining-productivity"] = 5`, re-run CLI for every line (miner counts drop ~33 %).
+- *"I'm at level 3 steel productivity"* → set `research_levels["steel-productivity"] = 3`, re-run CLI for every line that touches `steel-plate` or `casting-steel`.
+- *"I have level 10 processing unit productivity"* → set `research_levels["processing-unit-productivity"] = 10`, re-run CLI for any line producing `processing-unit`.
+- Generic form: any *"level N X productivity"* where X matches one of the research names in §3.1 maps to a `research_levels` entry. Re-run CLI for every line whose recipe list in §3.1 intersects the affected recipes.
 
 Always re-derive `bottlenecks` after any state change:
 - A line is a bottleneck if `effective_rate < target_rate * 0.95`.
@@ -338,6 +360,28 @@ Always re-derive `bottlenecks` after any state change:
 full kebab-case machine ID (e.g. `assembling-machine-3`, `electric-furnace`),
 never shorthand like `AM3`. The dashboard's `humanizeText()` function converts
 these IDs to friendly names automatically.
+
+### 3.1 Research productivity map
+
+Each infinite research tech is 1-to-many with recipes. When the player levels a
+tech, every recipe in its list moves together (+10 % prod per level, summed with
+module prod, clamped to +300 % total for crafting recipes only).
+
+| Research name (state key) | Recipes affected | Cap applies? |
+|---------------------------|------------------|--------------|
+| `mining-productivity` | all mining-drill / pumpjack yields (excluding `offshore-pump`) | **no** — uncapped |
+| `steel-productivity` | `steel-plate`, `casting-steel` | yes, +300 % |
+| `low-density-structure-productivity` | `low-density-structure`, `casting-low-density-structure` | yes |
+| `scrap-recycling-productivity` | `scrap-recycling` | yes |
+| `processing-unit-productivity` | `processing-unit` | yes |
+| `plastic-bar-productivity` | `plastic-bar`, `bioplastic` | yes |
+| `rocket-fuel-productivity` | `rocket-fuel`, `rocket-fuel-from-jelly`, `ammonia-rocket-fuel` | yes |
+| `asteroid-productivity` | `carbonic-asteroid-crushing`, `oxide-asteroid-crushing`, `metallic-asteroid-crushing`, `advanced-carbonic-asteroid-crushing`, `advanced-oxide-asteroid-crushing`, `advanced-metallic-asteroid-crushing` | yes |
+| `rocket-part-productivity` | `rocket-part` | yes |
+
+Use this table to decide which lines need re-running after a `research_levels`
+update: if a line's `production_steps` include any recipe in the tech's list,
+that line is stale and must be re-planned.
 
 ---
 
@@ -351,7 +395,8 @@ these IDs to friendly names automatically.
    `--modules MACHINE=...` for every entry in `module_configs`,
    `--beacon BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` if `default_beacon` is set,
    `--beacon MACHINE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` for every entry in `beacon_configs`,
-   `--recipe ITEM=RECIPE` for every entry in `recipe_overrides`.
+   `--recipe ITEM=RECIPE` for every entry in `recipe_overrides`,
+   `--research NAME=LEVEL` for every non-zero entry in `research_levels`.
 3. Parse the JSON output.
 4. Format a human-readable answer:
    - Lead with the **machine count** for the target step.

@@ -164,6 +164,40 @@
     .progress-track { height: var(--bar-primary); background: var(--bg-input); border-radius: 3px; overflow: hidden; }
     .progress-fill  { height: 100%; border-radius: 3px; transition: width .5s ease; }
 
+    /* ── Research section ── */
+    .research-section { background: var(--bg-card); border: 1px solid var(--border-sub);
+                        border-left: 3px solid var(--accent);
+                        border-radius: 4px; padding: 10px 16px; margin-bottom: 10px; }
+    .research-header  { display: flex; align-items: center; justify-content: space-between;
+                        margin-bottom: 0; cursor: pointer; user-select: none;
+                        font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+                        text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted); }
+    .research-header-main { display: flex; align-items: center; gap: 8px; }
+    .research-chevron { color: var(--text-dim); font-size: 10px; }
+    .research-count-pill { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+                           color: var(--text-dim); background: var(--bg-input); border-radius: 3px;
+                           padding: 1px 7px; letter-spacing: 0; text-transform: none; }
+    .research-body    { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-sub); }
+    .research-grid    { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
+    .research-row     { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .research-label   { font-family: 'Barlow Condensed', sans-serif; font-size: 13px;
+                        color: var(--text); letter-spacing: .02em; }
+    .research-input   { width: 58px; text-align: right; background: var(--bg-input);
+                        border: 1px solid var(--border); border-radius: 3px;
+                        color: var(--text); font-family: 'JetBrains Mono', monospace;
+                        font-size: 12px; padding: 2px 6px; height: 24px; }
+    .research-input:focus { outline: none; border-color: var(--accent); }
+    .research-subgroup-label { grid-column: 1 / -1; font-family: 'Barlow Condensed', sans-serif;
+                               font-size: 10px; font-weight: 800; text-transform: uppercase;
+                               letter-spacing: .12em; color: var(--text-dim); margin-top: 4px; }
+
+    /* Line-card research chips (stale / capped) */
+    .card-chip { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700;
+                 text-transform: uppercase; letter-spacing: .05em; border-radius: 3px;
+                 padding: 1px 6px; border: 1px solid; display: inline-flex; align-items: center; }
+    .card-chip.stale  { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
+    .card-chip.capped { color: var(--text-dim); border-color: var(--border); background: var(--bg-input); }
+
     /* ── Bottleneck banner ── */
     .bottleneck-banner { background: var(--bad-bg); border: 1px solid var(--bad-border);
                          border-left: 3px solid var(--bad);
@@ -505,9 +539,29 @@ const DEFAULT_STATE = {
   save_name: 'My Factory', dataset: 'vanilla', assembler: 3,
   furnace: 'electric', machine_quality: 'normal', beacon_quality: 'normal',
   module_configs: {}, beacon_configs: {}, recipe_overrides: {}, machine_overrides: {},
+  research_levels: {},
   preferred_belt: 'blue',
   locations: [makeLocation('nauvis', 'planet')],
   chat_log: [],
+};
+
+// Research-tech → recipe-list map; mirror of PRODUCTIVITY_RESEARCH in cli.py.
+// The empty recipe list for mining-productivity is intentional: it's a miner-
+// wide bonus, not a recipe-keyed bonus.  Used for UI labels, rendering, and
+// staleness detection on line cards.
+const PRODUCTIVITY_RESEARCH = {
+  'mining-productivity':                { label: 'Mining',              recipes: [],                                                                  sa: false },
+  'steel-productivity':                 { label: 'Steel',               recipes: ['steel-plate', 'casting-steel'],                                    sa: true  },
+  'low-density-structure-productivity': { label: 'Low-Density Struct.', recipes: ['low-density-structure', 'casting-low-density-structure'],          sa: true  },
+  'scrap-recycling-productivity':       { label: 'Scrap Recycling',     recipes: ['scrap-recycling'],                                                 sa: true  },
+  'processing-unit-productivity':       { label: 'Processing Unit',     recipes: ['processing-unit'],                                                 sa: true  },
+  'plastic-bar-productivity':           { label: 'Plastic Bar',         recipes: ['plastic-bar', 'bioplastic'],                                       sa: true  },
+  'rocket-fuel-productivity':           { label: 'Rocket Fuel',         recipes: ['rocket-fuel', 'rocket-fuel-from-jelly', 'ammonia-rocket-fuel'],    sa: true  },
+  'asteroid-productivity':              { label: 'Asteroid Crushing',   recipes: [
+    'carbonic-asteroid-crushing', 'oxide-asteroid-crushing', 'metallic-asteroid-crushing',
+    'advanced-carbonic-asteroid-crushing', 'advanced-oxide-asteroid-crushing', 'advanced-metallic-asteroid-crushing',
+  ], sa: true },
+  'rocket-part-productivity':           { label: 'Rocket Part',         recipes: ['rocket-part'],                                                     sa: true  },
 };
 
 const SCIENCE_ORDER = [
@@ -678,6 +732,10 @@ function currentLoc() {
 // ── Migration ─────────────────────────────────────────────────────────────────
 
 function migrateState(state) {
+  // Ensure research_levels exists so older exported states don't crash the UI.
+  if (!state.research_levels || typeof state.research_levels !== 'object') {
+    state.research_levels = {};
+  }
   if (state.locations) return state; // already new format
   const loc = makeLocation('nauvis', 'planet');
   loc.lines       = state.lines       ?? [];
@@ -863,6 +921,83 @@ function renderLocationBar() {
       ${planetBtns}${sep}${platformBtns}
       ${isVanilla ? '' : '<button class="btn loc-btn" id="btn-add-loc" style="opacity:.7">+ Add</button>'}
     </div>`;
+}
+
+// ── Research productivity ────────────────────────────────────────────────────
+
+// UI persistence: whether the collapsible Research section is expanded.
+let researchOpen = false;
+
+function renderResearch() {
+  const isSA = (STATE.dataset ?? 'vanilla') === 'space-age';
+  const levels = STATE.research_levels ?? {};
+  const activeCount = Object.values(levels).filter(v => v && v > 0).length;
+  const countPill = activeCount
+    ? `<span class="research-count-pill">${activeCount} active</span>`
+    : '<span class="research-count-pill">none</span>';
+
+  const rowHtml = (key, entry) => {
+    const val = levels[key] ?? 0;
+    return `
+      <div class="research-row">
+        <span class="research-label">${esc(entry.label)}</span>
+        <input type="number" class="research-input" data-research="${key}"
+               min="0" step="1" value="${val}" placeholder="0" />
+      </div>`;
+  };
+
+  const mining = rowHtml('mining-productivity', PRODUCTIVITY_RESEARCH['mining-productivity']);
+  const saRows = isSA
+    ? Object.entries(PRODUCTIVITY_RESEARCH)
+        .filter(([, entry]) => entry.sa)
+        .map(([k, entry]) => rowHtml(k, entry))
+        .join('')
+    : '';
+
+  const body = researchOpen ? `
+    <div class="research-body">
+      <div class="research-grid">
+        ${mining}
+        ${isSA ? `<div class="research-subgroup-label">Space Age — Recipe Prod (capped at +300%)</div>${saRows}` : ''}
+      </div>
+    </div>` : '';
+
+  return `
+    <div class="research-section">
+      <div class="research-header" id="research-toggle" aria-expanded="${researchOpen}">
+        <span class="research-header-main">
+          <span class="research-chevron">${researchOpen ? '▼' : '▶'}</span>
+          <span>Research Productivity</span>
+        </span>
+        ${countPill}
+      </div>
+      ${body}
+    </div>`;
+}
+
+// Decide whether a line's cli_result is stale w.r.t. the current STATE.research_levels.
+// Returns an array of tech names whose current level differs from what the line was
+// calculated against, restricted to techs actually relevant to the line's recipes.
+function lineStaleTechs(line) {
+  const live = STATE.research_levels ?? {};
+  const saved = line.cli_result?.research_levels ?? {};
+  const steps = line.cli_result?.production_steps ?? [];
+  const recipeKeys = new Set(steps.map(s => s.recipe));
+  // A line uses miners if miners_needed has any non-offshore-pump entry.
+  const miners = line.cli_result?.miners_needed ?? {};
+  const usesMiners = Object.values(miners).some(m => m && m.machine && m.machine !== 'offshore-pump');
+
+  const stale = [];
+  for (const [tech, entry] of Object.entries(PRODUCTIVITY_RESEARCH)) {
+    const relevant = tech === 'mining-productivity'
+      ? usesMiners
+      : entry.recipes.some(r => recipeKeys.has(r));
+    if (!relevant) continue;
+    const liveLvl  = live[tech]  ?? 0;
+    const savedLvl = saved[tech] ?? 0;
+    if (liveLvl !== savedLvl) stale.push(tech);
+  }
+  return stale;
 }
 
 function renderBottlenecks() {
@@ -1152,13 +1287,19 @@ function renderLineCard(line, idx) {
 
   const cardClass   = line.wip ? 'wip' : sc;
   const displayRate = line.wip ? (line.target_rate ?? 0) : actual;
+  const stale = lineStaleTechs(line);
+  const cappedHere = line.cli_result?.research_prod_capped === true;
+  const chips = [
+    stale.length ? `<span class="card-chip stale" title="Research changed since this line was planned: ${stale.map(t => PRODUCTIVITY_RESEARCH[t]?.label ?? t).join(', ')}">⟳ stale</span>` : '',
+    cappedHere    ? `<span class="card-chip capped" title="A step on this line is at the +300% prod cap; more research levels won't reduce its machine count.">@300% cap</span>` : '',
+  ].filter(Boolean).join(' ');
   return `
     <div class="line-card ${cardClass}">
       <div class="card-header ${cardClass}" data-card="${idx}" aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'}">
         <div class="card-header-left">
           <span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
           <div class="card-title-group">
-            <span class="card-title">${esc(line.label ?? label(line.item))}${line.wip ? '<span class="wip-badge">WIP</span>' : ''}</span>
+            <span class="card-title">${esc(line.label ?? label(line.item))}${line.wip ? '<span class="wip-badge">WIP</span>' : ''}${chips ? ` ${chips}` : ''}</span>
             <span class="card-subtitle">${esc(label(line.item))}</span>
           </div>
         </div>
@@ -1215,6 +1356,7 @@ function render() {
     <div class="main">
       <div class="main-inner">
         ${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
+        ${renderResearch()}
         ${(STATE.dataset ?? 'vanilla') !== 'vanilla' ? renderLocationBar() : ''}
         ${renderBottlenecks()}
         ${renderTabs()}
@@ -1255,6 +1397,22 @@ function bindEvents() {
     hdr.addEventListener('click', e => {
       const idx = +hdr.dataset.card;
       expandedCards.has(idx) ? expandedCards.delete(idx) : expandedCards.add(idx);
+      render();
+    }));
+
+  document.getElementById('research-toggle')?.addEventListener('click', () => {
+    researchOpen = !researchOpen;
+    render();
+  });
+
+  document.querySelectorAll('.research-input[data-research]').forEach(input =>
+    input.addEventListener('change', () => {
+      const key = input.dataset.research;
+      const lvl = Math.max(0, parseInt(input.value, 10) || 0);
+      STATE.research_levels = STATE.research_levels ?? {};
+      if (lvl > 0) STATE.research_levels[key] = lvl;
+      else         delete STATE.research_levels[key];
+      saveState();
       render();
     }));
 

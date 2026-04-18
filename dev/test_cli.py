@@ -78,6 +78,7 @@ def _solver(location: "str | None" = None, **kwargs) -> cli.Solver:
         bus_items                = kwargs.get("bus_items",                None),
         planet_props             = kwargs.get("planet_props",             d["planet_props"]),
         location                 = kwargs.get("location",                 location),
+        research_levels          = kwargs.get("research_levels",          None),
     )
 
 
@@ -748,6 +749,7 @@ def _solver_new(location: "str | None" = None, **kwargs) -> cli.Solver:
         bus_items                = kwargs.get("bus_items",                None),
         planet_props             = kwargs.get("planet_props",             d["planet_props"]),
         location                 = kwargs.get("location",                 location),
+        research_levels          = kwargs.get("research_levels",          None),
     )
 
 
@@ -2832,6 +2834,279 @@ class TestLocationFilter(unittest.TestCase):
         )
         result = cli.format_output(args, s, d["resource_info"])
         self.assertIsNone(result.get("location"))
+
+
+# ---------------------------------------------------------------------------
+# Research productivity (--research flag / research_levels)
+# ---------------------------------------------------------------------------
+
+class TestResearchProductivity(unittest.TestCase):
+    """Tests for infinite research productivity (mining + SA recipe prod)."""
+
+    # -- Mining productivity ------------------------------------------------
+
+    def test_mining_prod_reduces_drill_count(self):
+        d = _DATA["vanilla"]
+        base = _solver()
+        base.solve("iron-plate", Fraction(60))
+        base_miners = cli.compute_miners(
+            base.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=base.mining_productivity_level,
+        )
+        prod = _solver(research_levels={"mining-productivity": 5})
+        prod.solve("iron-plate", Fraction(60))
+        prod_miners = cli.compute_miners(
+            prod.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=prod.mining_productivity_level,
+        )
+        ratio = base_miners["iron-ore"]["machine_count"] / prod_miners["iron-ore"]["machine_count"]
+        self.assertAlmostEqual(ratio, 1.5, places=2)
+
+    def test_mining_prod_does_not_change_smelter_count(self):
+        base = _solver()
+        base.solve("iron-plate", Fraction(60))
+        prod = _solver(research_levels={"mining-productivity": 5})
+        prod.solve("iron-plate", Fraction(60))
+        self.assertEqual(
+            base.steps["iron-plate"]["machine_count"],
+            prod.steps["iron-plate"]["machine_count"],
+        )
+
+    def test_mining_prod_reduces_pumpjack_required_yield_pct(self):
+        d = _DATA["vanilla"]
+        base = _solver()
+        base.solve("processing-unit", Fraction(10))
+        base.resolve_oil(d["data"])
+        base_miners = cli.compute_miners(
+            base.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=base.mining_productivity_level,
+        )
+        prod = _solver(research_levels={"mining-productivity": 5})
+        prod.solve("processing-unit", Fraction(10))
+        prod.resolve_oil(d["data"])
+        prod_miners = cli.compute_miners(
+            prod.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=prod.mining_productivity_level,
+        )
+        ratio = (
+            base_miners["crude-oil"]["required_yield_pct"]
+            / prod_miners["crude-oil"]["required_yield_pct"]
+        )
+        self.assertAlmostEqual(ratio, 1.5, places=3)
+
+    def test_mining_prod_does_not_affect_offshore_pump(self):
+        d = _DATA["vanilla"]
+        base = _solver()
+        base.solve("steam", Fraction(60))
+        base_miners = cli.compute_miners(
+            base.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=base.mining_productivity_level,
+        )
+        prod = _solver(research_levels={"mining-productivity": 5})
+        prod.solve("steam", Fraction(60))
+        prod_miners = cli.compute_miners(
+            prod.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=prod.mining_productivity_level,
+        )
+        # Only run this assertion if steam resolution actually routed water through offshore-pump
+        if "water" in base_miners and "water" in prod_miners:
+            self.assertEqual(base_miners["water"]["machine"], "offshore-pump")
+            self.assertEqual(
+                base_miners["water"]["machine_count"],
+                prod_miners["water"]["machine_count"],
+            )
+
+    def test_mining_prod_uncapped_at_level_100(self):
+        d = _DATA["vanilla"]
+        base = _solver()
+        base.solve("iron-plate", Fraction(60))
+        base_miners = cli.compute_miners(
+            base.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=base.mining_productivity_level,
+        )
+        prod = _solver(research_levels={"mining-productivity": 100})
+        prod.solve("iron-plate", Fraction(60))
+        prod_miners = cli.compute_miners(
+            prod.raw_resources, d["resource_info"], "electric",
+            mining_productivity_level=prod.mining_productivity_level,
+        )
+        ratio = base_miners["iron-ore"]["machine_count"] / prod_miners["iron-ore"]["machine_count"]
+        self.assertAlmostEqual(ratio, 11.0, places=2)
+        # Mining prod never trips the +300 % cap (cap applies to crafting only).
+        self.assertFalse(prod.research_prod_capped)
+
+    # -- Recipe productivity ------------------------------------------------
+
+    def test_steel_productivity_reduces_steel_machine_count(self):
+        base = _solver(furnace_type="electric")
+        base.solve("steel-plate", Fraction(60))
+        prod = _solver(
+            furnace_type="electric",
+            research_levels={"steel-productivity": 3},
+        )
+        prod.solve("steel-plate", Fraction(60))
+        ratio = (
+            base.steps["steel-plate"]["machine_count"]
+            / prod.steps["steel-plate"]["machine_count"]
+        )
+        self.assertEqual(Fraction(ratio), Fraction(13, 10))  # +30 % prod → 1/1.3
+
+    def test_steel_productivity_does_not_affect_iron_plate(self):
+        base = _solver()
+        base.solve("iron-plate", Fraction(60))
+        prod = _solver(research_levels={"steel-productivity": 3})
+        prod.solve("iron-plate", Fraction(60))
+        self.assertEqual(
+            base.steps["iron-plate"]["machine_count"],
+            prod.steps["iron-plate"]["machine_count"],
+        )
+
+    def test_steel_productivity_affects_casting_steel(self):
+        # Force casting-steel via recipe override (it's not a default on Vulcanus).
+        overrides = {"steel-plate": "casting-steel"}
+        base = _solver("vulcanus", recipe_overrides=overrides)
+        base.solve("steel-plate", Fraction(60))
+        prod = _solver(
+            "vulcanus",
+            recipe_overrides=overrides,
+            research_levels={"steel-productivity": 3},
+        )
+        prod.solve("steel-plate", Fraction(60))
+        self.assertIn("casting-steel", prod.steps)
+        ratio = (
+            base.steps["casting-steel"]["machine_count"]
+            / prod.steps["casting-steel"]["machine_count"]
+        )
+        self.assertEqual(Fraction(ratio), Fraction(13, 10))
+
+    def test_asteroid_productivity_moves_all_six_recipes(self):
+        s = _solver("space-age", research_levels={"asteroid-productivity": 2})
+        for rk in cli.PRODUCTIVITY_RESEARCH["asteroid-productivity"]:
+            self.assertEqual(s.recipe_research_prod.get(rk), Fraction(2, 10))
+
+    def test_plastic_bar_productivity_boosts_bioplastic_on_gleba(self):
+        base = _solver("gleba")
+        base.solve("plastic-bar", Fraction(60))
+        prod = _solver("gleba", research_levels={"plastic-bar-productivity": 5})
+        prod.solve("plastic-bar", Fraction(60))
+        # Gleba routes plastic-bar through bioplastic.
+        self.assertIn("bioplastic", base.steps)
+        self.assertIn("bioplastic", prod.steps)
+        ratio = (
+            base.steps["bioplastic"]["machine_count"]
+            / prod.steps["bioplastic"]["machine_count"]
+        )
+        # +50 % prod → 1/1.5 machines
+        self.assertEqual(Fraction(ratio), Fraction(15, 10))
+
+    def test_research_prod_stacks_additively_with_module_prod(self):
+        # 4 prod-3 normal (+40 %) + L3 research (+30 %) = +70 % additive total.
+        base = _solver()
+        base.solve("processing-unit", Fraction(10))
+        combo = _solver(
+            module_configs  = {"assembling-machine-3": [_mspec(4, "prod", 3)]},
+            research_levels = {"processing-unit-productivity": 3},
+        )
+        combo.solve("processing-unit", Fraction(10))
+        ratio = (
+            base.steps["processing-unit"]["machine_count"]
+            / combo.steps["processing-unit"]["machine_count"]
+        )
+        self.assertEqual(Fraction(ratio), Fraction(17, 10))
+        self.assertFalse(combo.research_prod_capped)
+
+    def test_cap_enforced_at_plus_300_pct(self):
+        base = _solver(furnace_type="electric")
+        base.solve("steel-plate", Fraction(60))
+        capped = _solver(
+            furnace_type="electric",
+            research_levels={"steel-productivity": 50},
+        )
+        capped.solve("steel-plate", Fraction(60))
+        # +500 % research prod is clamped to +300 % → 1/4 machines, not 1/6.
+        ratio = (
+            base.steps["steel-plate"]["machine_count"]
+            / capped.steps["steel-plate"]["machine_count"]
+        )
+        self.assertEqual(Fraction(ratio), Fraction(4))
+        self.assertTrue(capped.research_prod_capped)
+        self.assertIn("steel-plate", capped.capped_recipes)
+
+    def test_unknown_research_name_ignored_by_solver(self):
+        base = _solver()
+        base.solve("iron-plate", Fraction(60))
+        weird = _solver(research_levels={"bogus-productivity": 5})
+        weird.solve("iron-plate", Fraction(60))
+        self.assertEqual(
+            base.steps["iron-plate"]["machine_count"],
+            weird.steps["iron-plate"]["machine_count"],
+        )
+        # Unknown name yields no recipe-level research prod mapping.
+        self.assertEqual(weird.recipe_research_prod, {})
+        # Nothing was capped.
+        self.assertFalse(weird.research_prod_capped)
+
+    # -- Output format ------------------------------------------------------
+
+    def test_output_echoes_research_levels(self):
+        import argparse
+        d = _DATA["vanilla"]
+        s = _solver(research_levels={"mining-productivity": 5, "steel-productivity": 3})
+        s.solve("steel-plate", Fraction(60))
+        s.resolve_oil(d["data"])
+        args = argparse.Namespace(
+            items=["steel-plate"], item="steel-plate", rates=[60.0], rate=60.0,
+            location=None, assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        self.assertEqual(
+            out["research_levels"],
+            {"mining-productivity": 5, "steel-productivity": 3},
+        )
+
+    def test_output_flags_research_prod_capped(self):
+        import argparse
+        d = _DATA["vanilla"]
+        s = _solver(
+            furnace_type="electric",
+            research_levels={"steel-productivity": 50},
+        )
+        s.solve("steel-plate", Fraction(60))
+        s.resolve_oil(d["data"])
+        args = argparse.Namespace(
+            items=["steel-plate"], item="steel-plate", rates=[60.0], rate=60.0,
+            location=None, assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        self.assertTrue(out.get("research_prod_capped"))
+        steel_step = next(x for x in out["production_steps"] if x["recipe"] == "steel-plate")
+        self.assertTrue(steel_step.get("prod_capped"))
+
+    def test_output_omits_research_fields_when_empty(self):
+        import argparse
+        d = _DATA["vanilla"]
+        s = _solver()
+        s.solve("iron-plate", Fraction(60))
+        s.resolve_oil(d["data"])
+        args = argparse.Namespace(
+            items=["iron-plate"], item="iron-plate", rates=[60.0], rate=60.0,
+            location=None, assembler=3, furnace="electric", miner="electric",
+            machine_quality="normal", beacon_quality="normal",
+            module_configs=None, beacon_configs=None,
+            recipe_machine_overrides=None, recipe_module_overrides=None,
+            recipe_beacon_overrides=None,
+        )
+        out = cli.format_output(args, s, d["resource_info"])
+        self.assertNotIn("research_levels", out)
+        self.assertNotIn("research_prod_capped", out)
 
 
 if __name__ == "__main__":

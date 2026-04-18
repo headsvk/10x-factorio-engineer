@@ -243,6 +243,40 @@ RECIPE_DEFAULTS_BY_LOCATION: dict[str, dict[str, str]] = {
     },
 }
 
+# Infinite research productivity techs.  Maps research tech name →
+# list of recipe keys it boosts by +10% productivity per level.
+# The "mining-productivity" key is special-cased: its empty recipe list
+# signals the solver to apply the bonus to all miner/pumpjack yields in
+# compute_miners() rather than to recipe productivity.
+#
+# SA caps total machine productivity at +300% for crafting recipes; mining
+# productivity has no cap since miners are not crafting machines.
+PRODUCTIVITY_RESEARCH: dict[str, list[str]] = {
+    "mining-productivity":                [],   # special: applied in compute_miners
+    "steel-productivity":                 ["steel-plate", "casting-steel"],
+    "low-density-structure-productivity": ["low-density-structure", "casting-low-density-structure"],
+    "scrap-recycling-productivity":       ["scrap-recycling"],
+    "processing-unit-productivity":       ["processing-unit"],
+    "plastic-bar-productivity":           ["plastic-bar", "bioplastic"],
+    "rocket-fuel-productivity":           ["rocket-fuel", "rocket-fuel-from-jelly", "ammonia-rocket-fuel"],
+    "asteroid-productivity":              [
+        "carbonic-asteroid-crushing",
+        "oxide-asteroid-crushing",
+        "metallic-asteroid-crushing",
+        "advanced-carbonic-asteroid-crushing",
+        "advanced-oxide-asteroid-crushing",
+        "advanced-metallic-asteroid-crushing",
+    ],
+    "rocket-part-productivity":           ["rocket-part"],
+}
+
+# +10 % productivity per research level; scaled by integer level in the solver.
+RESEARCH_PROD_PER_LEVEL: Fraction = Fraction(1, 10)
+
+# Hard cap on total machine productivity (module + research) for crafting
+# recipes.  Mining drills and labs are uncapped.
+MAX_CRAFTING_PROD: Fraction = Fraction(3)   # +300 %
+
 # Productivity module bonus per filled slot, by tier
 MODULE_PROD_BONUS: dict[int, Fraction] = {
     0: Fraction(0),
@@ -907,6 +941,7 @@ class Solver:
         bus_items: frozenset | None = None,
         planet_props: dict | None = None,
         location: str | None = None,
+        research_levels: dict | None = None,
     ):
         self.recipe_idx      = recipe_idx
         self.raw_set         = raw_set
@@ -925,6 +960,25 @@ class Solver:
         self.bus_items: frozenset = frozenset(bus_items) if bus_items else frozenset()
         self.planet_props: dict = planet_props or {}
         self.location: str | None = location
+
+        # Infinite productivity research:
+        #   research_levels         – {tech_name: level_int} as passed in
+        #   mining_productivity_level – int; applied to miner yields in compute_miners
+        #   recipe_research_prod    – {recipe_key: Fraction}; additive to module prod
+        self.research_levels: dict[str, int] = dict(research_levels or {})
+        self.mining_productivity_level: int  = int(self.research_levels.get("mining-productivity", 0))
+        self.recipe_research_prod: dict[str, Fraction] = {}
+        for tech, level in self.research_levels.items():
+            if tech == "mining-productivity" or level <= 0:
+                continue
+            bonus = RESEARCH_PROD_PER_LEVEL * level
+            for rk in PRODUCTIVITY_RESEARCH.get(tech, []):
+                self.recipe_research_prod[rk] = self.recipe_research_prod.get(rk, Fraction(0)) + bonus
+
+        # Tracks whether any crafting step hit the +300% total-productivity cap.
+        # Set during solve(); surfaced in format_output() for UI signalling.
+        self.research_prod_capped: bool = False
+        self.capped_recipes: set[str] = set()
 
         self.steps: dict[str, dict]             = {}
         self.raw_resources: dict[str, Fraction] = defaultdict(Fraction)
@@ -953,33 +1007,45 @@ class Solver:
         return self.default_beacon_config
 
     def _compute_module_effects(
-        self, specs: list, machine_key: str, allow_prod: bool
-    ) -> tuple:
+        self, specs: list, machine_key: str, allow_prod: bool,
+        recipe_key: str | None = None,
+    ) -> tuple[Fraction, Fraction, bool]:
         """
-        Compute (prod_bonus: Fraction, speed_bonus: Fraction) from module specs.
-        Total slot count is capped to the machine's available slots.
-        Efficiency modules are tracked for output purposes but have no speed/prod effect.
+        Compute (prod_bonus, speed_bonus, capped) for a recipe step.
+
+        Module prod is computed from specs; research prod is looked up from
+        self.recipe_research_prod[recipe_key].  Both are gated by the
+        recipe's allow_productivity flag and summed additively.  The total
+        is clamped to MAX_CRAFTING_PROD (+300 %) per Space Age rules; the
+        third return value is True when clamping occurred.
         """
-        if not specs:
-            return Fraction(0), Fraction(0)
         slots = self.machine_module_slots.get(machine_key, 0)
-        if slots == 0:
-            return Fraction(0), Fraction(0)
-        total_requested = sum(s["count"] for s in specs)
-        if total_requested == 0:
-            return Fraction(0), Fraction(0)
-        scale = Fraction(min(slots, total_requested), total_requested)
-        prod_bonus  = Fraction(0)
         speed_bonus = Fraction(0)
-        for spec in specs:
-            eff_count = Fraction(spec["count"]) * scale
-            qual_mult = MODULE_QUALITY_MULT[spec["quality"]]
-            if spec["type"] == "prod" and allow_prod:
-                prod_bonus  += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
-            elif spec["type"] == "speed":
-                speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
-            # efficiency: no effect on production count
-        return prod_bonus, speed_bonus
+        module_prod = Fraction(0)
+
+        if specs and slots > 0:
+            total_requested = sum(s["count"] for s in specs)
+            if total_requested > 0:
+                scale = Fraction(min(slots, total_requested), total_requested)
+                for spec in specs:
+                    eff_count = Fraction(spec["count"]) * scale
+                    qual_mult = MODULE_QUALITY_MULT[spec["quality"]]
+                    if spec["type"] == "prod" and allow_prod:
+                        module_prod += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
+                    elif spec["type"] == "speed":
+                        speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
+                    # efficiency: no effect on production count
+
+        research_prod = Fraction(0)
+        if allow_prod and recipe_key is not None:
+            research_prod = self.recipe_research_prod.get(recipe_key, Fraction(0))
+
+        total_prod = module_prod + research_prod
+        capped = False
+        if total_prod > MAX_CRAFTING_PROD:
+            total_prod = MAX_CRAFTING_PROD
+            capped = True
+        return total_prod, speed_bonus, capped
 
     def _compute_beacon_speed(self, beacon_spec: dict | None) -> float:
         """
@@ -1032,7 +1098,9 @@ class Solver:
 
         allow_prod = recipe.get("allow_productivity", False)
         specs      = self._get_modules(recipe_key, machine_key)
-        prod_bonus, speed_mod_bonus = self._compute_module_effects(specs, machine_key, allow_prod)
+        prod_bonus, speed_mod_bonus, _capped = self._compute_module_effects(
+            specs, machine_key, allow_prod, recipe_key,
+        )
         effective_speed = effective_speed * (Fraction(1) + speed_mod_bonus)
 
         effective_result = result_amount * (Fraction(1) + prod_bonus)
@@ -1126,10 +1194,15 @@ class Solver:
         quality_mult    = Fraction(1) + MACHINE_QUALITY_SPEED[self.machine_quality]
         effective_speed = base_speed * quality_mult
 
-        # Module effects
+        # Module + research productivity effects
         allow_prod = recipe.get("allow_productivity", False)
         specs      = self._get_modules(recipe_key, machine_key)
-        prod_bonus, speed_mod_bonus = self._compute_module_effects(specs, machine_key, allow_prod)
+        prod_bonus, speed_mod_bonus, capped = self._compute_module_effects(
+            specs, machine_key, allow_prod, recipe_key,
+        )
+        if capped:
+            self.research_prod_capped = True
+            self.capped_recipes.add(recipe_key)
         effective_speed = effective_speed * (Fraction(1) + speed_mod_bonus)
 
         # Effective output per cycle (productivity bonus)
@@ -1332,10 +1405,15 @@ def compute_miners(
     beacon_configs: dict | None = None,
     default_beacon_config: dict | None = None,
     beacon_quality: str = "normal",
+    mining_productivity_level: int = 0,
 ) -> dict:
     if machine_power_w is None:
         machine_power_w = {}
     drill_key = "big-mining-drill" if miner_type == "big" else "electric-mining-drill"
+    # Mining productivity research: +10% per level, uncapped.  Stacks additively
+    # with drill prod modules (Factorio semantics).  Does NOT apply to
+    # offshore-pump (not a miner).
+    mining_research_prod = RESEARCH_PROD_PER_LEVEL * mining_productivity_level
     result: dict[str, dict] = {}
 
     for item, rate in raw_resources.items():
@@ -1362,7 +1440,11 @@ def compute_miners(
             # FactorioLab-style: report total required field yield % rather than
             # machine count, since pumpjack throughput depends on field depletion.
             # rate_at_100pct = rate one pumpjack produces at 100% field yield.
-            rate_at_100pct = (MINER_SPEED["pumpjack"] / info["mining_time"]) * info["yield"] * 60
+            # Mining productivity research multiplies per-pumpjack throughput.
+            rate_at_100pct = (
+                (MINER_SPEED["pumpjack"] / info["mining_time"])
+                * info["yield"] * (Fraction(1) + mining_research_prod) * 60
+            )
             required_pct   = rate / rate_at_100pct * 100
             result[item] = {
                 "machine":            "pumpjack",
@@ -1409,7 +1491,9 @@ def compute_miners(
 
             base_speed    = MINER_SPEED[drill_key] * (Fraction(1) + speed_bonus)
             eff_speed     = float(base_speed) * (1.0 + beacon_speed_bonus)
-            rate_each     = (Fraction(str(round(eff_speed, 12))) / info["mining_time"]) * info["yield"] * (Fraction(1) + prod_bonus) * 60
+            # Mining productivity research stacks additively with drill prod modules.
+            total_prod    = prod_bonus + mining_research_prod
+            rate_each     = (Fraction(str(round(eff_speed, 12))) / info["mining_time"]) * info["yield"] * (Fraction(1) + total_prod) * 60
             count = rate / rate_each
             entry = {
                 "machine":            machine,
@@ -1502,6 +1586,8 @@ def format_output(
         if beacon_spec is not None:
             step_out["beacon_spec"]    = beacon_spec
             step_out["beacon_quality"] = solver.beacon_quality
+        if recipe_key in solver.capped_recipes:
+            step_out["prod_capped"] = True
         steps_list_raw.append(step_out)
 
     steps_list = sorted(steps_list_raw, key=lambda x: -next(iter(x["outputs"].values()), 0))
@@ -1525,6 +1611,7 @@ def format_output(
         beacon_configs=solver.beacon_configs or None,
         default_beacon_config=solver.default_beacon_config,
         beacon_quality=solver.beacon_quality,
+        mining_productivity_level=solver.mining_productivity_level,
     )
 
     is_multi = len(args.items) > 1
@@ -1563,6 +1650,11 @@ def format_output(
 
     if solver.recipe_overrides:
         out["recipe_overrides"] = solver.recipe_overrides
+
+    if solver.research_levels:
+        out["research_levels"] = dict(solver.research_levels)
+    if solver.research_prod_capped:
+        out["research_prod_capped"] = True
 
     # Per-recipe overrides from args
     if getattr(args, "recipe_machine_overrides", None):
@@ -1910,6 +2002,21 @@ Examples:
         help="Per-recipe beacon override. Repeatable. Same value format as --beacon.",
     )
     p.add_argument(
+        "--research",
+        action="append", default=[],
+        metavar="NAME=LEVEL",
+        dest="research",
+        help=(
+            "Infinite productivity research level. NAME is a research tech name "
+            "(e.g. 'mining-productivity', 'steel-productivity', "
+            "'processing-unit-productivity'). LEVEL is an integer >= 0. "
+            "Adds +10% per level: mining-productivity applies to every "
+            "drill/pumpjack yield; the SA recipe techs apply to their fixed "
+            "recipe lists and sum with module productivity, capped at +300% "
+            "total machine productivity (mining is uncapped). Repeatable."
+        ),
+    )
+    p.add_argument(
         "--bus-item",
         action="append", default=[],
         metavar="ITEM-ID",
@@ -1998,6 +2105,25 @@ def main() -> None:
 
     bus_items: frozenset = frozenset(args.bus_item)
 
+    # Parse --research NAME=LEVEL
+    research_levels: dict[str, int] = {}
+    for raw in args.research:
+        k, v = _parse_kv(raw, "--research")
+        try:
+            level = int(v)
+        except ValueError:
+            sys.exit(f"--research LEVEL must be an integer, got: {v!r}")
+        if level < 0:
+            sys.exit(f"--research LEVEL must be >= 0, got: {level}")
+        if k not in PRODUCTIVITY_RESEARCH:
+            sys.stderr.write(
+                f"warning: unknown research name '{k}'; ignored. "
+                f"Valid names: {', '.join(sorted(PRODUCTIVITY_RESEARCH))}\n"
+            )
+            continue
+        if level > 0:
+            research_levels[k] = level
+
     data            = load_data(args.location)
     raw_set         = build_raw_set(data, args.location)
     planet_props    = get_planet_props(data, args.location)
@@ -2027,6 +2153,7 @@ def main() -> None:
         bus_items=bus_items or None,
         planet_props=planet_props or None,
         location=args.location,
+        research_levels=research_levels or None,
     )
 
     targets: list[tuple[str, Fraction]] = []
@@ -2053,6 +2180,7 @@ def main() -> None:
             bus_items=solver.bus_items or None,
             planet_props=solver.planet_props or None,
             location=solver.location,
+            research_levels=solver.research_levels or None,
         )
         ref.solve(args.item, Fraction(1))
 
