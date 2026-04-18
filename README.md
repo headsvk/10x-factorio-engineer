@@ -28,7 +28,7 @@ dev/
   sample/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
-  test_cli.py               # unittest suite (182 tests, stdlib only)
+  test_cli.py               # unittest suite (198 tests, stdlib only)
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -54,6 +54,11 @@ python assets/cli.py --item electronic-circuit --rate 60 \
     --modules "assembling-machine-3=4:prod:3:normal" \
     --beacon "assembling-machine-3=8:3:legendary" \
     --machine-quality legendary
+
+# Infinite research productivity (mining L5 + steel L3)
+python assets/cli.py --item steel-plate --rate 60 \
+    --research mining-productivity=5 \
+    --research steel-productivity=3
 
 # Override recipe
 python assets/cli.py --item solid-fuel --rate 20 --recipe solid-fuel=solid-fuel-from-light-oil
@@ -145,7 +150,7 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 python -m unittest dev.test_cli -v
 ```
 
-182 tests, stdlib only.
+198 tests, stdlib only.
 
 ---
 
