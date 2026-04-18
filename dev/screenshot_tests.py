@@ -639,15 +639,41 @@ LINE_CARD_SCENARIOS = [
 # ── Group 4: README full-page screenshots ────────────────────────────────────
 
 def make_state_readme() -> dict:
-    """Rich multi-planet state that showcases science overview, bus balance, and a bottleneck."""
+    """Rich multi-planet state showcasing science, research, bus balance, and a bottleneck."""
     state = _base_state("Mid-Game Factory")
     state["module_configs"] = {"assembling-machine-3": MACHINE_MODULE_CONFIGS["normal"]}
+    state["research_levels"] = {
+        "mining-productivity": 12,
+        "steel-productivity":  5,
+    }
     bus_items = [
         {"item": "iron-plate",    "rate": 7200},
         {"item": "copper-plate",  "rate": 10800},
         {"item": "steel-plate",   "rate": 1800},
         {"item": "petroleum-gas", "rate": 400, "fluid": True},
     ]
+    # Iron ore line with stale chip: cli_result was computed at mining-prod 0,
+    # but STATE now has level 12 → triggers ⟳ stale on the card.
+    iron_ore_cli = {
+        "item": "iron-ore",
+        "rate_per_min": 1800.0,
+        "production_steps": [],
+        "raw_resources": {"iron-ore": 1800.0},
+        "co_products": {},
+        "miners_needed": {
+            "iron-ore": {
+                "machine": "electric-mining-drill",
+                "machine_count": 180.0,
+                "machine_count_ceil": 180,
+                "power_kw": 8100.0,
+                "beacon_power_kw": 0.0,
+            }
+        },
+        "total_power_mw": 8.1,
+        "total_power_mw_ceil": 8.1,
+        "bus_inputs": {},
+        "research_levels": {},
+    }
     lines = [
         make_minimal_line("automation-science-pack",  "Automation Science",  90,  90,
                           bus_inputs={"iron-plate": 90}),
@@ -658,6 +684,13 @@ def make_state_readme() -> dict:
         make_minimal_line("military-science-pack",    "Military Science",    90,   0),
         make_minimal_line("electronic-circuit",       "Green Circuits",     1800, 1800,
                           bus_inputs={"iron-plate": 1800, "copper-plate": 5400}),
+        {
+            "item": "iron-ore",
+            "label": "Iron Ore Mining",
+            "target_rate": 1800,
+            "effective_rate": 1800,
+            "cli_result": iron_ore_cli,
+        },
     ]
     state["locations"] = [
         _loc("nauvis", "Nauvis",
@@ -682,9 +715,9 @@ def make_state_readme() -> dict:
 
 
 README_SCENARIOS = [
-    # (filename,             state_factory,    tab,        light)
-    ("readme__dark.png",   make_state_readme, "overview", False),
-    ("readme__light.png",  make_state_readme, "overview", True),
+    # (filename,             state_factory,    tab,        light,  pre_click)
+    ("readme__dark.png",   make_state_readme, "overview", False,  "#research-toggle"),
+    ("readme__light.png",  make_state_readme, "overview", True,   "#research-toggle"),
 ]
 
 
@@ -714,7 +747,7 @@ async def capture_section(context, state, selector, tab, out_path,
         os.unlink(tmp_path)
 
 
-async def capture_full_page(context, state, tab, out_path, light_theme=False):
+async def capture_full_page(context, state, tab, out_path, light_theme=False, pre_click=None):
     """Render state and screenshot the full viewport (header + tabs + content)."""
     html = build_html(state, light_theme=light_theme)
     with tempfile.NamedTemporaryFile(
@@ -729,6 +762,9 @@ async def capture_full_page(context, state, tab, out_path, light_theme=False):
         await page.wait_for_selector(".tab-panel.active", timeout=10_000)
         await page.evaluate("document.fonts.ready")
         await page.wait_for_timeout(300)
+        if pre_click:
+            await page.locator(pre_click).first.click()
+            await page.wait_for_timeout(150)
         await page.screenshot(path=out_path, full_page=True)
         await page.close()
     finally:
@@ -811,12 +847,13 @@ async def run_line_card_variants(context):
 
 async def run_readme_screenshots(context):
     total = 0
-    for filename, state_factory, tab, light_theme in README_SCENARIOS:
+    for filename, state_factory, tab, light_theme, pre_click in README_SCENARIOS:
         state    = state_factory()
         out_path = os.path.join(SCREENSHOTS_DIR, filename)
         theme_tag = " [light]" if light_theme else " [dark]"
         try:
-            await capture_full_page(context, state, tab, out_path, light_theme=light_theme)
+            await capture_full_page(context, state, tab, out_path,
+                                    light_theme=light_theme, pre_click=pre_click)
             total += 1
             print(f"  readme   {filename}{theme_tag}")
         except Exception as exc:
