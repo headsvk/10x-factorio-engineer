@@ -108,6 +108,8 @@ While infinite research can be leveled forever, certain levels provide practical
 
 **Productivity research breakpoints (Space Age):**
 
+Foundry, biochamber, and electromagnetic plant each have a **built-in 50% productivity bonus** that counts toward the 300% recipe cap. This is why these machines hit the cap at lower research levels than a standard assembler would — they start 50% of the way there before any modules or research are applied.
+
 | Technology | Key breakpoints |
 |---|---|
 | Processing unit productivity | Level 13: EM plants with legendary prod modules hit the 300% productivity cap. Level 25: EM plants hit 300% cap with no modules. |

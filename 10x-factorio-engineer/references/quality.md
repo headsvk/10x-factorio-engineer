@@ -49,29 +49,53 @@ gives better throughput returns. The CLI `--machine-quality` flag models this.
 ### Quality upcycling loop design (from Tutorial:Quality_upcycling_math)
 **Wiki:** https://wiki.factorio.com/Tutorial:Quality_upcycling_math
 
-The quality upcycling loop is a **Markov chain** — each item either becomes higher quality (with probability q per quality tier) or is recycled (–75% items). After enough cycles, every item either becomes legendary or is destroyed.
+The quality upcycling loop is a **Markov chain** — each item either becomes higher quality or is destroyed by the recycler (–75% items). All items eventually either reach legendary or are consumed.
 
-**Key design insight:** The loop transformation matrix (reassembly × recycler) converges: for typical 5×legendary quality-3 modules in an EM plant + recycler, roughly **1.3 legendary items are produced per 100 normal inputs**. Adding productivity modules to the reassembly stage greatly improves this ratio — productivity multiplies the number of items at each stage, giving more chances to hit quality rolls.
+**Machine capabilities:**
 
-**Worked example: upcycling assembling machine 3 to legendary**
-- Setup: EM plant with 4× quality-3 modules (normal quality) for reassembly; recycler with 4× quality-3 modules (normal quality) for recycling.
-- Quality-3 module base chance: **+2.5% per slot** → 4 slots = **10% effective quality chance** per craft.
-- Per recycle: recycler returns 25% of ingredients (75% loss); each recycled item also has a 10% quality upgrade chance.
-- Steady-state result (normal quality-3 modules, no productivity): approximately **1.3 legendary per 100 normal inputs** fed into the loop.
-- With **legendary quality-3 modules** (×2.5 mult → **6.25% per slot**, 4 slots = **25% effective chance**): approximately **11–12 legendary per 100 normal inputs** — roughly a 9× improvement.
-- Adding productivity modules to the EM plant (e.g. 2× prod-3 + 2× quality-3): each craft produces more items before recycling, compounding quality roll opportunities. This is often the highest-leverage upgrade.
-- Key constraint: recyclers cannot accept productivity modules (hard game rule) — only quality modules go in the recycler.
+| Machine | Module slots | Base productivity |
+|---|---|---|
+| Chemical plant | 3 | 0% |
+| Assembling machine 3 | 4 | 0% |
+| Foundry | 4 | +50% |
+| Electromagnetic plant | 5 | +50% |
+| Cryogenic plant | 8 | 0% |
 
-**Module allocation strategy:**
-- Reassembly machines (making the item): use a mix of productivity + quality modules. Productivity increases item count (more items = more quality rolls). More quality modules = higher per-item chance. The optimal split depends on the machine's prod bonus and module slot count.
-- Recycler machines: quality modules only (recyclers cannot accept productivity modules — this is a hard game rule).
-- Machines making legendary output: switch to productivity + speed modules once a machine is only processing legendary inputs — quality modules waste slots on 100%-legendary lines.
+Foundry and EM plant's +50% base productivity multiplies output count before quality rolls fire — each craft produces 1.5× items, compounding quality opportunities. This is why the foundry beats assembler-3 despite identical slot count.
 
-**Quality skip probability:** When an item does roll quality, there is always a **10% chance to skip a tier** (e.g., go directly from normal to rare, bypassing uncommon). This is fixed and cannot be changed by modules. At most 10% of items that "get quality" will be rare or better.
+**Optimal module allocation (normal quality-3 modules):**
+
+For non-legendary tiers: fill with quality modules — the goal is tier promotion, not producing more same-tier items. For the legendary-producing machine: switch entirely to productivity — quality rolls do nothing on legendary outputs.
+
+| Machine | Normal / uncommon / rare tiers | Epic tier | Legendary tier |
+|---|---|---|---|
+| Chemical plant | 3× quality-3 | 3× quality-3 | 3× prod-3 |
+| Assembling machine 3 | 4× quality-3 | 4× quality-3 | 4× prod-3 |
+| Foundry | 4× quality-3 | 4× quality-3 | 4× prod-3 |
+| Electromagnetic plant | 5× quality-3 | 5× quality-3 | 5× prod-3 |
+| Cryogenic plant | 6× quality-3 + 2× prod-3 | 6–7× quality-3 + 1–2× prod-3 | 8× prod-3 |
+
+Recyclers: quality modules only — productivity modules are not allowed in recyclers (hard game rule).
+
+**Yield and machine count ratios (normal quality-3 modules; recyclers loaded with 4 legendary quality-3):**
+
+Machine counts needed to keep **1 legendary-producing machine** running continuously:
+
+| Machine | Yield % | Recyclers | Normal-tier | Uncommon-tier | Rare-tier | Epic-tier | Legendary-tier |
+|---|---|---|---|---|---|---|---|
+| Chemical plant | 0.034% | 53 | 198 | 23 | 7 | 2 | 1 |
+| Assembling machine 3 | 0.046% | 31 | 123 | 18 | 6 | 2 | 1 |
+| Foundry | 0.134% | 14 | 53 | 12 | 5 | 2 | 1 |
+| Electromagnetic plant | 0.177% | 14 | 56 | 16 | 7 | 3 | 1 |
+| Cryogenic plant | 0.119% | 9 | 41 | 16 | 8 | 4 | 1 |
+
+Yield % = legendary outputs per 100 normal inputs. EM plant with legendary quality-3 modules reaches ~1.3% yield (≈7× improvement over normal modules) — upgrading module quality is the single highest-leverage investment once the loop is built. Use these ratios to size the loop: if you want 10 legendary outputs per hour, multiply all counts accordingly.
+
+**Quality tier-skip probabilities:** When an item rolls a quality upgrade, the tier jump is: **90%** chance +1 tier, **9%** chance +2 tiers, **0.9%** chance +3 tiers, **0.1%** chance +4 tiers (normal straight to legendary in one roll). Higher-starting-tier items cap out earlier — an epic item can only jump +1 to legendary.
 
 **When quality upcycling is worth it:**
 - High-value items with large per-stat multipliers: modules, beacons, equipment grid items, space platform machines
-- Items with many uses downstream: legendary assembler-3 runs faster, reducing the machine count for everything it produces
-- **Not worth it** for: bulk intermediates (iron plates, circuits) where the throughput cost is higher than the value. Focus quality loops on the final machine or equipment tier.
+- Items with many uses downstream: legendary assembler-3 runs faster, reducing machine count for everything it produces
+- **Not worth it** for bulk intermediates (iron plates, circuits) — throughput cost exceeds value. Focus loops on final machines and equipment.
 
-**Selector combinator "Quality filter" mode:** The standard circuit pattern for quality routing. Filter inserters connected to the selector set to "Quality filter ≥ legendary" output only legendary items to keep; the remainder loops back to the recycler. No arithmetic combinator needed — the selector handles quality comparison directly.
+**Selector combinator "Quality filter" mode:** Standard circuit pattern for quality routing. Set selector to "Quality filter ≥ legendary" — legendary items exit to keep, everything else loops back to the recycler. No arithmetic combinator needed.

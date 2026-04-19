@@ -601,6 +601,7 @@ Do not preload at session start. Each file is self-contained.
 | Factory layout: main bus, belts, balancers, inserters, city blocks, spaghetti, ribbon base, hybrid bus→train→city-block | `references/factory-layouts.md` |
 | Train networks, signals, deadlock, schedules, train groups, interrupts, stackers, elevated rails | `references/trains.md` |
 | Megabase planning, SPM targets, UPS optimization, beacons, direct insertion | `references/megabase.md` |
+| Productivity research: mining productivity, recipe productivity techs (steel/processing-unit/plastic-bar/rocket-fuel/etc.), 300% cap, research breakpoints, when to invest | `references/megabase.md` |
 | Space Age planets: Vulcanus, Fulgora, Gleba, Aquilo, planet order, demolishers, scrap recycling, pentapods, heating, Space Age science packs | `references/planets.md` |
 | Space platforms, asteroids, thruster fuel, platform defense, interplanetary logistics | `references/space-platforms.md` |
 | Power: solar, nuclear, Kovarex, steam, fusion, lightning rods/collectors | `references/power.md` |
