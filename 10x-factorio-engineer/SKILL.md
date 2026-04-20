@@ -617,4 +617,64 @@ topics (e.g. "how do I defend my Gleba factory" → `combat-defense.md` + `plane
 
 ---
 
+## 11. Legendary Planning via Asteroid Reprocessing
+
+For **legendary-tier production planning**, prefer `dev/quality_planner.py` over
+`assets/cli.py`.  The planner implements a backward-induction DP quality loop
+solver and the canonical asteroid-reprocessing strategy (80 % aggregate chunk
+retention, quality modules on crushers, fluid-transparent foundry casting).
+
+### When to call it
+
+Invoke `quality_planner.py` when the player asks for:
+
+- "How do I make N legendary &lt;item&gt; per minute?"
+- "Cheapest asteroid input for legendary circuits / gears / plates?"
+- "How many crushers for legendary &lt;chunk&gt; upcycling?"
+
+Keep using `assets/cli.py` for everything else — raw / uncommon / rare
+throughput, bus sizing, bottleneck analysis, and all non-quality math.
+
+### Invocation
+
+```
+python dev/quality_planner.py --item <item-id> --rate <N>
+    [--module-quality normal|uncommon|rare|epic|legendary]   # default: legendary
+    [--assembler-level 2|3]                                   # default: 3
+    [--research NAME=LEVEL ...]                               # e.g. asteroid-productivity=5
+    [--format json|human]                                     # default: human
+```
+
+### V1 scope and fail-fast
+
+V1 supports **Nauvis-style assembly items whose raws are all reachable via
+asteroid reprocessing**: iron, copper, stone, calcite, ice (and water via ice
+melting).  Items requiring planet exclusives or oil-chain fluids fail fast with
+a specific error:
+
+- `ERROR: item '<x>' requires '<raw>', which needs planet '<P>' — not supported in V1`
+- `ERROR: recipe '<r>' is self-recycling (output recycles to itself) — not supported in V1`
+- `ERROR: no asteroid path to required raw '<raw>'`
+
+Fail-fast items include tungsten products (Vulcanus), holmium / superconductor
+(Fulgora self-recycling), and anything depending on plastic / sulfur / lubricant
+/ explosives / rocket-fuel (oil chain).  Tell the player why the V1 planner
+cannot handle their item and point them to the CLI for a regular throughput
+calculation or to `references/quality.md` for manual planning guidance.
+
+### Output summary
+
+The planner emits:
+
+- `asteroid_input` — normal-chunk rate per chunk type needed
+- `stages[]` — reprocessing, raw-crushing, casting, and assembly stages with
+  machine counts and module configurations per quality tier
+- `total_machine_count` — sum across all stages
+
+For strategic / qualitative questions about quality mechanics, module placement,
+beacon interactions with quality, and upcycling mindset — read
+`references/quality.md` and synthesize.
+
+---
+
 *End of skill definition.*

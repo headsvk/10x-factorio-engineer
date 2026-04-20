@@ -120,6 +120,9 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/test_cli.py` | `unittest` suite (198 tests, stdlib only) — dev only |
+| `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
+| `dev/test_quality_planner.py` | `unittest` suite (50 tests) for quality_planner |
+| `dev/quality_planner_v1.md` | Spec document for the V1 planner — scope, algorithm, deferred features |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
 | `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki/crawl.py crawl` (~15 min) |
@@ -435,6 +438,23 @@ python -m unittest dev.test_cli -v
 | `TestHumanReadableOutput` | `format_human_readable()` returns non-JSON text; header contains item+rate; sections present (Production Steps, Raw Resources, Miners Needed, Power); machine names in steps; module/beacon config in header and detail lines; machine quality in step label; pumpjack shows yield%; bus inputs section when bus items present |
 | `TestLocationFilter` | `--location` raw_set filtering (vulcanus has tungsten-ore+sulfuric-acid, not iron-ore; gleba has yumako+jellynut+spoilage as raw; space-platform is empty); planet surface_conditions filtering; explicit `--recipe` override bypasses planet filter; `location` field in JSON output; Vulcanus water→steam-condensation+acid-neutralisation; Gleba plastic/sulfur/lubricant→bio-substitutes; Aquilo ice→ammoniacal-solution-separation |
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
+
+### `dev/test_quality_planner.py` (50 tests)
+
+Covers the V1 legendary planner in `dev/quality_planner.py`:
+
+| Class | What's tested |
+|-------|---------------|
+| `TestDPKernel` | `_quality_chance` (zero-modules, T3 legendary, linear stacking, clamping at 100%); `_tier_skip_probs` (90/9/0.9/0.1 distribution, sum=1, caps at legendary); `_prod_bonus` scaling |
+| `TestDPKernelYields` | Wiki-style yield numbers for iron-plate electric-furnace self-loop (within expected 0.05–5% band); legendary modules beat normal by >2x; +300% prod cap saturates at high research levels |
+| `TestAsteroidReprocessing` | Reprocessing recipe aggregate retention = 0.8; legendary yield positive and < 1.0; all three chunk types give identical yields; higher module quality / tier give higher yields; unknown chunk returns zero |
+| `TestFluidTransparency` | `casting-iron` picked over `iron-plate` on Nauvis; `casting-copper-cable` picked over `copper-cable`; `molten-iron` picks ore variant (not lava) on Nauvis due to planet-exclusive filter; fluid set correctness |
+| `TestAssemblyPropagation` | Electronic-circuit end-stage flagged `inputs_all_legendary=True`; iron-gear-wheel chain includes reprocessing + crushing + foundry casting |
+| `TestResearchProd` | Research lookup for asteroid-productivity; no research returns 0; unknown techs ignored; asteroid research reduces required raw chunk input |
+| `TestFailFast` | Tungsten-plate → Vulcanus error; holmium-plate → self-recycling blocklist; superconductor → self-recycling; tungsten-carbide → blocklist; plastic-bar / processing-unit / artillery-shell → oil-chain error |
+| `TestEndToEnd` | Electronic-circuit @ 60/min full chain; iron-plate and copper-plate simple chains; JSON serialisable output; human format smoke test; rate doubles → asteroid input doubles |
+| `TestHelpers` | `_recipe_result_amount` with probability; `_recipe_ing_amount`; `build_fluid_set` contents; `_humanize` mapping |
+| `TestParseResearch` | `--research NAME=LEVEL` parsing round-trip; empty list |
 
 ---
 

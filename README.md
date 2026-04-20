@@ -29,6 +29,8 @@ dev/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (198 tests, stdlib only)
+  quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
+  test_quality_planner.py   # unittest suite (50 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -148,9 +150,27 @@ See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags refere
 
 ```bash
 python -m unittest dev.test_cli -v
+python -m unittest dev.test_quality_planner -v
 ```
 
-198 tests, stdlib only.
+198 CLI tests + 50 quality-planner tests, stdlib only.
+
+### Legendary Production Planner (V1)
+
+`dev/quality_planner.py` is a separate tool focused on legendary-tier production via
+asteroid reprocessing.  It computes the cheapest asteroid-chunk input rate and the
+per-stage machine / module layout for a target legendary item + rate.
+
+```bash
+python dev/quality_planner.py --item electronic-circuit --rate 60 \
+    --module-quality legendary \
+    --research asteroid-productivity=5
+```
+
+Scope is limited to Nauvis-style assembly items whose raws are reachable via asteroid
+reprocessing (iron, copper, stone, calcite, ice).  Items requiring planet exclusives
+(tungsten, holmium, fluorine, Gleba biolocals) or oil-chain fluids fail fast with a
+specific error — see `dev/quality_planner_v1.md` for full V1 scope.
 
 ---
 
@@ -192,7 +212,7 @@ the same data that powers <https://kirkmcdonald.github.io/calc.html>.
 
 ### CLI / Calculator
 
-- **Quality recycling loops** — model the throughput cost of quality recycling lines for legendary production
+- **Quality recycling loops** — V1 implemented in `dev/quality_planner.py` (asteroid-path only); V2 will extend to per-item recycling loops, planet exclusives, and self-recycling items
 
 ### Skill / Workflow
 
