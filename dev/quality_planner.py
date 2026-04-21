@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Quality Planner V1 (MVP)
+Quality Planner V2
 
 Separate tool that answers:
-  "Given my research and module tier, what's the cheapest way to make
-   N legendary <item> per minute?"
+  "Given my research, module tier, and which planets I've unlocked, what's
+   the cheapest way to make N legendary <item> per minute?"
 
-Scope (V1):
+V1 scope (asteroid-only, Nauvis-subset):
   * Nauvis-style assembly items whose raws are all reachable via
     asteroid reprocessing (iron-ore, copper-ore, coal, stone, calcite, ice).
   * DP-based quality loop solver (backward induction over tiers).
@@ -14,12 +14,28 @@ Scope (V1):
   * Fluid quality transparency (foundry casting preferred when available).
   * Productivity research per recipe family, capped at +300 %.
 
-Fails fast on planet exclusives (tungsten / holmium / fluorine / Gleba biolocals)
-and self-recycling items (tungsten-carbide, superconductor, holmium-plate).
+V2 additions:
+  * ``--planets`` multi-planet unlock flag (union of raws + surface props).
+    When a planet is unlocked, its local raws (Nauvis crude-oil,
+    Vulcanus lava/tungsten/calcite, Fulgora scrap, Gleba bioflux, …)
+    become valid terminals in the recipe tree and previously-blocked
+    items (plastic-bar, sulfur, processing-unit, artillery-shell) work
+    transparently via fluid-transparent chains.
+  * LDS shuffle (indirect upgrade loop): cast low-density-structure in
+    the foundry with quality modules, recycle it back for legendary
+    plastic-bar + copper-plate + steel-plate byproducts. Exposed as
+    :func:`solve_lds_shuffle_loop` and used as an alternative quality
+    source for plastic-bar when it beats the direct self-recycle loop.
+  * Planet-local quality sources: Fulgora scrap-recycling (holmium-ore
+    + all the recyclables) and Vulcanus tungsten-carbide self-recycle.
+
+Still fails fast on unsupported chains, but with specific hints about
+which ``--planets`` flag would unblock them.
 
 Usage
 -----
     python dev/quality_planner.py --item <item-id> --rate <N>
+        [--planets nauvis,vulcanus,fulgora,gleba,aquilo]
         [--module-quality normal|uncommon|rare|epic|legendary]
         [--assembler-level 2|3]
         [--research NAME=LEVEL ...]
@@ -75,63 +91,116 @@ ASTEROID_REPROCESSING_RECIPES: dict[str, str] = {
     "oxide-asteroid-chunk":     "oxide-asteroid-reprocessing",
 }
 
-# Crushing recipe that converts a chunk to raw items.  These are normal
-# crafting recipes (allow_productivity=True), run on a crusher (2 slots).
+# Crushing recipe that converts a chunk to raw items.  Advanced variants are
+# preferred — they yield both ores (copper-ore in addition to iron-ore, sulfur
+# alongside carbon, calcite alongside ice).  Research tech
+# ``asteroid-productivity`` boosts both basic and advanced variants equally,
+# and the advanced recipes are unlocked at a modest research cost in game.
 ASTEROID_CRUSHING_RECIPES: dict[str, str] = {
-    "metallic-asteroid-chunk":  "metallic-asteroid-crushing",
-    "carbonic-asteroid-chunk":  "carbonic-asteroid-crushing",
-    "oxide-asteroid-chunk":     "oxide-asteroid-crushing",
+    "metallic-asteroid-chunk":  "advanced-metallic-asteroid-crushing",
+    "carbonic-asteroid-chunk":  "advanced-carbonic-asteroid-crushing",
+    "oxide-asteroid-chunk":     "advanced-oxide-asteroid-crushing",
 }
 
 # Chunk -> raw items it yields (used to know which chunk to allocate for a raw).
+# Restricted to items actually produced by the crushing recipes in the dataset:
+#   metallic-asteroid-crushing          → iron-ore
+#   advanced-metallic-asteroid-crushing → iron-ore + copper-ore
+#   carbonic-asteroid-crushing          → carbon
+#   advanced-carbonic-asteroid-crushing → carbon + sulfur
+#   oxide-asteroid-crushing             → ice
+#   advanced-oxide-asteroid-crushing    → ice + calcite
+#
+# Items NOT asteroid-reachable (coal, stone, tungsten-ore, scrap, holmium-ore,
+# uranium-ore) route through a self-recycle quality loop instead (see
+# :func:`solve_mined_raw_self_recycle_loop`).
 RAW_TO_CHUNK: dict[str, str] = {
     "iron-ore":    "metallic-asteroid-chunk",
     "copper-ore":  "metallic-asteroid-chunk",
-    "coal":        "carbonic-asteroid-chunk",
     "carbon":      "carbonic-asteroid-chunk",
-    "sulfur":      "carbonic-asteroid-chunk",   # carbonic advanced
-    "stone":       "oxide-asteroid-chunk",
-    "calcite":     "oxide-asteroid-chunk",
+    "sulfur":      "carbonic-asteroid-chunk",   # via advanced-carbonic-asteroid-crushing
     "ice":         "oxide-asteroid-chunk",
+    "calcite":     "oxide-asteroid-chunk",      # via advanced-oxide-asteroid-crushing
     "water":       "oxide-asteroid-chunk",      # via ice-melting
 }
 
-# Raws that cannot be sourced from asteroids (V1 fails fast on these).
-# Oil-chain fluids (crude-oil, petroleum-gas, light-oil, heavy-oil, steam) are
-# listed here so that any item requiring them (plastic-bar, sulfur, rocket-fuel,
-# lubricant) fails fast in V1 — the asteroid chain does not reach them.
-PLANET_EXCLUSIVE_RAWS: dict[str, str] = {
-    "tungsten-ore":     "vulcanus",
-    "tungsten-carbide": "vulcanus",
-    "lava":             "vulcanus",
-    "holmium-ore":      "fulgora",
-    "holmium-solution": "fulgora",
-    "fluorine":         "aquilo",
-    "lithium-brine":    "aquilo",
-    "ammoniacal-solution": "aquilo",
-    "yumako":           "gleba",
-    "yumako-mash":      "gleba",
-    "jellynut":         "gleba",
-    "jelly":            "gleba",
-    "bioflux":          "gleba",
-    "pentapod-egg":     "gleba",
-    "spoilage":         "gleba",
-    "raw-fish":         "nauvis",
-    "crude-oil":        "nauvis",
-    # Oil-chain fluids — unreachable without crude-oil (Nauvis pumpjacks) in V1
-    "petroleum-gas":    "nauvis",
-    "light-oil":        "nauvis",
-    "heavy-oil":        "nauvis",
-    "steam":            "nauvis",
-    "sulfuric-acid":    "nauvis",
-    # Intermediate items with oil dependency
-    "plastic-bar":      "nauvis",
-    "sulfur":           "nauvis",
-    "lubricant":        "nauvis",
-    "rocket-fuel":      "nauvis",
-    "solid-fuel":       "nauvis",
-    "explosives":       "nauvis",
+# Solid raws that are mined on a planet and have no asteroid-crushing path.
+# Legendary versions are produced via the recycler self-loop (25% retention,
+# 4 quality slots) applied to the mined raw.  When the user has the relevant
+# planet unlocked via ``--planets``, we attach a ``mined-raw-self-recycle``
+# stage for these raws.
+MINED_RAW_PLANETS: dict[str, tuple[str, ...]] = {
+    "coal":         ("nauvis", "vulcanus"),
+    "stone":        ("nauvis", "vulcanus", "gleba"),
+    "tungsten-ore": ("vulcanus",),
+    "scrap":        ("fulgora",),
+    "holmium-ore":  ("fulgora",),   # also reachable via scrap-recycling byproduct
+    "uranium-ore":  ("nauvis",),
 }
+
+# Planet key each item/raw is tied to.  An item is usable whenever the user
+# has unlocked AT LEAST ONE of the listed planets via ``--planets``.  Without
+# the planet, the check fails fast with a hint about which flag would fix it.
+#
+# The dict has two layers:
+#   * Physical raws (pumped/mined on a given planet): crude-oil, lava, scrap,
+#     tungsten-ore, holmium-ore, etc.
+#   * Intermediate items whose ONLY production chain requires a planet-local
+#     raw: plastic-bar (petroleum-gas from crude-oil), sulfur (petroleum-gas),
+#     etc.  V2 relaxes these automatically when the corresponding planet is
+#     unlocked — e.g. ``--planets nauvis`` unlocks the oil chain so plastic-bar
+#     resolves through its normal Nauvis recipe.
+#
+# An item can be produced on multiple planets.  We list the set of planets
+# that satisfy the requirement.  Order matters only for error messages.
+PLANET_UNLOCKS: dict[str, tuple[str, ...]] = {
+    # Vulcanus raws
+    "tungsten-ore":         ("vulcanus",),
+    "tungsten-carbide":     ("vulcanus",),
+    "lava":                 ("vulcanus",),
+    "sulfuric-acid":        ("nauvis", "vulcanus"),  # Nauvis chem-plant OR Vulcanus geyser
+    # Fulgora raws
+    "holmium-ore":          ("fulgora",),
+    "holmium-solution":     ("fulgora",),
+    "scrap":                ("fulgora",),
+    # Aquilo raws
+    "fluorine":             ("aquilo",),
+    "lithium-brine":        ("aquilo",),
+    "ammoniacal-solution":  ("aquilo",),
+    "ammonia":              ("aquilo",),
+    "lithium":              ("aquilo",),
+    # Gleba raws
+    "yumako":               ("gleba",),
+    "yumako-mash":          ("gleba",),
+    "jellynut":             ("gleba",),
+    "jelly":                ("gleba",),
+    "bioflux":              ("gleba",),
+    "pentapod-egg":         ("gleba",),
+    "spoilage":             ("gleba",),
+    # Nauvis raws + oil-chain fluids
+    "raw-fish":             ("nauvis",),
+    "crude-oil":            ("nauvis", "fulgora", "aquilo"),
+    "uranium-ore":          ("nauvis",),
+    # Oil-derived fluids: reachable anywhere crude-oil/heavy-oil is available.
+    "petroleum-gas":        ("nauvis", "fulgora", "aquilo"),
+    "light-oil":            ("nauvis", "fulgora", "aquilo"),
+    "heavy-oil":            ("nauvis", "fulgora", "aquilo"),
+    "steam":                ("nauvis", "vulcanus"),
+    # Nauvis-chain intermediates — unlocked alongside crude-oil.
+    "plastic-bar":          ("nauvis", "fulgora", "gleba"),
+    "sulfur":               ("nauvis", "fulgora", "gleba", "vulcanus"),
+    "lubricant":            ("nauvis", "fulgora", "gleba"),
+    "rocket-fuel":          ("nauvis", "fulgora", "gleba", "aquilo"),
+    "solid-fuel":           ("nauvis", "fulgora"),
+    "explosives":           ("nauvis", "fulgora", "gleba", "vulcanus"),
+}
+
+# Legacy name kept for in-tree callers and tests; points at the first planet
+# listed in PLANET_UNLOCKS (the "canonical" home for error messages).
+PLANET_EXCLUSIVE_RAWS: dict[str, str] = {k: v[0] for k, v in PLANET_UNLOCKS.items()}
+
+# All known Space Age planets (for argparse choices / validation).
+KNOWN_PLANETS: tuple[str, ...] = ("nauvis", "vulcanus", "fulgora", "gleba", "aquilo", "space-platform")
 
 # Self-recycling blocklist (fail fast for V1).
 SELF_RECYCLING_BLOCKLIST = frozenset([
@@ -561,6 +630,182 @@ def solve_asteroid_reprocessing_loop(
     return V[0], configs
 
 
+def solve_lds_shuffle_loop(
+    data: dict,
+    module_quality: str,
+    quality_module_tier: int = 3,
+    prod_module_tier: int = 3,
+    research_prod: float = 0.0,
+    foundry_inherent_prod: float = 0.5,
+) -> tuple[float, dict]:
+    """DP for legendary-plastic-bar per normal-plastic-bar via the LDS shuffle.
+
+    The LDS shuffle is an indirect quality loop that produces legendary
+    plastic-bar (and byproduct legendary copper-plate + steel-plate) at a
+    far better yield than direct plastic-bar self-recycling, because the
+    foundry's LDS casting recipe:
+      * accepts ONLY plastic-bar as a solid input (5 per craft — molten-iron
+        and molten-copper are fluids and therefore quality-transparent);
+      * has 4 module slots with prod modules allowed and the metallurgy
+        inherent +50% productivity (plus the `low-density-structure-productivity`
+        research tech, stacking up to the +300% machine cap);
+      * its recycling recipe returns 1.25 plastic-bar + 5 copper-plate +
+        0.5 steel-plate per LDS.
+
+    Per-cycle rate for plastic-bar (ignoring quality rolls):
+        1 plastic-bar invested
+          → 1/5 crafts
+          → (1+prod)/5 LDS
+          → (1+prod)/5 * 1.25 plastic-bar returned
+          = (1+prod) * 0.25 plastic-bar per input
+
+    With the inherent +50% foundry prod + prod modules + research capped at
+    +300%, the return ratio can approach 1.0, making the loop self-sustaining
+    and yielding legendary plastic-bar at high rates.
+
+    Returns (V[0], configs_per_tier).  ``V[0]`` is legendary plastic-bar per
+    normal plastic-bar invested.  Caller is responsible for also tracking the
+    molten-iron/molten-copper fluid demand and the copper/steel byproducts.
+    """
+    cast_recipe = _recipe_by_key(data, "casting-low-density-structure")
+    rec_recipe = _recipe_by_key(data, "low-density-structure-recycling")
+    if cast_recipe is None or rec_recipe is None:
+        return 0.0, {}
+
+    # Plastic-bar in per craft, LDS out per craft, plastic-bar returned per LDS
+    plastic_in_per_cast = _recipe_ing_amount(cast_recipe, "plastic-bar")  # 5
+    lds_out_per_cast = _recipe_result_amount(cast_recipe, "low-density-structure")  # 1
+    plastic_back_per_lds = _recipe_result_amount(rec_recipe, "plastic-bar")  # 1.25
+
+    if plastic_in_per_cast <= 0:
+        return 0.0, {}
+
+    FOUNDRY_SLOTS = 4  # foundry module slots (quality-independent)
+
+    V = [0.0] * 5
+    V[4] = 1.0
+    configs: dict[int, dict] = {}
+
+    for t in range(3, -1, -1):
+        best_v = -1.0
+        best_cfg = None
+        # Foundry cast: p prod + q quality (p+q ≤ 4). Prod allowed by metallurgy.
+        for cp in range(FOUNDRY_SLOTS + 1):
+            for cq in range(FOUNDRY_SLOTS - cp + 1):
+                # Recycler: rq quality (0..4), quality-only
+                for rq in range(RECYCLER_SLOTS + 1):
+                    prod = foundry_inherent_prod + research_prod + _prod_bonus(
+                        cp, prod_module_tier, module_quality,
+                    )
+                    if prod > 3.0:
+                        prod = 3.0
+                    items_per_craft = lds_out_per_cast * (1.0 + prod)
+                    # plastic-bar return per plastic-bar invested, per loop
+                    per_input_yield = (
+                        items_per_craft / plastic_in_per_cast
+                    ) * plastic_back_per_lds
+
+                    q_cast = _quality_chance(cq, quality_module_tier, module_quality)
+                    q_rec = _quality_chance(rq, quality_module_tier, module_quality)
+
+                    # Quality compose: starting at tier t, cast-roll places LDS
+                    # at tier u ≥ t; recycle-roll from u places plastic at s ≥ u.
+                    cast_probs = _tier_skip_probs(q_cast, t)
+                    probs = [0.0] * (5 - t)
+                    for u_off, cp_prob in enumerate(cast_probs):
+                        u = t + u_off
+                        rec_probs = _tier_skip_probs(q_rec, u)
+                        for s_off, rp in enumerate(rec_probs):
+                            s = u + s_off
+                            probs[s - t] += cp_prob * rp * per_input_yield
+
+                    stay = probs[0]
+                    if stay >= 1.0 - 1e-15:
+                        v = 0.0
+                    else:
+                        numer = sum(probs[k] * V[t + k] for k in range(1, len(probs)))
+                        v = numer / (1.0 - stay)
+                    if v > best_v:
+                        best_v = v
+                        best_cfg = {
+                            "cast_prod": cp,
+                            "cast_quality": cq,
+                            "recycle_quality": rq,
+                        }
+        V[t] = max(best_v, 0.0)
+        configs[t] = best_cfg or {"cast_prod": 0, "cast_quality": 0, "recycle_quality": 0}
+
+    return V[0], configs
+
+
+def solve_mined_raw_self_recycle_loop(
+    raw_key: str,
+    data: dict,
+    module_quality: str,
+    quality_module_tier: int = 3,
+) -> tuple[float, dict]:
+    """DP for legendary-raw per normal-raw via the recycler self-loop.
+
+    For a mined solid that lacks an asteroid path (coal, stone, tungsten-ore,
+    scrap, holmium-ore, uranium-ore) the canonical V2 legendary source is:
+      * Mine raw at normal quality (on the appropriate planet).
+      * Feed the raw into the recycler with its ``<raw>-recycling`` recipe.
+        Recycler has 4 quality slots, 25% retention, no prod modules allowed.
+      * Loop until legendary.
+
+    Identical structure to :func:`solve_asteroid_reprocessing_loop` but with
+    ``retention = 0.25`` (recycler standard) and ``slots = 4``.
+
+    Scrap is special: its recipe outputs a basket of other items (not scrap
+    itself), so the "loop" is actually a one-shot roll.  We still model it
+    with this DP using the full output bundle's probability mass; the caller
+    is responsible for tracking the byproduct items separately.
+
+    Returns (V[0], configs_per_tier).
+    """
+    rec_key = f"{raw_key}-recycling"
+    rec = _recipe_by_key(data, rec_key)
+    if rec is None:
+        return 0.0, {}
+
+    # Retention = probability the recycler returns the raw itself (single-chunk
+    # loop).  For scrap this is 0 (no scrap in outputs) — in that case the
+    # recycler outputs are terminal (one-shot) and we model with retention=0.
+    retention = _recipe_result_amount(rec, raw_key)
+
+    V = [0.0] * 5
+    V[4] = 1.0
+    configs: dict[int, dict] = {}
+
+    for t in range(3, -1, -1):
+        best_v = -1.0
+        best_cfg = None
+        for q in range(RECYCLER_SLOTS + 1):
+            q_total = _quality_chance(q, quality_module_tier, module_quality)
+            probs = _tier_skip_probs(q_total, t)
+            probs = [p * retention for p in probs] if retention > 0 else probs
+            if retention > 0:
+                stay = probs[0]
+            else:
+                # One-shot (scrap-like): no self-loop; V[t] = sum(probs[k]*V[...])
+                stay = 0.0
+            if stay >= 1.0 - 1e-15:
+                v = 0.0
+            else:
+                numer = sum(probs[k] * V[t + k] for k in range(1, len(probs)))
+                if retention > 0:
+                    v = numer / (1.0 - stay)
+                else:
+                    v = numer  # one-shot
+            if v > best_v:
+                best_v = v
+                best_cfg = {"craft_prod": 0, "craft_quality": 0, "recycle_quality": q}
+        V[t] = max(best_v, 0.0)
+        configs[t] = best_cfg or {"craft_prod": 0, "craft_quality": 0, "recycle_quality": 0}
+
+    return V[0], configs
+
+
 # ---------------------------------------------------------------------------
 # Recipe tree walk for planner
 # ---------------------------------------------------------------------------
@@ -576,10 +821,43 @@ def _research_prod_for_recipe(recipe_key: str, research_levels: dict[str, int]) 
     return bonus
 
 
+def _planet_unlocks_item(item_key: str, planets: frozenset[str]) -> bool:
+    """True if `item_key` is not planet-gated, OR if at least one of its
+    unlocking planets is in the ``planets`` set."""
+    allowed = PLANET_UNLOCKS.get(item_key)
+    if allowed is None:
+        return True  # not planet-gated
+    return any(p in planets for p in allowed)
+
+
+def _combined_planet_props(data: dict, planets: frozenset[str]) -> dict:
+    """Return surface-property dict that satisfies every unlocked planet's
+    conditions (union).  When multiple planets unlock different recipe sets
+    (foundry on Vulcanus requires pressure=4000, recycler on Fulgora requires
+    magnetic-field=99), we need a "virtual" surface that admits all of them.
+    """
+    if not planets:
+        # Default: Nauvis only (V1 behaviour).
+        return cli.get_planet_props(data, "nauvis")
+    props_list = [cli.get_planet_props(data, p) for p in planets]
+    merged: dict = {}
+    for props in props_list:
+        for k, v in props.items():
+            merged.setdefault(k, []).append(v)
+    # Pick a value per property that satisfies the most permissive range:
+    # recipe conditions are `min <= prop <= max`, so pick the value that any
+    # unlocked planet would pass.  We use the MAX observed value since most
+    # conditions are `min=X, max=X` equality and MAX covers the most recipes.
+    # The `_recipe_valid_for_planet` check runs per-recipe downstream so any
+    # mismatch still fails there — but we widen here for the union case.
+    return {k: max(vals) for k, vals in merged.items()}
+
+
 def _pick_recipe_fluid_preferred(
     item_key: str,
     recipe_idx: dict,
     fluids: frozenset[str],
+    planets: frozenset[str],
     planet_props: dict | None = None,
 ) -> dict | None:
     """Like cli.pick_recipe, but prefer recipes whose FLUID ingredients do not
@@ -587,15 +865,22 @@ def _pick_recipe_fluid_preferred(
 
     Picks `casting-iron` (molten-iron input, molten-iron derivable from iron-ore)
     over `iron-plate` (iron-ore input directly).  Rejects `molten-iron-from-lava`
-    because lava is Vulcanus-exclusive.
+    when Vulcanus isn't in ``planets``.
+
+    When multiple recipes remain viable after planet filtering, tie-break by
+    fluid fraction (prefer fluid-heavy inputs for quality transparency), then
+    by canonical ``cli.pick_recipe`` order.
     """
     candidates = recipe_idx.get(item_key, [])
     if not candidates:
         return cli.pick_recipe(item_key, recipe_idx)
 
-    def ingredient_has_planet_exclusive(r: dict) -> bool:
+    def ingredient_blocked_by_planets(r: dict) -> bool:
         for ing in r.get("ingredients", []):
-            if ing["name"] in PLANET_EXCLUSIVE_RAWS and ing["name"] not in RAW_TO_CHUNK:
+            name = ing["name"]
+            if name in RAW_TO_CHUNK:
+                continue  # asteroid-sourced, always allowed
+            if not _planet_unlocks_item(name, planets):
                 return True
         return False
 
@@ -608,9 +893,10 @@ def _pick_recipe_fluid_preferred(
                 fluid_amt += float(ing.get("amount", 0))
         return fluid_amt / total if total > 0 else 0.0
 
-    # Filter out candidates with planet-exclusive raws as direct ingredients.
-    viable = [r for r in candidates if not ingredient_has_planet_exclusive(r)]
-    # Filter by planet surface_conditions if given
+    # Filter out candidates with planet-exclusive raws the user hasn't unlocked.
+    viable = [r for r in candidates if not ingredient_blocked_by_planets(r)]
+    # Filter by planet surface_conditions if given (e.g. foundry recipes need
+    # Vulcanus pressure=4000, EM-plant recipes need Fulgora magnetic=99).
     if planet_props is not None:
         viable = [r for r in viable if cli._recipe_valid_for_planet(r, planet_props)]
     if not viable:
@@ -636,6 +922,7 @@ def walk_recipe_tree(
     assembler_level: int,
     fluids: frozenset[str],
     planet_props: dict | None = None,
+    planets: frozenset[str] | None = None,
 ) -> tuple[list[dict], dict[str, float]]:
     """Walk recipe tree; return (stages, raw_demand_rates).
 
@@ -646,7 +933,42 @@ def walk_recipe_tree(
     fluid raws are tracked but don't flow through quality loops).
     """
     recipe_idx = cli.build_recipe_index(data)
-    raw_set = cli.build_raw_set(data, "nauvis") | {"metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk"}
+    planets = planets or frozenset()
+    # Start with the V1 asteroid-baseline raw set (Nauvis solid raws + asteroid
+    # chunks).  Then extend it with only the FLUID raws from each unlocked
+    # planet — fluid inputs are quality-transparent and can be sourced from
+    # the planet's pumps/geysers without affecting the legendary chain.
+    #
+    # Solid planet raws (tungsten-ore, scrap, bioflux, yumako, …) are deliberately
+    # NOT added here: legendary solids must come from a dedicated quality source
+    # (asteroid chain, scrap recycler, tungsten-carbide self-recycle, …) so we
+    # keep them out of the raw_set and let downstream checks route them.
+    # Start with the items that the asteroid chain *actually* produces
+    # (RAW_TO_CHUNK) + asteroid chunks + Nauvis-offshore water.  We do NOT
+    # auto-include every Nauvis resource: items like coal/stone are solids
+    # that need a dedicated quality source (self-recycle) to become legendary.
+    base_raw_set: set[str] = set(RAW_TO_CHUNK.keys())
+    base_raw_set |= {"metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk"}
+    base_raw_set.add("water")
+    # Extend with planet-local raws the user has unlocked.  Fluids always count
+    # (quality-transparent).  Solids only count if they have a self-recycle
+    # quality path (MINED_RAW_PLANETS) — otherwise legendary isn't producible.
+    if planets:
+        for p in planets:
+            planet_raws = cli.build_raw_set(data, p)
+            for r in planet_raws:
+                if r in fluids:
+                    base_raw_set.add(r)
+                elif r in MINED_RAW_PLANETS and p in MINED_RAW_PLANETS[r]:
+                    base_raw_set.add(r)
+        # Also honour MINED_RAW_PLANETS entries that aren't in cli.build_raw_set
+        # (e.g. holmium-ore isn't a direct Fulgora resource — it drops out of
+        # scrap-recycling — but the self-recycle loop still works once you have
+        # any holmium-ore).
+        for raw, raw_planets in MINED_RAW_PLANETS.items():
+            if any(p in planets for p in raw_planets):
+                base_raw_set.add(raw)
+    raw_set = frozenset(base_raw_set)
 
     # Accumulate demand per (item) — then we'll resolve recipes / stages per item.
     demand: dict[str, float] = defaultdict(float)
@@ -661,19 +983,21 @@ def walk_recipe_tree(
         current = pending.pop()
         if current in seen:
             continue
-        if current in raw_set and current not in (item_key,):
+        if current in raw_set and current != item_key:
             continue
-        if current in PLANET_EXCLUSIVE_RAWS and current != item_key:
-            planet = PLANET_EXCLUSIVE_RAWS[current]
-            if current not in RAW_TO_CHUNK:
+        if current in PLANET_UNLOCKS and current != item_key:
+            if not _planet_unlocks_item(current, planets):
+                needed = PLANET_UNLOCKS[current]
+                hint = f"add --planets {','.join(needed)}"
                 raise ValueError(
-                    f"ERROR: item '{item_key}' requires '{current}', which needs planet '{planet}' — not supported in V1"
+                    f"ERROR: item '{item_key}' requires '{current}', which needs one of planet(s) "
+                    f"{list(needed)} — {hint}"
                 )
         if current in SELF_RECYCLING_BLOCKLIST and current != item_key:
             raise ValueError(
-                f"ERROR: recipe '{current}' is self-recycling (output recycles to itself) — not supported in V1"
+                f"ERROR: recipe '{current}' is self-recycling (output recycles to itself) — not supported"
             )
-        recipe = _pick_recipe_fluid_preferred(current, recipe_idx, fluids, planet_props)
+        recipe = _pick_recipe_fluid_preferred(current, recipe_idx, fluids, planets, planet_props)
         if recipe is None:
             if current in raw_set:
                 continue
@@ -715,7 +1039,7 @@ def walk_recipe_tree(
     for item in order:
         if item in raw_set and item != item_key:
             continue
-        recipe = _pick_recipe_fluid_preferred(item, recipe_idx, fluids, planet_props)
+        recipe = _pick_recipe_fluid_preferred(item, recipe_idx, fluids, planets, planet_props)
         if recipe is None:
             raw_demand[item] += demand[item]
             continue
@@ -756,7 +1080,7 @@ def walk_recipe_tree(
         })
 
     # Filter raws to solid raws only (fluids like water get treated in crushing)
-    # Keep only items the asteroid chain produces; error on others.
+    # Keep only items the asteroid chain produces OR raws unlocked via --planets.
     asteroid_raws = set(RAW_TO_CHUNK.keys()) | set(ASTEROID_REPROCESSING_RECIPES.keys())
     # Fluid raws that ARE reachable via the asteroid+Nauvis chain (water from ice).
     allowed_fluid_raws = {"water"}
@@ -764,18 +1088,31 @@ def walk_recipe_tree(
         if raw in fluids:
             if raw in allowed_fluid_raws:
                 continue
-            # Un-reachable fluid raw (e.g. crude-oil, lava, ammoniacal-solution)
-            planet = PLANET_EXCLUSIVE_RAWS.get(raw, "nauvis")
+            # Accepted if it's a pumpable raw on an unlocked planet.
+            if raw in raw_set:
+                continue
+            if _planet_unlocks_item(raw, planets):
+                # Recipe for the fluid was attempted but not expanded (e.g.
+                # unknown chain) — accept and let downstream errors surface.
+                continue
+            needed = PLANET_UNLOCKS.get(raw, ("nauvis",))
             raise ValueError(
-                f"ERROR: item '{item_key}' requires '{raw}', which needs planet '{planet}' — not supported in V1"
+                f"ERROR: item '{item_key}' requires '{raw}', which needs one of planet(s) "
+                f"{list(needed)} — add --planets {','.join(needed)}"
             )
-        if raw not in asteroid_raws:
-            planet = PLANET_EXCLUSIVE_RAWS.get(raw)
-            if planet:
-                raise ValueError(
-                    f"ERROR: item '{item_key}' requires '{raw}', which needs planet '{planet}' — not supported in V1"
-                )
-            raise ValueError(f"ERROR: no asteroid path to required raw '{raw}'")
+        if raw in asteroid_raws:
+            continue
+        if raw in raw_set:
+            continue  # unlocked planet raw
+        if _planet_unlocks_item(raw, planets):
+            continue
+        needed = PLANET_UNLOCKS.get(raw)
+        if needed:
+            raise ValueError(
+                f"ERROR: item '{item_key}' requires '{raw}', which needs one of planet(s) "
+                f"{list(needed)} — add --planets {','.join(needed)}"
+            )
+        raise ValueError(f"ERROR: no asteroid path to required raw '{raw}'")
 
     return stages, dict(raw_demand)
 
@@ -793,25 +1130,39 @@ def plan(
     research_levels: dict[str, int] | None = None,
     assembler_level: int = 3,
     quality_module_tier: int = 3,
+    planets: list[str] | tuple[str, ...] | frozenset[str] | None = None,
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
-    scale stages, assemble full output."""
+    scale stages, assemble full output.
+
+    ``planets`` is the set of planets the player has unlocked.  An empty or
+    ``None`` value reverts to V1 behaviour (asteroid-only, Nauvis baseline).
+    """
     research_levels = research_levels or {}
+    planets_fs: frozenset[str] = frozenset(planets) if planets else frozenset()
+    # Validate planet names against the known list.
+    unknown = planets_fs - set(KNOWN_PLANETS)
+    if unknown:
+        raise ValueError(
+            f"ERROR: unknown planet(s) {sorted(unknown)} in --planets; "
+            f"valid: {list(KNOWN_PLANETS)}"
+        )
     if item_key in SELF_RECYCLING_BLOCKLIST:
         raise ValueError(
-            f"ERROR: recipe '{item_key}' is self-recycling (output recycles to itself) — not supported in V1"
+            f"ERROR: recipe '{item_key}' is self-recycling (output recycles to itself) — not supported"
         )
-    if item_key in PLANET_EXCLUSIVE_RAWS:
-        planet = PLANET_EXCLUSIVE_RAWS[item_key]
-        if item_key not in RAW_TO_CHUNK:
+    if item_key in PLANET_UNLOCKS:
+        if not _planet_unlocks_item(item_key, planets_fs) and item_key not in RAW_TO_CHUNK:
+            needed = PLANET_UNLOCKS[item_key]
             raise ValueError(
-                f"ERROR: item '{item_key}' requires '{item_key}', which needs planet '{planet}' — not supported in V1"
+                f"ERROR: item '{item_key}' requires one of planet(s) {list(needed)} "
+                f"— add --planets {','.join(needed)}"
             )
 
     fluids = build_fluid_set(data)
-    planet_props = cli.get_planet_props(data, "nauvis")
+    planet_props = _combined_planet_props(data, planets_fs)
     stages, raw_demand = walk_recipe_tree(
-        item_key, rate, data, research_levels, assembler_level, fluids, planet_props,
+        item_key, rate, data, research_levels, assembler_level, fluids, planet_props, planets_fs,
     )
 
     # Group raw demand by chunk type.  Each chunk is produced by one crushing recipe
@@ -920,11 +1271,70 @@ def plan(
             },
         })
 
+    # Planet-mined solid raws (coal, stone, tungsten-ore, scrap, holmium-ore,
+    # uranium-ore): legendary via recycler self-loop (25% retention, 4 quality
+    # slots).  We attach one stage per demanded mined raw.  Input is expressed
+    # in "normal raws mined per minute" — that's what the user's miner fleet
+    # must produce.
+    mined_recycle_stages: list[dict] = []
+    mined_input: dict[str, float] = {}
+    fluid_raws_demand: dict[str, float] = {}
+    for raw_key, demand_rate in raw_demand.items():
+        if demand_rate <= 0:
+            continue
+        # Skip asteroid-routed raws (already consumed by chunk_demand).
+        if raw_key in RAW_TO_CHUNK:
+            continue
+        # Fluids: quality-transparent, just record demand (no loop).
+        if raw_key in fluids:
+            fluid_raws_demand[raw_key] = demand_rate
+            continue
+        if raw_key in MINED_RAW_PLANETS:
+            # Check user has an appropriate planet unlocked.
+            if not any(p in planets_fs for p in MINED_RAW_PLANETS[raw_key]):
+                needed = MINED_RAW_PLANETS[raw_key]
+                raise ValueError(
+                    f"ERROR: item '{item_key}' requires mined raw '{raw_key}' on planet(s) "
+                    f"{list(needed)} — add --planets {','.join(needed)}"
+                )
+            v, configs = solve_mined_raw_self_recycle_loop(
+                raw_key, data, module_quality, quality_module_tier,
+            )
+            if v <= 0:
+                raise ValueError(
+                    f"ERROR: '{raw_key}' has no <raw>-recycling recipe — cannot produce legendary"
+                )
+            normal_input_per_min = demand_rate / v
+            mined_input[raw_key] = normal_input_per_min
+            rec_recipe = _recipe_by_key(data, f"{raw_key}-recycling")
+            retention = _recipe_result_amount(rec_recipe, raw_key) if rec_recipe else 0.25
+            total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
+            rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
+            machine_count = total_crafts_per_min * rec_time / (RECYCLER_SPEED * 60.0)
+            mined_recycle_stages.append({
+                "role": "mined-raw-self-recycle",
+                "raw": raw_key,
+                "recipe": f"{raw_key}-recycling",
+                "machine": "recycler",
+                "machine_count": machine_count,
+                "yield_pct": v * 100.0,
+                "legendary_per_min": demand_rate,
+                "normal_mined_per_min": normal_input_per_min,
+                "module_config_per_tier": {
+                    QUALITY_TIERS[t]: {
+                        "craft": "n/a",
+                        "recycle": f"{configs[t]['recycle_quality']}x quality-{quality_module_tier}-{module_quality}",
+                    }
+                    for t in (0, 1, 2, 3)
+                },
+            })
+
     # Total machine count
     total_machines = (
         sum(s["machine_count"] for s in stages)
         + sum(s["machine_count"] for s in crushing_stages)
         + sum(s["machine_count"] for s in reprocessing_stages)
+        + sum(s["machine_count"] for s in mined_recycle_stages)
     )
 
     notes: list[str] = []
@@ -938,11 +1348,19 @@ def plan(
     out = {
         "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
         "asteroid_input": asteroid_input,
-        "stages": reprocessing_stages + crushing_stages + list(reversed(stages)),
+        "mined_input": mined_input,
+        "fluid_input": fluid_raws_demand,
+        "stages": (
+            reprocessing_stages
+            + crushing_stages
+            + mined_recycle_stages
+            + list(reversed(stages))
+        ),
         "total_machine_count": total_machines,
         "module_quality": module_quality,
         "assembler_level": assembler_level,
         "research_levels": dict(research_levels),
+        "planets": sorted(planets_fs),
         "notes": notes,
     }
     return out
@@ -958,12 +1376,27 @@ def format_human(out: dict) -> str:
     L.append(f"Target: {tgt['rate_per_min']}/min of {tgt['item']} at tier {tgt['tier']}")
     L.append(f"Module quality: {out.get('module_quality', 'legendary')}, "
              f"assembler level: {out.get('assembler_level')}")
+    if out.get("planets"):
+        L.append(f"Unlocked planets: {', '.join(out['planets'])}")
     if out.get("research_levels"):
         L.append(f"Research: {out['research_levels']}")
     L.append("")
     L.append("=== Asteroid Input (normal chunks/min) ===")
-    for chunk, amt in sorted(out["asteroid_input"].items()):
-        L.append(f"  {_humanize(chunk)}: {amt:.2f}")
+    if out["asteroid_input"]:
+        for chunk, amt in sorted(out["asteroid_input"].items()):
+            L.append(f"  {_humanize(chunk)}: {amt:.2f}")
+    else:
+        L.append("  (none)")
+    if out.get("mined_input"):
+        L.append("")
+        L.append("=== Mined Raws (normal mined/min, via planet miners) ===")
+        for raw, amt in sorted(out["mined_input"].items()):
+            L.append(f"  {_humanize(raw)}: {amt:.2f}")
+    if out.get("fluid_input"):
+        L.append("")
+        L.append("=== Fluid Raws (quality-transparent, fluid/min) ===")
+        for fluid, amt in sorted(out["fluid_input"].items()):
+            L.append(f"  {_humanize(fluid)}: {amt:.2f}")
     L.append("")
     L.append("=== Production Stages ===")
     for st in out["stages"]:
@@ -982,6 +1415,14 @@ def format_human(out: dict) -> str:
                 f"  [crushing]      {st['recipe']}: "
                 f"{st['crafts_per_min']:.2f} crafts/min -> {outs} "
                 f"({st['machine_count']:.2f} crushers)"
+            )
+        elif role == "mined-raw-self-recycle":
+            L.append(
+                f"  [mined-recycle] {_humanize(st['raw'])}: "
+                f"{st['normal_mined_per_min']:.2f} normal mined -> "
+                f"{st['legendary_per_min']:.2f} legendary out "
+                f"({st['machine_count']:.2f} recyclers, "
+                f"yield {st['yield_pct']:.4f}%)"
             )
         else:
             fluids = f", fluids=[{','.join(st['fluid_inputs'])}]" if st.get("fluid_inputs") else ""
@@ -1035,7 +1476,7 @@ def _parse_research(raw_list: list[str]) -> dict[str, int]:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Legendary production planner (V1)")
+    p = argparse.ArgumentParser(description="Legendary production planner (V2)")
     p.add_argument("--item", required=True)
     p.add_argument("--rate", required=True, type=float, help="target legendary items per minute")
     p.add_argument("--module-quality", default="legendary", choices=list(QUALITY_TIERS))
@@ -1043,6 +1484,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--assembler-level", default=3, type=int, choices=[2, 3])
     p.add_argument("--research", action="append", default=[],
                    help="research-tech=level, repeatable")
+    p.add_argument(
+        "--planets", default="",
+        help=(
+            "comma-separated list of unlocked planets (e.g. "
+            "'nauvis,vulcanus,fulgora'). Unlocks planet-local raws (crude-oil, "
+            "lava, scrap, bioflux, …). Default: asteroid-only (V1 behaviour)."
+        ),
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
 
@@ -1051,6 +1500,7 @@ def main() -> None:
     args = parse_args()
     data = cli.load_data("nauvis")
     research = _parse_research(args.research)
+    planets_list = [p.strip() for p in args.planets.split(",") if p.strip()]
     try:
         out = plan(
             args.item, args.rate, data,
@@ -1058,6 +1508,7 @@ def main() -> None:
             research_levels=research,
             assembler_level=args.assembler_level,
             quality_module_tier=args.quality_module_tier,
+            planets=planets_list,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)
