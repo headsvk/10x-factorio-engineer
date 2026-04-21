@@ -4,6 +4,47 @@ Follow-up to `quality_planner_v1.md`. Expands the planner's reachable item scope
 
 ---
 
+## Handoff (start here)
+
+**Entry points:**
+- Tests: `python dev/test_quality_planner.py` — 73 tests, ~0.07s, must be green before/after any change.
+- Smoke: `python dev/quality_planner.py --item processing-unit --rate 60 --planets nauvis` — should print ~620 machines.
+- Code: `dev/quality_planner.py`, ~1500 LoC, stdlib-only, imports `cli.py` as a library.
+
+**Code map** (line numbers, 2026-04-21):
+- `solve_recycle_loop` @ 480, `solve_asteroid_reprocessing_loop` @ 571 — V1 DP kernels, unchanged in V2.
+- `solve_lds_shuffle_loop` @ 633 — V2 addition, library-only (not called from `plan()`).
+- `solve_mined_raw_self_recycle_loop` @ 741 — V2 addition, called from `plan()`.
+- `_combined_planet_props` @ 833, `_planet_unlocks_item` @ 824 — planet-aware helpers.
+- `_pick_recipe_fluid_preferred` @ 856 — recipe selection, now takes `planets`.
+- `walk_recipe_tree` @ 917 — builds the stage DAG, routes leaves by raw type.
+- `plan` @ 1124 — top-level orchestrator.
+- `format_human` @ 1373, `parse_args` @ 1478, `main` @ 1499.
+
+**Regression anchors** (60/min legendary, module-quality=legendary, no research):
+| target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
+|---|---|---|---|---|---|
+| `iron-plate` | — | 18.3 | metallic 281, oxide 28 | — | — |
+| `processing-unit` | nauvis | 620.2 | metallic 1406, carbonic 703, oxide 59 | coal 321874 | crude-oil 5333 |
+| `artillery-shell` | nauvis,vulcanus | 4945.7 | carbonic 5625, oxide 1842 | coal 643749, tungsten-ore 2574996 | lava 9300 |
+
+These numbers are sanity anchors, not committed expectations — if a refactor moves them, investigate. Exact coal/oil counts are high because assembly stages still run modules-off.
+
+**Pending tasks (not in V3 roadmap — these are V2 leftovers):**
+- `10x-factorio-engineer/SKILL.md` — add a "Legendary planning" pointer to `dev/quality_planner.py` with the `--planets` flag.
+- `README.md` — add a usage example for `--planets`.
+- Neither was updated in the V2 commit; a next session should pick these up before starting V3.
+
+**Gotchas discovered during V2:**
+- V1 `RAW_TO_CHUNK` listed `coal` and `stone` but no crushing recipe produces them — latent bug that masked `plastic-bar` failing for a different reason. V2's `RAW_TO_CHUNK` is restricted to actual crushing outputs; mined-only raws live in `MINED_RAW_PLANETS`.
+- V1 `ASTEROID_CRUSHING_RECIPES` pointed at basic crushing (single-ore output). Copper-plate plans silently got 0 copper-ore. V2 uses `advanced-*-asteroid-crushing` (both ores per recipe).
+- Fulgora's `build_raw_set` does NOT include `holmium-ore` — holmium-ore is a scrap-recycling byproduct, not a direct resource. The walker has a second pass that adds `MINED_RAW_PLANETS` entries when any of their planets is unlocked, to cover this.
+- Many "obvious" V2 test targets are self-recycling and fail fast: `superconductor`, `holmium-plate`, `tungsten-carbide`, `fusion-power-cell`, `supercapacitor`, `teslagun`, `mech-armor`, `lithium`. Use `electrolyte`, `low-density-structure`, `battery`, `artillery-shell`, `processing-unit`, `tungsten-plate` as test targets instead.
+- The `test_fulgora_unlocks_scrap` test previously used `battery` expecting coal — but battery's only chemistry raw is sulfur (asteroid-reachable), so coal isn't needed. V2 swapped to `electrolyte` which genuinely needs holmium-ore.
+- `basic-oil-processing` is the chosen oil recipe because it has fewer fluid byproducts (picks lowest-complexity path in `_pick_recipe_fluid_preferred`).
+
+---
+
 ## Status (2026-04-21)
 
 **V2 shipped.** Same `dev/quality_planner.py` file (~1200 LoC now), same `dev/test_quality_planner.py` (73 tests, all passing). Zero new dependencies.
@@ -187,12 +228,75 @@ Total: 23 new tests; 73 tests overall; all passing.
 
 In priority order:
 
-1. **Cross-item quality solver** (LDS shuffle, rail shuffle, sibling loops). Graph-search over recipes whose output-recycle intersects the target's ingredient set. Joint DP over the subgraph. Byproduct crediting against other leaves.
-2. **Research-state tracking**. `--unlocked-techs T1,T2,...` or `--tech-level NAME=LEVEL` that gates: quality-module tier availability, recycler access, foundry / EM-plant / cryoplant access, asteroid collection (space platform), per-planet landing.
-3. **Self-recycling target items** (superconductor, holmium-plate, tungsten-carbide, fusion-power-cell). Dedicated solver — can't use the generic loop because output is itself the target.
-4. **Gleba biolocals** with spoilage budgets (yumako, jellynut, bioflux, pentapod eggs, nutrients).
-5. **Per-stage assembly module optimization**. V1/V2 leave assembly stages modules-off; a lot of legendary-output throughput on the table.
-6. **Alternate objectives**. Fewest machines, smallest footprint, lowest power, UPS-sensitive.
+### 1. Cross-item quality solver (LDS shuffle, rail shuffle, sibling loops)
+
+`solve_lds_shuffle_loop` already computes the per-plastic-bar legendary yield of the LDS shuffle. The missing piece is deciding **whether to use it** and **how to credit byproducts** inside `plan()`.
+
+**The decision problem:**
+- LDS shuffle consumes `plastic-bar@normal`, produces `plastic-bar@legendary` + byproducts `copper-plate@legendary` + `steel-plate@legendary`.
+- Asteroid path produces `plastic-bar@legendary` from carbonic-chunk, and `copper-plate@legendary` from metallic-chunk.
+- If the target chain needs N legendary plastic-bar and M legendary copper-plate, should the planner:
+  - (a) use asteroid for both? (V2 behavior)
+  - (b) use LDS shuffle for plastic-bar, credit byproduct copper-plate against M, fill the remainder from asteroid?
+  - (c) scale LDS shuffle so byproduct copper-plate alone covers M (accepting "wasted" legendary steel-plate)?
+
+Answer depends on which recipe loops have productivity research (asteroid-productivity vs lds-productivity vs plastic-bar-productivity) and on the ratio of plastic to copper demand. At zero research the asteroid path wins; at high plastic-bar-productivity + LDS-productivity, LDS shuffle dominates.
+
+**Sketch:**
+1. **Enumerate candidate shuffles.** For each recipe R with `allow_productivity=True` where the recycle of R's output returns ingredients that are all solid (fluid byproducts are free): R is a shuffle candidate. Pre-compute this list once. LDS is the canonical example; rails (iron-stick), concrete, green-circuits, red-circuits are others.
+2. **Per-shuffle yield.** For each candidate, compute the per-ingredient legendary yield (as `solve_lds_shuffle_loop` does for plastic-bar), and per-byproduct legendary credit.
+3. **Linear-program over leaves.** After the walker identifies all solid leaves and their required legendary rates, solve an LP:
+    - Variables: `x_asteroid[leaf]`, `x_shuffle[shuffle_id]` (scalar throughputs).
+    - Constraints: for each leaf L, `x_asteroid[L]·1 + Σ x_shuffle[s]·byproduct_rate[s,L] ≥ demand[L]`.
+    - Objective: minimize total input cost (asteroid chunks + shuffle-input legendary rates + mined raws).
+   Stdlib doesn't ship an LP; for 3-5 leaves + 3-5 shuffles a brute-force grid or explicit Karush-Kuhn-Tucker solution is enough.
+4. **Stage output.** The planner adds a `"role": "cross-item-shuffle"` stage per active shuffle, with throughput, byproduct credits, and module config per tier.
+
+**Open questions before implementing:**
+- Do we want exact minimization or a heuristic "pick the shuffle that dominates X% of demand"? The simpler heuristic catches 95% of meta builds.
+- How to surface byproduct overflow (legendary steel-plate produced but not demanded)? Either treat as free output or flag a warning.
+- Cycle detection — two shuffles can feed each other (LDS shuffle produces copper-plate, a hypothetical copper-shuffle produces plastic-bar). Need a guard.
+
+Estimated size: ~300-400 LoC + a dedicated test class.
+
+### 2. Research-state tracking
+
+User brought this up mid-V2: *"what if I can't use asteroids yet"*. V2 assumes everything is unlocked.
+
+Gating surface:
+- **Quality module tier**: quality-module-1 available after `quality-module` tech; t2/t3 after `quality-module-2`/`-3`. V2 takes `--quality-module-tier {1,2,3}` but doesn't check if it's actually researched.
+- **Recycler**: locked behind `recycling`. No recycler → asteroid-reprocessing + mined-raw-self-recycle both impossible → no quality at all.
+- **Foundry / EM plant / cryogenic plant**: gated by `metallurgic-science-pack`, `electromagnetic-science-pack`, `cryogenic-science-pack`. Blocks fluid-transparent recipes → chain falls back to furnace/assembler/chem-plant paths.
+- **Asteroid collection**: requires `space-platform-thruster` + `asteroid-collector`. No platform → `asteroid_input` section is empty, all quality must come from mined-raw self-recycle.
+- **Per-planet landing**: Vulcanus / Fulgora / Gleba / Aquilo each gated by their science-pack tech. Narrower than `--planets` (which V2 already has) because `--planets vulcanus` today implies the user already landed there.
+
+Proposed input: `--tech NAME=LEVEL` repeated, or `--tech-preset {early,mid,late,all}`. Fail-fast with a specific message naming the missing tech. Defaults to `late` (current V2 behavior).
+
+Estimated size: ~150 LoC + a `TestResearchGating` test class.
+
+### 3. Self-recycling target items
+
+`superconductor`, `holmium-plate`, `tungsten-carbide`, `fusion-power-cell` — the target itself appears in its own recycle. The V1/V2 generic loop errors out (`output recycles to itself`).
+
+A dedicated solver: model the target as a self-loop with productivity+quality modules in the craft stage, 25% retention via recycler, and a per-tier DP identical in shape to `solve_asteroid_reprocessing_loop` but with the target item replacing the chunk. External inputs (non-self ingredients) still need legendary upstream.
+
+Estimated size: ~100 LoC + test class.
+
+### 4. Gleba biolocals + spoilage
+
+Yumako, jellynut, bioflux, pentapod eggs, nutrients — each has a spoilage timer. Quality loops that take more than the spoilage window are infeasible. Needs a time-budget constraint layered over the DP. Complex because spoilage applies at multiple stages.
+
+Estimated size: ~400 LoC + a new timing model.
+
+### 5. Per-stage assembly module optimization
+
+V1/V2 run assembly stages with no modules. This means every foundry casting legendary iron-plate runs at base speed/prod; a 4-slot foundry with 4 legendary prod-3 modules gives +40% prod and reduces upstream demand by ~28%. Implementing this requires per-recipe module-config DP identical to what the quality loop solver already does, just without the quality dimension. Should be a straightforward extension of `_unused_solve_loop_reference`.
+
+Estimated size: ~100 LoC.
+
+### 6. Alternate objectives
+
+Fewest machines, smallest footprint, lowest power, UPS-sensitive. Each is a different objective on the same DP; requires swapping the "minimize asteroid input" objective for a weighted cost function.
 
 ---
 
