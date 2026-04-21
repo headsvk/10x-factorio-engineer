@@ -226,7 +226,7 @@ class TestAssemblyPropagation(unittest.TestCase):
         out = qp.plan("iron-gear-wheel", 60, _data())
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("metallic-asteroid-reprocessing", recipes)
-        self.assertIn("metallic-asteroid-crushing", recipes)
+        self.assertIn("advanced-metallic-asteroid-crushing", recipes)
         # Foundry casting picked
         self.assertIn("casting-iron-gear-wheel", recipes)
 
@@ -296,14 +296,17 @@ class TestFailFast(unittest.TestCase):
     def test_plastic_bar_errors_no_oil(self):
         with self.assertRaises(ValueError) as cm:
             qp.plan("plastic-bar", 60, _data())
-        # plastic-bar needs oil chain → blocked in V1
-        self.assertIn("not supported", str(cm.exception))
+        # plastic-bar needs oil chain → blocked without --planets
+        msg = str(cm.exception)
+        self.assertIn("plastic-bar", msg)
+        self.assertIn("--planets", msg)
 
     def test_processing_unit_errors_sulfuric_acid(self):
         # processing unit needs sulfuric-acid -> sulfur -> petroleum-gas (no crude-oil)
         with self.assertRaises(ValueError) as cm:
             qp.plan("processing-unit", 60, _data())
-        self.assertIn("not supported", str(cm.exception))
+        msg = str(cm.exception)
+        self.assertIn("--planets", msg)
 
     def test_artillery_shell_errors(self):
         # artillery shell needs tungsten-plate (Vulcanus) + explosives (oil)
@@ -333,7 +336,7 @@ class TestEndToEnd(unittest.TestCase):
         # iron-plate via casting-iron (foundry)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("casting-iron", recipes)
-        self.assertIn("metallic-asteroid-crushing", recipes)
+        self.assertIn("advanced-metallic-asteroid-crushing", recipes)
         self.assertIn("metallic-asteroid-reprocessing", recipes)
 
     def test_copper_plate_chain(self):
@@ -410,6 +413,202 @@ class TestParseResearch(unittest.TestCase):
 
     def test_empty(self):
         self.assertEqual(qp._parse_research([]), {})
+
+
+# ---------------------------------------------------------------------------
+# V2 — multi-planet unlock flag
+# ---------------------------------------------------------------------------
+
+class TestPlanetsFlag(unittest.TestCase):
+
+    def test_empty_planets_same_as_v1(self):
+        # Without --planets, V1 items still work identically.
+        out_v1 = qp.plan("iron-plate", 60, _data())
+        out_v2 = qp.plan("iron-plate", 60, _data(), planets=[])
+        # Same asteroid input (allow tiny float jitter).
+        self.assertAlmostEqual(
+            sum(out_v1["asteroid_input"].values()),
+            sum(out_v2["asteroid_input"].values()),
+            delta=0.01,
+        )
+
+    def test_unknown_planet_errors(self):
+        with self.assertRaises(ValueError) as cm:
+            qp.plan("iron-plate", 60, _data(), planets=["atlantis"])
+        self.assertIn("unknown planet", str(cm.exception))
+
+    def test_nauvis_unlocks_plastic_bar(self):
+        # Plastic-bar was blocked in V1 (oil chain unavailable); --planets nauvis unlocks it.
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        recipes = [s.get("recipe") for s in out["stages"]]
+        self.assertIn("plastic-bar", recipes)
+        # Coal comes through mined-recycle, not asteroid.
+        self.assertIn("Coal", [qp._humanize(k) for k in out["mined_input"]])
+        # Crude-oil is a fluid raw, quality-transparent.
+        self.assertIn("crude-oil", out["fluid_input"])
+
+    def test_vulcanus_unlocks_tungsten_plate(self):
+        out = qp.plan("tungsten-plate", 60, _data(), planets=["vulcanus"])
+        # Tungsten-ore routed through mined-recycle.
+        self.assertIn("tungsten-ore", out["mined_input"])
+        # Lava used as fluid raw.
+        self.assertIn("lava", out["fluid_input"])
+        # Tungsten-plate stage uses foundry.
+        final = out["stages"][-1]
+        self.assertEqual(final["recipe"], "tungsten-plate")
+
+    def test_plastic_bar_still_blocks_without_planets(self):
+        # No --planets → plastic-bar still blocked with a helpful hint.
+        with self.assertRaises(ValueError) as cm:
+            qp.plan("plastic-bar", 60, _data())
+        self.assertIn("--planets", str(cm.exception))
+
+    def test_processing_unit_with_nauvis(self):
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        recipes = [s.get("recipe") for s in out["stages"]]
+        self.assertIn("processing-unit", recipes)
+        self.assertIn("sulfuric-acid", recipes)
+
+    def test_artillery_shell_with_nauvis_vulcanus(self):
+        out = qp.plan("artillery-shell", 60, _data(), planets=["nauvis", "vulcanus"])
+        # Needs both oil chain (explosives) and tungsten-plate.
+        self.assertIn("coal", out["mined_input"])
+        self.assertIn("tungsten-ore", out["mined_input"])
+        recipes = [s.get("recipe") for s in out["stages"]]
+        self.assertIn("artillery-shell", recipes)
+
+    def test_planets_listed_in_output(self):
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        self.assertEqual(out["planets"], ["nauvis"])
+
+    def test_fluid_raws_quality_transparent(self):
+        # Crude-oil and lava should appear in fluid_input but never in asteroid_input.
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        for k in out["fluid_input"]:
+            self.assertNotIn(k, out["asteroid_input"])
+
+
+# ---------------------------------------------------------------------------
+# V2 — mined-raw self-recycle loop
+# ---------------------------------------------------------------------------
+
+class TestMinedRawSelfRecycle(unittest.TestCase):
+
+    def test_coal_self_recycle_positive(self):
+        v, cfg = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3,
+        )
+        self.assertGreater(v, 0.0)
+        self.assertLess(v, 0.01)  # expect ~0.03–0.04% yield
+        # Should select all 4 quality slots at tier 0 for legendary target.
+        self.assertEqual(cfg[0]["recycle_quality"], 4)
+
+    def test_stone_self_recycle_same_as_coal(self):
+        # Identical retention/slots → identical yield.
+        v_coal, _ = qp.solve_mined_raw_self_recycle_loop("coal", _data(), "legendary", 3)
+        v_stone, _ = qp.solve_mined_raw_self_recycle_loop("stone", _data(), "legendary", 3)
+        self.assertAlmostEqual(v_coal, v_stone, delta=1e-9)
+
+    def test_tungsten_ore_self_recycle(self):
+        v, _ = qp.solve_mined_raw_self_recycle_loop("tungsten-ore", _data(), "legendary", 3)
+        self.assertGreater(v, 0.0)
+
+    def test_holmium_ore_self_recycle(self):
+        v, _ = qp.solve_mined_raw_self_recycle_loop("holmium-ore", _data(), "legendary", 3)
+        self.assertGreater(v, 0.0)
+
+    def test_lower_module_quality_lower_yield(self):
+        v_leg, _ = qp.solve_mined_raw_self_recycle_loop("coal", _data(), "legendary", 3)
+        v_nor, _ = qp.solve_mined_raw_self_recycle_loop("coal", _data(), "normal", 3)
+        self.assertGreater(v_leg, v_nor)
+
+    def test_unknown_raw_returns_zero(self):
+        v, cfg = qp.solve_mined_raw_self_recycle_loop(
+            "not-a-raw-key", _data(), "legendary", 3,
+        )
+        self.assertEqual(v, 0.0)
+        self.assertEqual(cfg, {})
+
+    def test_self_recycle_worse_than_asteroid(self):
+        # Asteroid reprocessing (80% retention) should strictly beat recycler
+        # self-loop (25% retention) at the same module config.
+        v_ast, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3,
+        )
+        v_rec, _ = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3,
+        )
+        self.assertGreater(v_ast, v_rec)
+
+
+# ---------------------------------------------------------------------------
+# V2 — LDS shuffle (indirect upgrade loop)
+# ---------------------------------------------------------------------------
+
+class TestLDSShuffle(unittest.TestCase):
+
+    def test_lds_shuffle_no_research_positive(self):
+        v, cfg = qp.solve_lds_shuffle_loop(_data(), "legendary", 3, 3)
+        self.assertGreater(v, 0.001)
+        self.assertLess(v, 1.0)
+        # Config is populated for every tier.
+        for t in range(4):
+            self.assertIn("cast_prod", cfg[t])
+            self.assertIn("cast_quality", cfg[t])
+            self.assertIn("recycle_quality", cfg[t])
+
+    def test_lds_shuffle_research_improves_yield(self):
+        v_no, _ = qp.solve_lds_shuffle_loop(_data(), "legendary", 3, 3, research_prod=0.0)
+        v_res, _ = qp.solve_lds_shuffle_loop(_data(), "legendary", 3, 3, research_prod=0.5)
+        self.assertGreater(v_res, v_no)
+
+    def test_lds_shuffle_prod_cap(self):
+        # +300% cap: research_prod=2.5 already saturates with foundry's +50%.
+        # Further research should have no effect.
+        v_cap, _ = qp.solve_lds_shuffle_loop(_data(), "legendary", 3, 3, research_prod=2.5)
+        v_over, _ = qp.solve_lds_shuffle_loop(_data(), "legendary", 3, 3, research_prod=5.0)
+        self.assertAlmostEqual(v_cap, v_over, delta=1e-6)
+
+    def test_lds_shuffle_beats_asteroid_with_research(self):
+        # With meaningful research, LDS shuffle yield exceeds asteroid
+        # reprocessing (~0.4%).  Without research it's comparable.
+        v_lds, _ = qp.solve_lds_shuffle_loop(
+            _data(), "legendary", 3, 3, research_prod=0.5,
+        )
+        v_ast, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3,
+        )
+        self.assertGreater(v_lds, v_ast)
+
+    def test_lds_shuffle_lower_module_quality_lower_yield(self):
+        v_leg, _ = qp.solve_lds_shuffle_loop(_data(), "legendary", 3, 3)
+        v_nor, _ = qp.solve_lds_shuffle_loop(_data(), "normal", 3, 3)
+        self.assertGreater(v_leg, v_nor)
+
+
+# ---------------------------------------------------------------------------
+# V2 — fulgora / aquilo / gleba unlocks
+# ---------------------------------------------------------------------------
+
+class TestOtherPlanetUnlocks(unittest.TestCase):
+
+    def test_fulgora_unlocks_scrap(self):
+        # electrolyte → stone + holmium-ore + heavy-oil (fulgora offshore).
+        # With --planets fulgora, holmium-ore and stone are unlocked as mined raws.
+        out = qp.plan("electrolyte", 60, _data(), planets=["fulgora", "nauvis"])
+        self.assertIn("holmium-ore", out["mined_input"])
+        self.assertIn("stone", out["mined_input"])
+
+    def test_mined_recycle_stage_shape(self):
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        mined_stages = [s for s in out["stages"] if s.get("role") == "mined-raw-self-recycle"]
+        self.assertEqual(len(mined_stages), 1)
+        st = mined_stages[0]
+        self.assertEqual(st["raw"], "coal")
+        self.assertIn("legendary_per_min", st)
+        self.assertIn("normal_mined_per_min", st)
+        self.assertIn("yield_pct", st)
+        self.assertEqual(st["machine"], "recycler")
 
 
 if __name__ == "__main__":
