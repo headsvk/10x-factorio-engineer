@@ -2010,9 +2010,9 @@ Examples:
             "Infinite productivity research level. NAME is a research tech name "
             "(e.g. 'mining-productivity', 'steel-productivity', "
             "'processing-unit-productivity'). LEVEL is an integer >= 0. "
-            "Adds +10% per level: mining-productivity applies to every "
+            "Adds +10%% per level: mining-productivity applies to every "
             "drill/pumpjack yield; the SA recipe techs apply to their fixed "
-            "recipe lists and sum with module productivity, capped at +300% "
+            "recipe lists and sum with module productivity, capped at +300%% "
             "total machine productivity (mining is uncapped). Repeatable."
         ),
     )

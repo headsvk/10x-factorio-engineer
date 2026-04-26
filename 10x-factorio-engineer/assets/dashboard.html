@@ -320,8 +320,29 @@ letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
 th.r, td.r { text-align: right; }
 th:last-child, td:last-child { padding-right: 0; }
 tbody tr { border-top: 1px solid var(--border-sub); }
+tbody tr.step-io-row { border-top: none; }
 td { padding: 6px 16px 6px 0; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
 td.name-col { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; color: var(--text); }
+.step-io-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px;
+padding: 5px 8px 8px; background: var(--bg-input);
+border: 1px solid var(--border); border-top: none;
+border-radius: 0 0 3px 3px; margin-bottom: 2px; }
+.step-io-col { padding: 4px 0 2px 8px; }
+.step-io-col--in  { border-left: 2px solid #5b9fd4; }
+.step-io-col--out { border-left: 2px solid var(--ok); }
+.step-io-sect-label { font-family: 'Barlow Condensed', sans-serif; font-size: 9px; font-weight: 800;
+letter-spacing: .14em; text-transform: uppercase; margin-bottom: 4px; }
+.step-io-col--in  .step-io-sect-label { color: #5b9fd4; opacity: .7; }
+.step-io-col--out .step-io-sect-label { color: var(--ok); opacity: .7; }
+.step-io-item { display: flex; justify-content: space-between; align-items: baseline;
+gap: 8px; margin-bottom: 2px; }
+.step-io-item:last-child { margin-bottom: 0; }
+.step-io-name { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 600;
+white-space: nowrap; }
+.step-io-col--in  .step-io-name { color: #5b9fd4; }
+.step-io-col--out .step-io-name { color: var(--ok); }
+.step-io-rate { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
+white-space: nowrap; flex-shrink: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: var(--bg-input);
 border: 1px solid var(--border); border-radius: 3px; padding: 3px 8px; color: var(--text-muted); }
@@ -1099,12 +1120,24 @@ const bonusHtml = s.beacon_speed_bonus > 0
 : '';
 const chipRow = [modHtml, bcnHtml, bonusHtml].filter(Boolean).join(' ');
 const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}">◆</span>` : '';
+const belt = STATE.preferred_belt;
+const inEntries = Object.entries(s.inputs ?? {});
+const outEntries = Object.entries(s.outputs ?? {});
+const mkItems = (entries) => entries.map(([item, rate]) => {
+const isF = FLUID_ITEM_IDS.has(item);
+const rateStr = isF ? fmtFluid(rate) : fmtRB(rate, belt);
+return `<div class="step-io-item"><span class="step-io-name">${esc(label(item))}</span><span class="step-io-rate">${rateStr}</span></div>`;
+}).join('');
+const ioRow = (inEntries.length || outEntries.length) ? `<tr class="step-io-row"><td colspan="4" style="padding-top:0;padding-right:0"><div class="step-io-grid">
+<div class="step-io-col step-io-col--in"><div class="step-io-sect-label">Inputs</div>${mkItems(inEntries)}</div>
+<div class="step-io-col step-io-col--out"><div class="step-io-sect-label">Outputs</div>${mkItems(outEntries)}</div>
+</div></td></tr>` : '';
 return `<tr>
 <td>${esc(label(s.recipe))}</td>
 <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
 <td class="r">${s.machine_count_ceil}</td>
 <td class="r" style="color:var(--text-dim)">${powCell}</td>
-</tr>`;
+</tr>${ioRow}`;
 }).join('');
 const totalPow = line.cli_result?.total_power_mw;
 const totalPowCeil = line.cli_result?.total_power_mw_ceil;
