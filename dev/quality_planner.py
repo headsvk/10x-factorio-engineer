@@ -738,6 +738,136 @@ def solve_lds_shuffle_loop(
     return V[0], configs
 
 
+def compute_lds_shuffle_stage(
+    legendary_plastic_per_min: float,
+    data: dict,
+    module_quality: str,
+    quality_module_tier: int = 3,
+    prod_module_tier: int = 3,
+    research_prod: float = 0.0,
+    foundry_inherent_prod: float = 0.5,
+    foundry_speed: float = 4.0,
+    recycler_speed: float = RECYCLER_SPEED,
+) -> dict | None:
+    """Size an LDS-shuffle stage that produces ``legendary_plastic_per_min``.
+
+    Returns a dict describing throughputs, machine counts, and byproduct
+    legendary rates (copper-plate, steel-plate) — or ``None`` if the dataset
+    is missing the required recipes.
+
+    Math (per normal plastic-bar input across the full quality loop):
+      * V = solve_lds_shuffle_loop(...) gives legendary plastic-bar yield.
+      * Total foundry crafts ≈ plastic-bar-input / 5 / (1 - retention) where
+        retention = (1+prod)/5 * 1.25 ≈ self-feed ratio.  We approximate
+        across tiers by using the per-tier configs from the solver.
+      * Each casting consumes molten-iron + molten-copper (fluid, transparent)
+        and yields 1 LDS, then recycler returns 1.25 plastic-bar + 5 copper +
+        0.5 steel.
+
+    Byproduct credits are computed as:
+      copper_legendary  = legendary_plastic_per_min * 5.0  / 1.25
+      steel_legendary   = legendary_plastic_per_min * 0.5  / 1.25
+    (each legendary plastic-bar exits via the same recycler stream as the
+    byproducts — the ratio is fixed by the recipe, independent of modules.)
+    """
+    if legendary_plastic_per_min <= 0:
+        return None
+    cast_recipe = _recipe_by_key(data, "casting-low-density-structure")
+    rec_recipe = _recipe_by_key(data, "low-density-structure-recycling")
+    if cast_recipe is None or rec_recipe is None:
+        return None
+
+    plastic_in_per_cast = _recipe_ing_amount(cast_recipe, "plastic-bar")  # 5
+    lds_out_per_cast = _recipe_result_amount(cast_recipe, "low-density-structure")  # 1
+    plastic_back_per_lds = _recipe_result_amount(rec_recipe, "plastic-bar")  # 1.25
+    copper_back_per_lds = _recipe_result_amount(rec_recipe, "copper-plate")  # 5
+    steel_back_per_lds = _recipe_result_amount(rec_recipe, "steel-plate")  # 0.5
+    if plastic_in_per_cast <= 0 or plastic_back_per_lds <= 0:
+        return None
+
+    v, configs = solve_lds_shuffle_loop(
+        data,
+        module_quality,
+        quality_module_tier,
+        prod_module_tier,
+        research_prod,
+        foundry_inherent_prod,
+    )
+    if v <= 0:
+        return None
+
+    # Normal plastic-bar invested per minute to produce target legendary.
+    normal_plastic_in_per_min = legendary_plastic_per_min / v
+
+    # Approximate machine counts: take the tier-0 (normal) module config as
+    # the dominant configuration (most throughput happens at low tiers since
+    # the upgrade ladder narrows toward legendary).  Foundry prod from cp0
+    # determines per-craft throughput; recycler is purely quality-rolling.
+    cfg0 = configs.get(0, {"cast_prod": 0, "cast_quality": 0, "recycle_quality": 4})
+    cp0 = cfg0.get("cast_prod", 0)
+    prod = foundry_inherent_prod + research_prod + _prod_bonus(
+        cp0, prod_module_tier, module_quality,
+    )
+    if prod > 3.0:
+        prod = 3.0
+    items_per_craft = lds_out_per_cast * (1.0 + prod)
+    plastic_back_per_craft = items_per_craft * plastic_back_per_lds  # plastic in 5 -> back
+
+    # Cycle-count multiplier across all tiers: each plastic-bar normal-input
+    # cycles repeatedly until it lands at legendary or escapes via tier-skip.
+    # Effective recirculation ratio per craft is plastic_back_per_craft/plastic_in_per_cast;
+    # total castings ≈ normal_plastic_in_per_min / plastic_in_per_cast / (1 - r).
+    r_per_cycle = plastic_back_per_craft / plastic_in_per_cast
+    if r_per_cycle >= 1.0 - 1e-9:
+        # Self-sustaining loop — per-cycle throughput is unbounded; clamp.
+        # In practice the quality roll always upgrades some fraction out.
+        r_per_cycle = 0.999
+    total_castings_per_min = (
+        normal_plastic_in_per_min / plastic_in_per_cast / (1.0 - r_per_cycle)
+    )
+    cast_time = float(cast_recipe.get("energy_required", 15.0))
+    foundry_machines = total_castings_per_min * cast_time / (foundry_speed * 60.0)
+
+    # Recycler throughput equals casting LDS output rate.
+    total_recycles_per_min = total_castings_per_min * items_per_craft
+    rec_time = float(rec_recipe.get("energy_required", 0.9375))
+    recycler_machines = total_recycles_per_min * rec_time / (recycler_speed * 60.0)
+
+    # Byproduct legendary rates: ratio fixed by recipe (modules don't change
+    # the recipe outputs, only quality distribution).  Each legendary plastic-bar
+    # exits the recycler alongside copper-plate (5/1.25) and steel-plate (0.5/1.25).
+    copper_legendary_per_min = legendary_plastic_per_min * (
+        copper_back_per_lds / plastic_back_per_lds
+    )
+    steel_legendary_per_min = legendary_plastic_per_min * (
+        steel_back_per_lds / plastic_back_per_lds
+    )
+
+    # Fluid demand (quality-transparent, but caller may want to display it).
+    molten_iron_per_cast = _recipe_ing_amount(cast_recipe, "molten-iron")
+    molten_copper_per_cast = _recipe_ing_amount(cast_recipe, "molten-copper")
+    fluid_demand = {
+        "molten-iron": molten_iron_per_cast * total_castings_per_min,
+        "molten-copper": molten_copper_per_cast * total_castings_per_min,
+    }
+
+    return {
+        "yield_per_normal_plastic": v,
+        "legendary_plastic_per_min": legendary_plastic_per_min,
+        "normal_plastic_in_per_min": normal_plastic_in_per_min,
+        "total_castings_per_min": total_castings_per_min,
+        "total_recycles_per_min": total_recycles_per_min,
+        "foundry_machines": foundry_machines,
+        "recycler_machines": recycler_machines,
+        "byproduct_legendary": {
+            "copper-plate": copper_legendary_per_min,
+            "steel-plate": steel_legendary_per_min,
+        },
+        "fluid_demand": fluid_demand,
+        "configs_per_tier": configs,
+    }
+
+
 def solve_mined_raw_self_recycle_loop(
     raw_key: str,
     data: dict,

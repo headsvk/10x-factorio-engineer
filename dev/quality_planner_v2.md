@@ -230,6 +230,51 @@ In priority order:
 
 ### 1. Cross-item quality solver (LDS shuffle, rail shuffle, sibling loops)
 
+**Status (2026-04-26): partial — sizing helper landed; wiring + byproduct
+credit + CLI flag still pending.**
+
+What's in tree:
+- `compute_lds_shuffle_stage(legendary_plastic_per_min, data, ...)` at
+  `dev/quality_planner.py:744`. Calls `solve_lds_shuffle_loop` for the
+  per-input yield, then sizes a stage: returns `normal_plastic_in_per_min`,
+  `foundry_machines`, `recycler_machines`, `byproduct_legendary` map
+  (copper-plate, steel-plate — ratio fixed by recipe), and `fluid_demand`
+  (molten-iron, molten-copper).
+- Smoke check (60/min legendary plastic, no research, legendary T3 modules):
+  yield ≈ 1.58%, ~108 foundries + ~122 recyclers, byproducts 240
+  copper-plate + 24 steel-plate legendary/min. Numbers scale linearly with
+  rate.
+
+Known limitation in the helper:
+- When `research_prod` saturates the +300% prod cap, the per-cycle return
+  ratio `r = (1+prod) * 1.25 / 5` reaches 1.0 → the recirculating throughput
+  diverges (clamped to r=0.999, machine counts ~1500 for 60/min). This is
+  mathematically correct in the limit (plastic-bar cycles indefinitely
+  while quality slowly tiers up) but practically the planner should split
+  into multiple parallel loops with smaller per-tier prod configs. Defer
+  to wiring step — comparison vs asteroid total-machine cost will reject
+  the saturated config naturally.
+
+Still pending (in order):
+- Wire `compute_lds_shuffle_stage` into `plan()` behind `--enable-lds-shuffle`
+  flag. Default off so the 73 baseline tests stay untouched.
+- Replace `plastic-bar` walker expansion with the shuffle stage when the
+  flag is set. Keep the normal chem-plant chain available for the
+  "normal-plastic-bar input" leg.
+- Credit `byproduct_legendary["copper-plate"]` and `["steel-plate"]`
+  against the demand of those items downstream — reduces metallic-asteroid
+  input. Cap the credit at the demanded rate (no negative inputs).
+- Add `cross-item-shuffle` stage role to `out["stages"]` and to
+  `format_human`.
+- New `TestLDSShuffleWiring` class in `dev/test_quality_planner.py`:
+  flag default off; flag on with no research = positive but suboptimal;
+  flag on with `plastic-bar-productivity=10` reduces total machines vs
+  default; byproduct credit observed in metallic-asteroid input drop;
+  byproduct overflow flagged in notes when it exceeds demand.
+
+Generic shuffle enumeration (rail shuffle, etc.) is V3.1 — wire LDS-only
+first, validate the byproduct/credit/notes UX, then generalise.
+
 `solve_lds_shuffle_loop` already computes the per-plastic-bar legendary yield of the LDS shuffle. The missing piece is deciding **whether to use it** and **how to credit byproducts** inside `plan()`.
 
 **The decision problem:**
