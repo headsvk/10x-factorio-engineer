@@ -274,24 +274,10 @@ class TestFailFast(unittest.TestCase):
             qp.plan("tungsten-plate", 60, _data())
         self.assertIn("vulcanus", str(cm.exception))
 
-    def test_holmium_plate_errors(self):
-        with self.assertRaises(ValueError) as cm:
-            qp.plan("holmium-plate", 60, _data())
-        # holmium-plate is in SELF_RECYCLING_BLOCKLIST
-        self.assertTrue(
-            "self-recycling" in str(cm.exception) or "fulgora" in str(cm.exception)
-        )
-
-    def test_superconductor_errors(self):
-        with self.assertRaises(ValueError) as cm:
-            qp.plan("superconductor", 60, _data())
-        self.assertIn("self-recycling", str(cm.exception))
-
-    def test_tungsten_carbide_errors(self):
-        with self.assertRaises(ValueError) as cm:
-            qp.plan("tungsten-carbide", 60, _data())
-        msg = str(cm.exception)
-        self.assertTrue("self-recycling" in msg or "vulcanus" in msg)
+    # NOTE: holmium-plate, superconductor, tungsten-carbide were previously
+    # in TestFailFast (V1/V2 fail-fast on self-recycling).  V3 item 3 added
+    # a dedicated self-recycle target solver — coverage moved to
+    # TestSelfRecycleTarget below.
 
     def test_plastic_bar_errors_no_oil(self):
         with self.assertRaises(ValueError) as cm:
@@ -609,6 +595,191 @@ class TestOtherPlanetUnlocks(unittest.TestCase):
         self.assertIn("normal_mined_per_min", st)
         self.assertIn("yield_pct", st)
         self.assertEqual(st["machine"], "recycler")
+
+
+class TestLDSShuffleWiring(unittest.TestCase):
+    """V3 partial: --enable-lds-shuffle flag wires the shuffle into plan()."""
+
+    def test_flag_default_off(self):
+        # Without the flag, output has no shuffle stage and no normal-input buckets.
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        shuffle_stages = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
+        self.assertEqual(shuffle_stages, [])
+        self.assertEqual(out.get("normal_solid_input"), {})
+        self.assertEqual(out.get("normal_fluid_input"), {})
+        self.assertEqual(out.get("shuffle_byproduct_legendary"), {})
+
+    def test_flag_on_no_research_positive(self):
+        # With shuffle on, no research: shuffle stage present with positive yield;
+        # mined coal eliminated (replaced by normal coal input).
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], enable_lds_shuffle=True,
+        )
+        shuffle = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
+        self.assertEqual(len(shuffle), 1)
+        self.assertGreater(shuffle[0]["yield_per_normal_plastic_pct"], 0.0)
+        self.assertGreater(shuffle[0]["foundry_machines"], 0.0)
+        self.assertGreater(shuffle[0]["recycler_machines"], 0.0)
+        # Coal moved out of mined_input into normal_solid_input.
+        self.assertNotIn("coal", out["mined_input"])
+        self.assertIn("coal", out["normal_solid_input"])
+        self.assertGreater(out["normal_solid_input"]["coal"], 0.0)
+
+    def test_high_research_reduces_total_machines(self):
+        # With high LDS productivity research, shuffle becomes more efficient and
+        # total machines should drop below the no-research shuffle total.
+        out_low = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], enable_lds_shuffle=True,
+        )
+        out_high = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], enable_lds_shuffle=True,
+            research_levels={"low-density-structure-productivity": 10},
+        )
+        self.assertLess(
+            out_high["total_machine_count"], out_low["total_machine_count"]
+        )
+
+    def test_byproduct_credit_drops_metallic_asteroid_input(self):
+        # Direct walker test: feeding byproduct_credits reduces upstream raw demand
+        # for the credited item's chain.  solar-panel demands copper-plate non-fluid.
+        data = _data()
+        fluids = qp.build_fluid_set(data)
+        planet_props = qp.cli.get_planet_props(data, "nauvis")
+        _, raws_base = qp.walk_recipe_tree(
+            "solar-panel", 60, data, {}, 3, fluids, planet_props,
+            frozenset({"nauvis"}),
+        )
+        _, raws_credited = qp.walk_recipe_tree(
+            "solar-panel", 60, data, {}, 3, fluids, planet_props,
+            frozenset({"nauvis"}),
+            byproduct_credits={"copper-plate": 100.0},
+        )
+        # copper-ore demand should drop by 100 (1:1 via molten-copper chain).
+        self.assertAlmostEqual(
+            raws_base["copper-ore"] - raws_credited["copper-ore"], 100.0, delta=1e-3,
+        )
+
+    def test_byproduct_overflow_flagged_in_notes(self):
+        # processing-unit's chain doesn't demand copper-plate (fluid-cast routes
+        # around it), so all byproduct copper-plate is surplus → overflow note.
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], enable_lds_shuffle=True,
+        )
+        emitted = out["shuffle_byproduct_legendary"]
+        overflow = out["shuffle_byproduct_overflow"]
+        self.assertGreater(emitted.get("copper-plate", 0.0), 0.0)
+        self.assertAlmostEqual(
+            overflow.get("copper-plate", 0.0),
+            emitted["copper-plate"], delta=1e-6,
+        )
+        self.assertTrue(any("surplus" in n and "copper-plate" in n for n in out["notes"]))
+
+    def test_shuffle_stage_machine_count_in_total(self):
+        # Total machines should include foundry+recycler from the shuffle stage.
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], enable_lds_shuffle=True,
+        )
+        shuffle_st = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"][0]
+        self.assertGreaterEqual(
+            out["total_machine_count"], shuffle_st["machine_count"],
+        )
+
+    def test_human_format_renders_shuffle(self):
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], enable_lds_shuffle=True,
+        )
+        text = qp.format_human(out)
+        self.assertIn("Shuffle Byproducts", text)
+        self.assertIn("[shuffle]", text)
+        self.assertIn("Normal-Quality", text)
+
+
+class TestSelfRecycleTarget(unittest.TestCase):
+    """V3 item 3: items whose recycle returns themselves can now be targets."""
+
+    def test_holmium_plate_target(self):
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        sts = [s for s in out["stages"] if s.get("role") == "self-recycle-target"]
+        self.assertEqual(len(sts), 1)
+        st = sts[0]
+        self.assertEqual(st["target"], "holmium-plate")
+        self.assertEqual(st["machine"], "foundry")
+        self.assertGreater(st["yield_per_normal_craft"], 0.0)
+        self.assertLess(st["yield_per_normal_craft"], 1.0)
+        self.assertGreater(st["craft_machines"], 0.0)
+        self.assertGreater(st["recycler_machines"], 0.0)
+
+    def test_tungsten_carbide_target(self):
+        out = qp.plan("tungsten-carbide", 60, _data(), planets=["nauvis", "vulcanus"])
+        st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
+        self.assertEqual(st["target"], "tungsten-carbide")
+        self.assertGreater(st["yield_per_normal_craft"], 0.0)
+        # Tungsten ore must appear as a normal-quality solid input.
+        self.assertIn("tungsten-ore", out["normal_solid_input"])
+
+    def test_superconductor_target(self):
+        out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"])
+        st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
+        self.assertEqual(st["machine"], "electromagnetic-plant")
+        # EM plant has 5 slots + 50% inherent prod → high yield, low crafts/min
+        self.assertGreater(st["yield_per_normal_craft"], 0.001)
+
+    def test_legendary_modules_outperform_normal(self):
+        out_leg = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], module_quality="legendary",
+        )
+        out_nor = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], module_quality="normal",
+        )
+        leg_st = [s for s in out_leg["stages"] if s.get("role") == "self-recycle-target"][0]
+        nor_st = [s for s in out_nor["stages"] if s.get("role") == "self-recycle-target"][0]
+        # Legendary modules give >2× the per-craft yield of normal modules.
+        self.assertGreater(
+            leg_st["yield_per_normal_craft"],
+            nor_st["yield_per_normal_craft"] * 2.0,
+        )
+
+    def test_solver_unknown_item_returns_zero(self):
+        v, cfg = qp.solve_self_recycle_target_loop(
+            "not-a-thing", _data(),
+            machine_key="assembling-machine-3", machine_slots=4,
+            machine_allow_prod=True, inherent_prod=0.0, research_prod=0.0,
+            module_quality="legendary",
+        )
+        self.assertEqual(v, 0.0)
+        self.assertEqual(cfg, {})
+
+    def test_rate_doubles_machines_double(self):
+        out_60 = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        out_120 = qp.plan("holmium-plate", 120, _data(), planets=["fulgora"])
+        self.assertAlmostEqual(
+            out_120["total_machine_count"] / out_60["total_machine_count"],
+            2.0, delta=0.01,
+        )
+
+    def test_module_config_per_tier_present(self):
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
+        self.assertIn("module_config_per_tier", st)
+        self.assertIn("normal", st["module_config_per_tier"])
+        # Per-tier entry has 'craft' and 'recycle' description strings.
+        n = st["module_config_per_tier"]["normal"]
+        self.assertIn("craft", n)
+        self.assertIn("recycle", n)
+
+    def test_human_format_renders_self_recycle(self):
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        text = qp.format_human(out)
+        self.assertIn("[self-recycle]", text)
+        self.assertIn("Holmium Plate", text)
 
 
 if __name__ == "__main__":

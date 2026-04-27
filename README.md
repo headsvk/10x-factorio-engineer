@@ -30,7 +30,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (198 tests, stdlib only)
   quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
-  test_quality_planner.py   # unittest suite (50 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (85 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -153,24 +153,57 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-198 CLI tests + 50 quality-planner tests, stdlib only.
+198 CLI tests + 85 quality-planner tests, stdlib only.
 
-### Legendary Production Planner (V1)
+### Legendary Production Planner (V1 + V2 + V3-partial)
 
-`dev/quality_planner.py` is a separate tool focused on legendary-tier production via
-asteroid reprocessing.  It computes the cheapest asteroid-chunk input rate and the
-per-stage machine / module layout for a target legendary item + rate.
+`dev/quality_planner.py` is a separate tool focused on legendary-tier production.
+It computes the cheapest input rate and the per-stage machine / module layout
+for a target legendary item + rate.
 
 ```bash
+# V1: asteroid-reprocessing chain (Nauvis-only items)
 python dev/quality_planner.py --item electronic-circuit --rate 60 \
     --module-quality legendary \
     --research asteroid-productivity=5
+
+# V2: multi-planet (mined-raw self-recycle for coal, stone, tungsten-ore,
+# scrap, holmium-ore, uranium-ore; planet-exclusive fluids)
+python dev/quality_planner.py --item processing-unit --rate 60 \
+    --planets nauvis
+
+python dev/quality_planner.py --item artillery-shell --rate 60 \
+    --planets nauvis,vulcanus
+
+# V3-partial: LDS shuffle replaces plastic-bar leg with foundry-cast LDS +
+# recycle (legendary plastic + copper/steel byproducts).  Cuts mined-coal
+# self-recycle entirely; benefits scale with plastic-bar / LDS productivity.
+python dev/quality_planner.py --item processing-unit --rate 60 \
+    --planets nauvis --enable-lds-shuffle \
+    --research low-density-structure-productivity=10 \
+    --research plastic-bar-productivity=10
+
+# V3 item 3: self-recycling targets (recycle returns the item itself)
+python dev/quality_planner.py --item superconductor --rate 60 \
+    --planets nauvis,fulgora
+python dev/quality_planner.py --item tungsten-carbide --rate 60 \
+    --planets nauvis,vulcanus
+python dev/quality_planner.py --item holmium-plate --rate 60 --planets fulgora
 ```
 
-Scope is limited to Nauvis-style assembly items whose raws are reachable via asteroid
-reprocessing (iron, copper, stone, calcite, ice).  Items requiring planet exclusives
-(tungsten, holmium, fluorine, Gleba biolocals) or oil-chain fluids fail fast with a
-specific error — see `dev/quality_planner_v1.md` for full V1 scope.
+Reachable items today:
+- **Asteroid-only** (no `--planets`): items whose raws are all asteroid-reachable
+  (iron, copper, stone, calcite, ice).
+- **+ Nauvis**: chemistry chain (plastic-bar, sulfur, processing-unit, etc.) via
+  mined-coal self-recycle + petgas via crude-oil.
+- **+ Vulcanus / Fulgora / Aquilo**: planet-exclusive raws (tungsten-ore,
+  scrap, holmium-ore, ammoniacal-solution).
+- **Self-recycle targets**: `tungsten-carbide`, `superconductor`, `holmium-plate`,
+  `fusion-power-cell`, `lithium`.
+
+Items deferred (still fail fast): Gleba biolocals (spoilage timing), self-recycling
+items as **intermediate ingredients** of another chain.  See `dev/quality_planner_v2.md`
+for the full V3 roadmap.
 
 ---
 

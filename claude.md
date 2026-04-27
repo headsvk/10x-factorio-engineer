@@ -121,7 +121,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/test_cli.py` | `unittest` suite (198 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
-| `dev/test_quality_planner.py` | `unittest` suite (50 tests) for quality_planner |
+| `dev/test_quality_planner.py` | `unittest` suite (85 tests) for quality_planner |
 | `dev/quality_planner_v1.md` | Spec document for the V1 planner — scope, algorithm, deferred features |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
@@ -446,9 +446,9 @@ python -m unittest dev.test_cli -v
 | `TestLocationFilter` | `--location` raw_set filtering (vulcanus has tungsten-ore+sulfuric-acid, not iron-ore; gleba has yumako+jellynut+spoilage as raw; space-platform is empty); planet surface_conditions filtering; explicit `--recipe` override bypasses planet filter; `location` field in JSON output; Vulcanus water→steam-condensation+acid-neutralisation; Gleba plastic/sulfur/lubricant→bio-substitutes; Aquilo ice→ammoniacal-solution-separation |
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
 
-### `dev/test_quality_planner.py` (50 tests)
+### `dev/test_quality_planner.py` (85 tests)
 
-Covers the V1 legendary planner in `dev/quality_planner.py`:
+Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-partial LDS-shuffle wiring:
 
 | Class | What's tested |
 |-------|---------------|
@@ -462,6 +462,12 @@ Covers the V1 legendary planner in `dev/quality_planner.py`:
 | `TestEndToEnd` | Electronic-circuit @ 60/min full chain; iron-plate and copper-plate simple chains; JSON serialisable output; human format smoke test; rate doubles → asteroid input doubles |
 | `TestHelpers` | `_recipe_result_amount` with probability; `_recipe_ing_amount`; `build_fluid_set` contents; `_humanize` mapping |
 | `TestParseResearch` | `--research NAME=LEVEL` parsing round-trip; empty list |
+| `TestPlanetsFlag` (V2) | `--planets` flag; nauvis unlocks plastic-bar; vulcanus unlocks tungsten-plate; multi-planet artillery-shell; fluid raws marked transparent |
+| `TestMinedRawSelfRecycle` (V2) | coal/stone/tungsten-ore/holmium-ore positive yield; legendary modules beat normal; self-recycle yield strictly worse than asteroid reprocessing |
+| `TestLDSShuffle` (V2) | per-input yield positive; research improves; +300% prod cap; LDS shuffle beats asteroid reprocessing with high plastic-bar research |
+| `TestOtherPlanetUnlocks` (V2) | fulgora unlocks scrap/holmium-ore (electrolyte chain); mined-recycle stage shape |
+| `TestLDSShuffleWiring` (V3 partial) | `--enable-lds-shuffle` flag default off; flag on emits cross-item-shuffle stage with positive yield; coal moves from `mined_input` to `normal_solid_input`; high LDS-prod research reduces total machines vs no research; byproduct credit reduces upstream raw demand (verified directly via walker on solar-panel + copper-plate credit); byproduct overflow flagged in notes; total machines includes shuffle foundry+recycler; human format renders shuffle/byproducts/normal-input sections |
+| `TestSelfRecycleTarget` (V3 item 3) | Self-recycling targets work: `holmium-plate` (foundry, 4 slots, +50% inherent prod), `tungsten-carbide` (assembler-3, 4 slots), `superconductor` (EM plant, 5 slots, +50% inherent prod); ingredients consumed at NORMAL quality (tungsten-ore appears in `normal_solid_input`); legendary modules >2× normal-modules yield; rate doubles → total machines double linearly; per-tier module config exposed; human format renders `[self-recycle]` line; `solve_self_recycle_target_loop` returns 0 for unknown items |
 
 ---
 
