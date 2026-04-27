@@ -45,9 +45,44 @@ These numbers are sanity anchors, not committed expectations — if a refactor m
 
 ---
 
-## Status (2026-04-21)
+## Status (2026-04-26)
 
-**V2 shipped.** Same `dev/quality_planner.py` file (~1200 LoC now), same `dev/test_quality_planner.py` (73 tests, all passing). Zero new dependencies.
+**V2 shipped.** **V3-partial (LDS shuffle wiring + self-recycle targets)
+shipped.** Same `dev/quality_planner.py` file,
+`dev/test_quality_planner.py` now at 85 tests (7 new in
+`TestLDSShuffleWiring`, 8 new in `TestSelfRecycleTarget`, 3 obsolete
+`TestFailFast` tests removed for the items that V3 now supports as
+targets). Zero new dependencies.
+
+V3 item 3 (self-recycle targets): items whose recycle returns themselves
+(`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`,
+`lithium`) can now be used as planner targets. New solver
+`solve_self_recycle_target_loop` runs the recycler-only DP (distinct from
+the shuffle-style `solve_recycle_loop` that re-crafts). Ingredients are
+consumed at NORMAL quality (quality rolls happen during craft+recycle), so
+they go into `normal_solid_input` / `normal_fluid_input`. Output adds the
+`self-recycle-target` stage role. Items still fail-fast when used as
+INTERMEDIATE ingredients in another chain (must be supplied externally).
+
+V3-partial adds the `--enable-lds-shuffle` flag (default off): when on, the
+plastic-bar leg of any chain is replaced by an LDS-shuffle stage
+(foundry-cast LDS + recycle for legendary plastic-bar + copper/steel
+byproducts). Coal moves from `mined_input` (legendary self-recycle) to
+`normal_solid_input` (chem-plant input). Petgas goes through a normal-quality
+oil-processing leg (`normal_fluid_input`).
+
+`walk_recipe_tree` now accepts `extra_raws` (treat items as supplied
+externally, skip recursion) and `byproduct_credits` (subtract from initial
+demand, propagates downward through the chain). The shuffle wiring uses both:
+re-walks main chain with plastic-bar as extra_raw, then re-walks again with
+capped byproduct credits applied. Surplus byproducts (when downstream demand
+< emitted) are flagged in `notes` and reported in
+`shuffle_byproduct_overflow`.
+
+Output additions: `normal_solid_input`, `normal_fluid_input`,
+`shuffle_byproduct_legendary`, `shuffle_byproduct_credited`,
+`shuffle_byproduct_overflow`. New stage role: `cross-item-shuffle` (with
+foundry/recycler split, yield%, byproduct dict).
 
 **What V2 unlocks:**
 - Items whose chain needs planet-specific raws and fluids: `plastic-bar`, `sulfur`, `processing-unit`, `artillery-shell`, `low-density-structure`, `battery`, `electrolyte`, `holmium-plate`-ingredient items that aren't themselves self-recycling (e.g. `fusion-power-cell` inputs via the chain), `tungsten-plate`, etc.
@@ -230,8 +265,27 @@ In priority order:
 
 ### 1. Cross-item quality solver (LDS shuffle, rail shuffle, sibling loops)
 
-**Status (2026-04-26): partial — sizing helper landed; wiring + byproduct
-credit + CLI flag still pending.**
+**Status (2026-04-26): LDS-only path shipped behind `--enable-lds-shuffle`.
+Generic shuffle enumeration (rail shuffle, etc.) remains V3.1.**
+
+What landed:
+- `--enable-lds-shuffle` CLI flag wires `compute_lds_shuffle_stage` into
+  `plan()`. Default off — V2 baseline tests untouched.
+- `plastic-bar` walker expansion is replaced by the shuffle stage when the
+  flag is set; the normal chem-plant chain runs separately at the shuffle's
+  required normal-plastic input rate.
+- Byproduct credits (legendary copper-plate, steel-plate) are capped at
+  observed demand and applied via a re-walk with `byproduct_credits`.
+  Demand for credited items propagates through the chain (verified on
+  solar-panel: copper-plate credit=100 → copper-ore raw drop=100, with
+  cascading drop in molten-copper / casting stages).
+- Byproduct overflow (when emitted > demanded) is flagged in `notes` and
+  recorded in `shuffle_byproduct_overflow`. For Nauvis processing-unit at
+  60/min, all 960/min copper-plate + 96/min steel-plate are surplus
+  because fluid-preferred recipes (casting-copper-cable, casting-iron)
+  route around solid plates entirely — informational, not an error.
+- `cross-item-shuffle` stage role and `format_human` rendering for it,
+  plus normal-quality input sections.
 
 What's in tree:
 - `compute_lds_shuffle_stage(legendary_plastic_per_min, data, ...)` at
@@ -255,25 +309,17 @@ Known limitation in the helper:
   to wiring step — comparison vs asteroid total-machine cost will reject
   the saturated config naturally.
 
-Still pending (in order):
-- Wire `compute_lds_shuffle_stage` into `plan()` behind `--enable-lds-shuffle`
-  flag. Default off so the 73 baseline tests stay untouched.
-- Replace `plastic-bar` walker expansion with the shuffle stage when the
-  flag is set. Keep the normal chem-plant chain available for the
-  "normal-plastic-bar input" leg.
-- Credit `byproduct_legendary["copper-plate"]` and `["steel-plate"]`
-  against the demand of those items downstream — reduces metallic-asteroid
-  input. Cap the credit at the demanded rate (no negative inputs).
-- Add `cross-item-shuffle` stage role to `out["stages"]` and to
-  `format_human`.
-- New `TestLDSShuffleWiring` class in `dev/test_quality_planner.py`:
-  flag default off; flag on with no research = positive but suboptimal;
-  flag on with `plastic-bar-productivity=10` reduces total machines vs
-  default; byproduct credit observed in metallic-asteroid input drop;
-  byproduct overflow flagged in notes when it exceeds demand.
-
-Generic shuffle enumeration (rail shuffle, etc.) is V3.1 — wire LDS-only
-first, validate the byproduct/credit/notes UX, then generalise.
+Still pending for full V3 cross-item solver:
+- Generic shuffle enumeration: detect any recipe R where R's recycling
+  returns only solids (fluids are free), all originally non-self
+  ingredients can be quality-rolled through R. Auto-select a shuffle
+  candidate per chain.
+- LP / objective-aware selection between asteroid path and shuffle path
+  per chain (currently shuffle is unconditionally used when flag is on
+  and plastic-bar is in the chain — could be objectively worse, e.g. on
+  Nauvis processing-unit at zero research where the byproducts overflow).
+- Cycle detection guard between mutually-feeding shuffles (LDS produces
+  copper, hypothetical copper-shuffle produces plastic-bar).
 
 `solve_lds_shuffle_loop` already computes the per-plastic-bar legendary yield of the LDS shuffle. The missing piece is deciding **whether to use it** and **how to credit byproducts** inside `plan()`.
 
@@ -319,13 +365,45 @@ Proposed input: `--tech NAME=LEVEL` repeated, or `--tech-preset {early,mid,late,
 
 Estimated size: ~150 LoC + a `TestResearchGating` test class.
 
-### 3. Self-recycling target items
+### 3. Self-recycling target items — **SHIPPED (2026-04-27)**
 
-`superconductor`, `holmium-plate`, `tungsten-carbide`, `fusion-power-cell` — the target itself appears in its own recycle. The V1/V2 generic loop errors out (`output recycles to itself`).
+`superconductor`, `holmium-plate`, `tungsten-carbide`, `fusion-power-cell`,
+`lithium` — the target item appears in its own recycle. The V1/V2 generic
+loop errored out; V3 added a dedicated solver
+`solve_self_recycle_target_loop` and the planner branch
+`_plan_self_recycle_target`.
 
-A dedicated solver: model the target as a self-loop with productivity+quality modules in the craft stage, 25% retention via recycler, and a per-tier DP identical in shape to `solve_asteroid_reprocessing_loop` but with the target item replacing the chunk. External inputs (non-self ingredients) still need legendary upstream.
+**Key insight:** the existing `solve_recycle_loop` was designed for
+shuffle-style loops where the recycler's output (an ingredient) is fed
+back to a re-craft (correct for LDS shuffle). For self-recycle TARGETS
+the recycler returns the SAME ITEM, so the chain is recycler-only:
+items are re-recycled until they tier up to legendary or vanish (via
+the 25% retention loss). The new DP separates this:
+  * Outer search: pick (craft_prod, craft_quality, recycle_quality).
+  * One craft produces ``items_per_craft = output × (1+prod)`` items
+    distributed across tiers by ``q_craft``.
+  * Inner DP ``V_rec[t]``: per-item legendary yield from a single item
+    at tier t entering a recycler-only chain (with retention < 1 so it
+    converges).
+  * Total = items_per_craft × Σ craft_probs[s] × V_rec[s].
 
-Estimated size: ~100 LoC + test class.
+**Output additions:** `self-recycle-target` stage role (with
+`craft_machines` + `recycler_machines` split, `yield_pct`,
+`crafts_per_min`, `module_config_per_tier`).  Ingredients consumed at
+NORMAL quality (quality rolls happen during craft+recycle), so they go
+into `normal_solid_input` / `normal_fluid_input` and are walked through
+`walk_recipe_tree` as normal-quality production trees.
+
+**Constants added:** `MACHINE_INHERENT_PROD` for foundry/EM-plant/
+biochamber (+50% inherent), and others (zero).  `SELF_RECYCLE_TARGETS`
+allowlist (extends `SELF_RECYCLING_BLOCKLIST` for items that are
+allowed as targets but still blocked as intermediates).
+
+**Tests:** `TestSelfRecycleTarget` (8 tests) — holmium-plate / tungsten-
+carbide / superconductor work as targets; ingredients show up in
+normal_solid_input; legendary modules >2× normal yield; rate doubles =>
+machines double; per-tier config exposed; human format renders;
+unknown-item solver returns 0.
 
 ### 4. Gleba biolocals + spoilage
 
