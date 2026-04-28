@@ -1600,7 +1600,40 @@ def format_output(
             step_out["prod_capped"] = True
         steps_list_raw.append(step_out)
 
-    steps_list = sorted(steps_list_raw, key=lambda x: -next(iter(x["outputs"].values()), 0))
+    # Sort steps topologically: target recipe(s) first, dependencies below.
+    # DFS pre-order from each target item; among a step's inputs, visit the
+    # highest-rate one first for deterministic sub-ordering.
+    _item_to_recipe: dict[str, str] = {}
+    for _s in steps_list_raw:
+        for _itm in _s["outputs"]:
+            _item_to_recipe[_itm] = _s["recipe"]
+    _recipe_to_step: dict[str, dict] = {_s["recipe"]: _s for _s in steps_list_raw}
+
+    def _topo_sort(target_items: list[str]) -> list[dict]:
+        _visited: set[str] = set()
+        _result:  list[dict] = []
+        def _visit(rkey: str) -> None:
+            if rkey in _visited:
+                return
+            _visited.add(rkey)
+            _result.append(_recipe_to_step[rkey])
+            _step = _recipe_to_step[rkey]
+            for _inp in sorted(_step["inputs"], key=lambda k: -(_step["inputs"][k] or 0)):
+                _dep = _item_to_recipe.get(_inp)
+                if _dep:
+                    _visit(_dep)
+        for _tgt in target_items:
+            _start = _item_to_recipe.get(_tgt)
+            if _start:
+                _visit(_start)
+        # Append any steps not reachable from targets (e.g. oil cracking intermediates)
+        for _s in steps_list_raw:
+            if _s["recipe"] not in _visited:
+                _result.append(_s)
+        return _result
+
+    _target_items: list[str] = getattr(args, "items", None) or [getattr(args, "item", None)]
+    steps_list = _topo_sort([t for t in _target_items if t])
 
     raw_sorted = {
         k: _f(v)
