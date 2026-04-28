@@ -909,7 +909,7 @@ function renderScience() {
       <div class="science-bar">
         <div class="science-bar-header">
           <div class="science-name">
-            ${esc(label(name))}
+            ${esc(label(name))}${info?.allWip ? ' <span class="wip-badge">WIP</span>' : ''}
           </div>
           <div class="science-meta">
             <span class="rate-text">${actual}/min</span>
