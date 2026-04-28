@@ -229,6 +229,13 @@ SPEED_MODULE_BONUS: dict[int, Fraction] = {
     3: Fraction(1, 2),    # +50%
 }
 
+# Speed PENALTY per prod-module tier (NOT quality-scaled; flat per slot)
+PROD_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
+    1: Fraction(-1, 20),   # −5%
+    2: Fraction(-1, 10),   # −10%
+    3: Fraction(-3, 20),   # −15%
+}
+
 # Base productivity bonus per prod-module tier at normal quality (same as MODULE_PROD_BONUS)
 # combined with MODULE_QUALITY_MULT for effective bonus
 

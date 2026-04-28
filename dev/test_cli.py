@@ -337,8 +337,10 @@ class TestMachineCategoryVanilla(unittest.TestCase):
 
 class TestProductivityBonus(unittest.TestCase):
 
-    def test_prod_reduces_machine_count(self):
-        # 4× prod-3-normal on assembling-machine-3 → +40% output → fewer machines.
+    def test_prod_increases_machine_count(self):
+        # 4× prod-3-normal on assembling-machine-3:
+        #   +40% productivity (fewer cycles) but −60% speed (slower machine).
+        # Net: speed penalty dominates → MORE machines needed (5/7 > 2/5).
         base = _solver()
         base.solve("electronic-circuit", Fraction(60))
 
@@ -346,8 +348,8 @@ class TestProductivityBonus(unittest.TestCase):
         prod.solve("electronic-circuit", Fraction(60))
 
         self.assertGreater(
-            base.steps["electronic-circuit"]["machine_count"],
             prod.steps["electronic-circuit"]["machine_count"],
+            base.steps["electronic-circuit"]["machine_count"],
         )
 
     def test_zero_slot_machine_ignores_prod(self):
@@ -367,7 +369,10 @@ class TestProductivityBonus(unittest.TestCase):
         )
 
     def test_electric_furnace_two_slots(self):
-        # electric-furnace has 2 slots → 4 prod-3 specs capped to 2 → +20%, not +40%.
+        # electric-furnace has 2 slots → 4 prod-3 specs capped to 2 → +20% prod, −30% speed.
+        # effective_result = 6/5, effective_speed = 2 × (1 − 3/10) = 7/5
+        # base machines = 8/5, prod machines = 40/21
+        # ratio base/prod = (8/5) / (40/21) = 21/25 = 0.84 (prod INCREASES machine count)
         prod = _solver(
             furnace_type="electric",
             module_configs={"electric-furnace": [_mspec(4, "prod", 3)]},
@@ -378,7 +383,7 @@ class TestProductivityBonus(unittest.TestCase):
         base.solve("iron-plate", Fraction(60))
 
         ratio = base.steps["iron-plate"]["machine_count"] / prod.steps["iron-plate"]["machine_count"]
-        self.assertAlmostEqual(float(ratio), 1.20, places=6)
+        self.assertAlmostEqual(float(ratio), 0.84, places=6)
 
     def test_speed_reduces_machine_count(self):
         # 1× speed-3-normal in electric-furnace → +50% speed → fewer machines.
@@ -799,9 +804,9 @@ def _fmt_new(
 
 class TestModuleConfig(unittest.TestCase):
 
-    def test_prod_reduces_machine_count(self):
-        # 4× prod-3-normal in assembler-3:  prod_bonus = 4×10% = 40%
-        # effective_result = 7/5  →  machine_count = 2/7  (vs 2/5 without)
+    def test_prod_increases_machine_count(self):
+        # 4× prod-3-normal in assembler-3: +40% prod but −60% speed penalty.
+        # Speed penalty dominates → MORE machines needed (5/7 > 2/5 without modules).
         no_mod = _solver_new()
         no_mod.solve("electronic-circuit", Fraction(60))
 
@@ -811,23 +816,25 @@ class TestModuleConfig(unittest.TestCase):
         prod.solve("electronic-circuit", Fraction(60))
 
         self.assertGreater(
-            no_mod.steps["electronic-circuit"]["machine_count"],
             prod.steps["electronic-circuit"]["machine_count"],
+            no_mod.steps["electronic-circuit"]["machine_count"],
         )
 
     def test_prod_exact_machine_count(self):
         # assembler-3 (speed=5/4), electronic-circuit (time=0.5s, yield=1)
-        # prod_bonus = 4 × 10/100 = 2/5
-        # effective_result = 1 × (1 + 2/5) = 7/5
+        # prod_bonus  = 4 × 10/100 = 2/5
+        # speed_penalty (prod, not quality-scaled) = 4 × −15/100 = −3/5
+        # effective_result = 1 + 2/5 = 7/5
+        # effective_speed  = 5/4 × (1 − 3/5) = 5/4 × 2/5 = 1/2
         # cycles/min = 60 / (7/5) = 300/7
-        # machines = (300/7 × 1/2) / (60 × 5/4) = (150/7) / 75 = 2/7
+        # machines = (300/7 × 1/2) / (60 × 1/2) = (150/7) / 30 = 5/7
         s = _solver_new(module_configs={
             "assembling-machine-3": [_mspec(4, "prod", 3)]
         })
         s.solve("electronic-circuit", Fraction(60))
         self.assertEqual(
             s.steps["electronic-circuit"]["machine_count"],
-            Fraction(2, 7),
+            Fraction(5, 7),
         )
 
     def test_speed_reduces_machine_count(self):
@@ -864,7 +871,8 @@ class TestModuleConfig(unittest.TestCase):
 
     def test_two_slot_machine_caps_at_slots(self):
         # electric-furnace has 2 slots; specifying 4 prod-3-normal must only
-        # apply 2 slots worth of bonus (+20%), not 4 (+40%).
+        # apply 2 slots worth of bonus (+20% prod, −30% speed), not 4 (+40%/−60%).
+        # base = 8/5, prod = 40/21; ratio base/prod = 21/25 = 0.84
         base = _solver_new(furnace_type="electric")
         base.solve("iron-plate", Fraction(60))
 
@@ -878,12 +886,14 @@ class TestModuleConfig(unittest.TestCase):
             base.steps["iron-plate"]["machine_count"]
             / prod.steps["iron-plate"]["machine_count"]
         )
-        self.assertAlmostEqual(float(ratio), 1.20, places=6)
+        self.assertAlmostEqual(float(ratio), 0.84, places=6)
 
     def test_module_quality_scales_prod_bonus(self):
-        # prod-3-legendary: 4 × 10% × 2.5 = 100%  →  machine_count = 1/5
-        # prod-3-normal:    4 × 10% × 1.0 =  40%  →  machine_count = 2/7
-        # ratio normal/legendary = (1+1.0)/(1+0.4) = 2.0/1.4 = 10/7
+        # Speed penalty (−15%/slot) is NOT quality-scaled → identical for both.
+        # effective_speed = 5/4 × (1 − 3/5) = 1/2 for both.
+        # prod-3-legendary: 4 × 10% × 2.5 = 100%  →  machine_count = 1/2
+        # prod-3-normal:    4 × 10% × 1.0 =  40%  →  machine_count = 5/7
+        # ratio normal/legendary = (1+1.0)/(1+0.4) = 2.0/1.4 = 10/7  (speed terms cancel)
         leg = _solver_new(module_configs={
             "assembling-machine-3": [_mspec(4, "prod", 3, "legendary")]
         })
@@ -926,15 +936,16 @@ class TestModuleConfig(unittest.TestCase):
 
     def test_mixed_exact_machine_count(self):
         # 1× prod-3-rare + 3× speed-3-uncommon in assembler-3
-        # prod_bonus  = 1 × 10/100 × 8/5  = 4/25
-        # speed_bonus = 3 × 50/100 × 13/10 = 39/20
-        # effective_result = 29/25
-        # effective_speed  = 5/4 × (1 + 39/20) = 5/4 × 59/20 = 59/16
+        # prod_bonus  = 1 × 10/100 × 8/5 = 4/25
+        # speed_penalty (prod, NOT quality-scaled) = 1 × −15/100 = −3/20
+        # speed_bonus (speed modules, quality-scaled) = 3 × 50/100 × 13/10 = 39/20
+        # total speed = −3/20 + 39/20 = 36/20 = 9/5
+        # effective_result = 1 + 4/25 = 29/25
+        # effective_speed  = 5/4 × (1 + 9/5) = 5/4 × 14/5 = 7/2
         # cycles/min = 60 / (29/25) = 1500/29
-        # machines = (1500/29 × 1/2) / (60 × 59/16)
-        #          = (750/29) / (3540/16)
-        #          = (750 × 16) / (29 × 3540)
-        #          = 12000 / 102660 = 200 / 1711
+        # machines = (1500/29 × 1/2) / (60 × 7/2)
+        #          = (750/29) / 210
+        #          = 750 / 6090 = 25 / 203
         s = _solver_new(module_configs={
             "assembling-machine-3": [
                 _mspec(1, "prod",  3, "rare"),
@@ -944,7 +955,7 @@ class TestModuleConfig(unittest.TestCase):
         s.solve("electronic-circuit", Fraction(60))
         self.assertEqual(
             s.steps["electronic-circuit"]["machine_count"],
-            Fraction(200, 1711),
+            Fraction(25, 203),
         )
 
     def test_efficiency_modules_do_not_affect_count(self):
@@ -970,10 +981,10 @@ class TestModuleConfig(unittest.TestCase):
             "electronic-circuit": [_mspec(4, "prod", 3, "normal")]
         })
         s.solve("electronic-circuit", Fraction(60))
-        # electronic-circuit step gets the 40% prod bonus → 2/7 machines
+        # electronic-circuit step: +40% prod, −60% speed penalty → 5/7 machines
         self.assertEqual(
             s.steps["electronic-circuit"]["machine_count"],
-            Fraction(2, 7),
+            Fraction(5, 7),
         )
         # copper-cable (a dependency, no override) uses no prod bonus.
         # However, the prod bonus on electronic-circuit reduces its cycle rate:
@@ -3000,7 +3011,12 @@ class TestResearchProductivity(unittest.TestCase):
         self.assertEqual(Fraction(ratio), Fraction(15, 10))
 
     def test_research_prod_stacks_additively_with_module_prod(self):
-        # 4 prod-3 normal (+40 %) + L3 research (+30 %) = +70 % additive total.
+        # 4 prod-3 normal (+40% prod, −60% speed) + L3 research (+30% prod, no penalty).
+        # total prod = +70%: effective_result = 17/10
+        # speed_penalty from modules = −3/5: effective_speed = 5/4 × 2/5 = 1/2
+        # base machines    ∝ 1 / (5/4)   = 4/5
+        # combo machines   ∝ (10/17) / (1/2) = 20/17
+        # ratio base/combo = (4/5) / (20/17) = (4/5) × (17/20) = 68/100 = 17/25
         base = _solver()
         base.solve("processing-unit", Fraction(10))
         combo = _solver(
@@ -3012,7 +3028,7 @@ class TestResearchProductivity(unittest.TestCase):
             base.steps["processing-unit"]["machine_count"]
             / combo.steps["processing-unit"]["machine_count"]
         )
-        self.assertEqual(Fraction(ratio), Fraction(17, 10))
+        self.assertEqual(Fraction(ratio), Fraction(17, 25))
         self.assertFalse(combo.research_prod_capped)
 
     def test_cap_enforced_at_plus_300_pct(self):
