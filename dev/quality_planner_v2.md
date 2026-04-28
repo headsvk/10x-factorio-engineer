@@ -47,12 +47,12 @@ These numbers are sanity anchors, not committed expectations — if a refactor m
 
 ## Status (2026-04-26)
 
-**V2 shipped.** **V3-partial (LDS shuffle wiring + self-recycle targets)
-shipped.** Same `dev/quality_planner.py` file,
-`dev/test_quality_planner.py` now at 85 tests (7 new in
-`TestLDSShuffleWiring`, 8 new in `TestSelfRecycleTarget`, 3 obsolete
-`TestFailFast` tests removed for the items that V3 now supports as
-targets). Zero new dependencies.
+**V2 shipped.** **V3-partial shipped:** items 1 (LDS shuffle), 3
+(self-recycle targets), 5 (per-stage assembly module optimization).
+`dev/test_quality_planner.py` now at 93 tests (7 new in
+`TestLDSShuffleWiring`, 8 new in `TestSelfRecycleTarget`, 8 new in
+`TestAssemblyModules`, 3 obsolete `TestFailFast` tests removed for
+the items that V3 now supports as targets). Zero new dependencies.
 
 V3 item 3 (self-recycle targets): items whose recycle returns themselves
 (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`,
@@ -411,11 +411,40 @@ Yumako, jellynut, bioflux, pentapod eggs, nutrients — each has a spoilage time
 
 Estimated size: ~400 LoC + a new timing model.
 
-### 5. Per-stage assembly module optimization
+### 5. Per-stage assembly module optimization — **SHIPPED (2026-04-27)**
 
-V1/V2 run assembly stages with no modules. This means every foundry casting legendary iron-plate runs at base speed/prod; a 4-slot foundry with 4 legendary prod-3 modules gives +40% prod and reduces upstream demand by ~28%. Implementing this requires per-recipe module-config DP identical to what the quality loop solver already does, just without the quality dimension. Should be a straightforward extension of `_unused_solve_loop_reference`.
+V2 ran assembly stages with no modules — the regression-anchor note
+("Exact coal/oil counts are high because assembly stages still run
+modules-off") was the artefact.  V3 adds `--assembly-modules` (default
+off): when on, every assembly stage's machine slots are filled with prod
+modules at the planner's `--module-quality` and `--prod-module-tier`,
+inherent prod (foundry/EM-plant/biochamber +50%) is always applied, and
+the +300% cap engages from total prod (research + module + inherent).
 
-Estimated size: ~100 LoC.
+**Implementation:** `_assembly_prod_bonus(machine, recipe, slots_map,
+flag, quality, tier) → (prod_fraction, slots_filled)` is called at both
+walker passes (demand accumulation + stage construction) so ingredient
+demand propagates correctly upstream. Stage dict gains `module_prod`,
+`prod_modules`, `prod_module_tier`, `prod_module_quality`. `format_human`
+appends `Nx prod-3-legendary (+X%)` to each assembly line.
+
+**Smoke (60/min legendary processing-unit, --planets nauvis):**
+- modules off: 620.2 machines, metallic chunks 1406/min, mined coal 322k/min
+- modules on:  31.5 machines (≈20× drop), metallic chunks 30/min,
+  mined coal 14k/min
+
+The 20× cliff comes from cascading: cryogenic-plant gets 8 prod-3-
+legendary modules (+200%, cap), foundry +150% (4 modules + inherent),
+EM-plant +175%. Each of ~10 chained stages divides ingredient demand
+by 1+prod, compounding.
+
+**Tests:** `TestAssemblyModules` (8 tests).
+
+**Caveat:** `--prod-module-tier` defaults to 3.  No speed modules — speed
+doesn't reduce ingredient demand and the planner already sizes by
+throughput.  The chosen module config is a heuristic ("fill all slots
+with prod"); a per-stage DP that sometimes prefers fewer prod modules
+to leave slots free for speed/quality is V3.x.
 
 ### 6. Alternate objectives
 
