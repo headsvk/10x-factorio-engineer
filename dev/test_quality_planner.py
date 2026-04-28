@@ -782,5 +782,100 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertIn("Holmium Plate", text)
 
 
+class TestAssemblyModules(unittest.TestCase):
+    """V3 item 5: --assembly-modules fills assembly stage slots with prod modules."""
+
+    def test_default_off(self):
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        # Without flag, stages have no prod modules.
+        for st in out["stages"]:
+            if st.get("role") == "assembly":
+                self.assertEqual(st.get("prod_modules", 0), 0)
+                self.assertEqual(st.get("module_prod", 0.0), 0.0)
+
+    def test_flag_reduces_total_machines(self):
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_on = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+        )
+        # Modules cut total machines by an order of magnitude on chained
+        # foundry/EM-plant/cryogenic chains.
+        self.assertLess(
+            out_on["total_machine_count"], out_off["total_machine_count"] / 5,
+        )
+
+    def test_flag_reduces_raw_demand(self):
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_on = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+        )
+        # Asteroid input drops because every assembly stage's ingredient demand
+        # is divided by (1+prod).
+        m_off = out_off["asteroid_input"]["metallic-asteroid-chunk"]
+        m_on = out_on["asteroid_input"]["metallic-asteroid-chunk"]
+        self.assertLess(m_on, m_off / 5)
+
+    def test_inherent_prod_applied_to_em_plant(self):
+        # EM plant has 5 slots and 0.5 inherent prod.  With flag on at legendary T3,
+        # module prod = 5 × 0.25 × 1 = 1.25, total = 1.25 + 0.5 = 1.75 (capped at 3.0).
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+        )
+        em_stages = [
+            s for s in out["stages"]
+            if s.get("role") == "assembly" and s.get("machine") == "electromagnetic-plant"
+        ]
+        self.assertGreater(len(em_stages), 0)
+        for s in em_stages:
+            self.assertEqual(s["prod_modules"], 5)
+            self.assertAlmostEqual(s["module_prod"], 1.75, delta=1e-6)
+
+    def test_prod_cap_at_300pct(self):
+        # With cryogenic-plant (8 slots) and high research, total prod hits +300% cap.
+        out = qp.plan(
+            "plastic-bar", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+            research_levels={"plastic-bar-productivity": 30},
+        )
+        plastic_stages = [
+            s for s in out["stages"]
+            if s.get("role") == "assembly" and s.get("product") == "plastic-bar"
+        ]
+        self.assertGreater(len(plastic_stages), 0)
+        # Capped flag set (eff_prod hit the 4.0 cap).
+        self.assertTrue(any(s.get("prod_capped") for s in plastic_stages))
+
+    def test_recipe_disallowing_prod_skipped(self):
+        # casting-iron / casting-copper-cable typically allow_productivity=true,
+        # but recipes flagged allow_productivity=false (e.g. *-recycling) get 0.
+        # We use the helper directly to verify the gate.
+        recipe = {"allow_productivity": False}
+        prod, slots = qp._assembly_prod_bonus(
+            "foundry", recipe, {"foundry": 4}, True, "legendary", 3,
+        )
+        self.assertEqual(prod, 0.0)
+        self.assertEqual(slots, 0)
+
+    def test_helper_returns_inherent_when_no_slots(self):
+        # Machine with 0 slots in slots_map still gets inherent prod returned.
+        recipe = {"allow_productivity": True}
+        prod, slots = qp._assembly_prod_bonus(
+            "foundry", recipe, {}, True, "legendary", 3,
+        )
+        self.assertEqual(prod, 0.5)  # foundry inherent
+        self.assertEqual(slots, 0)
+
+    def test_human_format_shows_prod_modules(self):
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+        )
+        text = qp.format_human(out)
+        self.assertIn("prod-3-legendary", text)
+
+
 if __name__ == "__main__":
     unittest.main()

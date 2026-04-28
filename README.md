@@ -30,7 +30,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (198 tests, stdlib only)
   quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
-  test_quality_planner.py   # unittest suite (85 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (93 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -153,7 +153,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-198 CLI tests + 85 quality-planner tests, stdlib only.
+198 CLI tests + 93 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner (V1 + V2 + V3-partial)
 
@@ -182,6 +182,12 @@ python dev/quality_planner.py --item processing-unit --rate 60 \
     --planets nauvis --enable-lds-shuffle \
     --research low-density-structure-productivity=10 \
     --research plastic-bar-productivity=10
+
+# V3 item 5: prod modules in every assembly stage (drops machines ~20× on
+# fluid-cast chains because each foundry/EM-plant/cryogenic-plant gets
+# 4-8 prod-3-legendary modules + inherent +50%, capped at +300%).
+python dev/quality_planner.py --item processing-unit --rate 60 \
+    --planets nauvis --assembly-modules
 
 # V3 item 3: self-recycling targets (recycle returns the item itself)
 python dev/quality_planner.py --item superconductor --rate 60 \

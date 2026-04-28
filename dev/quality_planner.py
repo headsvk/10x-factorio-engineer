@@ -981,6 +981,36 @@ def _research_prod_for_recipe(recipe_key: str, research_levels: dict[str, int]) 
     return bonus
 
 
+def _assembly_prod_bonus(
+    machine_key: str,
+    recipe: dict,
+    slots_map: dict[str, int],
+    assembly_modules: bool,
+    module_quality: str,
+    prod_module_tier: int,
+) -> tuple[float, int]:
+    """Prod bonus from inherent machine prod + N prod modules filling all slots.
+
+    Returns ``(prod_fraction, slots_filled)``.  Slots_filled is the number of
+    module slots actually filled with prod modules — 0 if the recipe disallows
+    productivity OR ``assembly_modules`` is False.
+
+    Quality of the modules is ``module_quality`` (matches the planner's quality
+    config so the user gets internally-consistent module choices).  Tier is
+    ``prod_module_tier`` (default 3).
+    """
+    if not assembly_modules:
+        return 0.0, 0
+    if not recipe.get("allow_productivity", True):
+        return 0.0, 0
+    inherent = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+    slots = int(slots_map.get(machine_key, 0))
+    if slots <= 0:
+        return inherent, 0
+    module_bonus = _prod_bonus(slots, prod_module_tier, module_quality)
+    return inherent + module_bonus, slots
+
+
 def _planet_unlocks_item(item_key: str, planets: frozenset[str]) -> bool:
     """True if `item_key` is not planet-gated, OR if at least one of its
     unlocking planets is in the ``planets`` set."""
@@ -1085,6 +1115,9 @@ def walk_recipe_tree(
     planets: frozenset[str] | None = None,
     extra_raws: frozenset[str] | None = None,
     byproduct_credits: dict[str, float] | None = None,
+    assembly_modules: bool = False,
+    assembly_module_quality: str = "legendary",
+    prod_module_tier: int = 3,
 ) -> tuple[list[dict], dict[str, float]]:
     """Walk recipe tree; return (stages, raw_demand_rates).
 
@@ -1133,6 +1166,7 @@ def walk_recipe_tree(
     if extra_raws:
         base_raw_set |= set(extra_raws)
     raw_set = frozenset(base_raw_set)
+    slots_map = cli.build_machine_module_slots(data) if assembly_modules else {}
 
     # Accumulate demand per (item) — then we'll resolve recipes / stages per item.
     demand: dict[str, float] = defaultdict(float)
@@ -1175,7 +1209,19 @@ def walk_recipe_tree(
         if per_craft_output <= 0:
             continue
         research_prod = _research_prod_for_recipe(recipe["key"], research_levels)
-        eff_prod = 1.0 + research_prod
+        # Module prod (matches what we'll apply in the second pass — must be
+        # consistent so demand propagation upstream lines up).
+        if assembly_modules:
+            machine_key_p1, _ = cli.get_machine(
+                recipe["category"], assembler_level, "electric",
+            )
+            module_prod_p1, _ = _assembly_prod_bonus(
+                machine_key_p1, recipe, slots_map,
+                assembly_modules, assembly_module_quality, prod_module_tier,
+            )
+        else:
+            module_prod_p1 = 0.0
+        eff_prod = 1.0 + research_prod + module_prod_p1
         if eff_prod > 4.0:
             eff_prod = 4.0
         net_demand = max(0.0, demand[current])
@@ -1215,7 +1261,11 @@ def walk_recipe_tree(
         machine_key, machine_speed = cli.get_machine(recipe["category"], assembler_level, "electric")
         machine_speed_f = float(machine_speed)
         research_prod = _research_prod_for_recipe(recipe["key"], research_levels)
-        eff_prod = 1.0 + research_prod
+        module_prod, prod_slots_filled = _assembly_prod_bonus(
+            machine_key, recipe, slots_map,
+            assembly_modules, assembly_module_quality, prod_module_tier,
+        )
+        eff_prod = 1.0 + research_prod + module_prod
         capped = False
         if eff_prod > 4.0:
             eff_prod = 4.0
@@ -1247,6 +1297,10 @@ def walk_recipe_tree(
             "fluid_inputs": fluid_inputs,
             "solid_inputs": solid_inputs,
             "research_prod": research_prod,
+            "module_prod": module_prod,
+            "prod_modules": prod_slots_filled,
+            "prod_module_tier": prod_module_tier if prod_slots_filled > 0 else 0,
+            "prod_module_quality": assembly_module_quality if prod_slots_filled > 0 else "normal",
             "prod_capped": capped,
             "inputs_all_legendary": all(k not in fluids for k in inputs) if solid_inputs else True,
         })
@@ -1421,6 +1475,8 @@ def _plan_self_recycle_target(
     assembler_level: int,
     quality_module_tier: int,
     planets: frozenset[str],
+    assembly_modules: bool = False,
+    prod_module_tier: int = 3,
 ) -> dict:
     """Plan a chain whose target self-recycles (e.g. superconductor).
 
@@ -1513,6 +1569,9 @@ def _plan_self_recycle_target(
                 sub_stages, sub_raws = walk_recipe_tree(
                     iname, ing_rate, data, research_levels, assembler_level,
                     fluids, planet_props, planets,
+                    assembly_modules=assembly_modules,
+                    assembly_module_quality=module_quality,
+                    prod_module_tier=prod_module_tier,
                 )
             except ValueError:
                 # Ingredient may itself be planet-gated or unreachable — record
@@ -1601,6 +1660,8 @@ def plan(
     quality_module_tier: int = 3,
     planets: list[str] | tuple[str, ...] | frozenset[str] | None = None,
     enable_lds_shuffle: bool = False,
+    assembly_modules: bool = False,
+    prod_module_tier: int = 3,
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
     scale stages, assemble full output.
@@ -1633,6 +1694,8 @@ def plan(
             assembler_level=assembler_level,
             quality_module_tier=quality_module_tier,
             planets=planets_fs,
+            assembly_modules=assembly_modules,
+            prod_module_tier=prod_module_tier,
         )
     if item_key in PLANET_UNLOCKS:
         if not _planet_unlocks_item(item_key, planets_fs) and item_key not in RAW_TO_CHUNK:
@@ -1646,6 +1709,9 @@ def plan(
     planet_props = _combined_planet_props(data, planets_fs)
     stages, raw_demand = walk_recipe_tree(
         item_key, rate, data, research_levels, assembler_level, fluids, planet_props, planets_fs,
+        assembly_modules=assembly_modules,
+        assembly_module_quality=module_quality,
+        prod_module_tier=prod_module_tier,
     )
 
     # ---- LDS shuffle wiring (V3 partial: replace plastic-bar leg) ----
@@ -1681,6 +1747,9 @@ def plan(
                     item_key, rate, data, research_levels, assembler_level,
                     fluids, planet_props, planets_fs,
                     extra_raws=frozenset({"plastic-bar"}),
+                    assembly_modules=assembly_modules,
+                    assembly_module_quality=module_quality,
+                    prod_module_tier=prod_module_tier,
                 )
                 raw_demand.pop("plastic-bar", None)
 
@@ -1707,6 +1776,9 @@ def plan(
                         fluids, planet_props, planets_fs,
                         extra_raws=frozenset({"plastic-bar"}),
                         byproduct_credits=capped_credits,
+                        assembly_modules=assembly_modules,
+                        assembly_module_quality=module_quality,
+                        prod_module_tier=prod_module_tier,
                     )
                     raw_demand.pop("plastic-bar", None)
 
@@ -1721,6 +1793,9 @@ def plan(
                 n_stages, n_raws = walk_recipe_tree(
                     "plastic-bar", normal_in, data, research_levels, assembler_level,
                     fluids, planet_props, planets_fs,
+                    assembly_modules=assembly_modules,
+                    assembly_module_quality=module_quality,
+                    prod_module_tier=prod_module_tier,
                 )
                 for st in n_stages:
                     st["normal_quality_chain"] = True
@@ -2074,10 +2149,19 @@ def format_human(out: dict) -> str:
             fluids = f", fluids=[{','.join(st['fluid_inputs'])}]" if st.get("fluid_inputs") else ""
             capped = " [PROD-CAPPED]" if st.get("prod_capped") else ""
             tag = " [NORMAL]" if st.get("normal_quality_chain") else ""
+            n_prod = int(st.get("prod_modules", 0))
+            if n_prod > 0:
+                mods = (
+                    f", {n_prod}x prod-{st.get('prod_module_tier', 3)}-"
+                    f"{st.get('prod_module_quality', 'normal')} "
+                    f"(+{st.get('module_prod', 0.0) * 100.0:.0f}%)"
+                )
+            else:
+                mods = ""
             L.append(
                 f"  [{role:10s}] {st['recipe']}: "
                 f"{st['rate_per_min']:.2f}/min "
-                f"({st['machine_count']:.2f} × {_humanize(st['machine'])}){fluids}{capped}{tag}"
+                f"({st['machine_count']:.2f} × {_humanize(st['machine'])}){fluids}{mods}{capped}{tag}"
             )
     L.append("")
     L.append(f"Total machines: {out['total_machine_count']:.2f}")
@@ -2140,6 +2224,20 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--assembly-modules", action="store_true",
+        help=(
+            "Fill assembly-stage machine slots with prod modules "
+            "(matching --module-quality, tier 3). Reduces ingredient demand "
+            "and machine counts throughout the chain by 1/(1+prod) per "
+            "stage. Inherent +50%% prod (foundry/EM-plant/biochamber) is "
+            "always applied — this flag adds the module slots on top."
+        ),
+    )
+    p.add_argument(
+        "--prod-module-tier", default=3, type=int, choices=[1, 2, 3],
+        help="Tier of prod modules used by --assembly-modules (default 3).",
+    )
+    p.add_argument(
         "--enable-lds-shuffle", action="store_true",
         help=(
             "Replace the legendary plastic-bar chain with the LDS shuffle "
@@ -2167,6 +2265,8 @@ def main() -> None:
             quality_module_tier=args.quality_module_tier,
             planets=planets_list,
             enable_lds_shuffle=args.enable_lds_shuffle,
+            assembly_modules=args.assembly_modules,
+            prod_module_tier=args.prod_module_tier,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)
