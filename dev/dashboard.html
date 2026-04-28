@@ -828,7 +828,8 @@ function renderHeader() {
             const sciKeys = Object.keys(targets);
             if (!sciKeys.length) return '';
             const rates = allSciRates();
-            const eff = Math.min(...sciKeys.map(k => rates[k]?.total ?? 0));
+            const activeKeys = sciKeys.filter(k => !rates[k]?.allWip);
+            const eff = activeKeys.length ? Math.min(...activeKeys.map(k => rates[k]?.total ?? 0)) : 0;
             return `<span class="badge">${Math.round(eff)} SPM</span>`;
           })()}
         </div>
@@ -852,7 +853,10 @@ function allSciTargets() {
   return t;
 }
 
-// Aggregate science rates across all locations; returns { packId: { total, byLoc: [{label, rate}] } }
+// Aggregate science rates across all locations.
+// Returns { packId: { total, allWip, byLoc: [{label, rate}] } }
+// allWip is true when every contributing line has wip:true — used to exclude
+// in-progress lines from the SPM bottleneck headline.
 function allSciRates() {
   const targets = allSciTargets();
   const result = {};
@@ -860,8 +864,9 @@ function allSciRates() {
     for (const line of loc.lines ?? []) {
       if (!(line.item in targets)) continue;
       const rate = line.effective_rate ?? line.target_rate ?? 0;
-      if (!result[line.item]) result[line.item] = { total: 0, byLoc: [] };
+      if (!result[line.item]) result[line.item] = { total: 0, allWip: true, byLoc: [] };
       result[line.item].total += rate;
+      if (!line.wip) result[line.item].allWip = false;
       const entry = result[line.item].byLoc.find(e => e.label === loc.label);
       if (entry) entry.rate += rate;
       else result[line.item].byLoc.push({ label: loc.label, rate });
@@ -876,7 +881,8 @@ function renderScience() {
   if (!keys.length) return '';
   const rates = allSciRates();
 
-  const effectiveSPM = Math.min(...keys.map(k => rates[k]?.total ?? 0));
+  const activeKeys   = keys.filter(k => !rates[k]?.allWip);
+  const effectiveSPM = activeKeys.length ? Math.min(...activeKeys.map(k => rates[k]?.total ?? 0)) : 0;
   const targetSPM    = Math.max(...keys.map(k => targets[k]));
   const spmPct = pct(effectiveSPM, targetSPM);
   const spmCol = statusColor(spmPct);
