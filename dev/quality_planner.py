@@ -136,6 +136,15 @@ MINED_RAW_PLANETS: dict[str, tuple[str, ...]] = {
     "scrap":        ("fulgora",),
     "holmium-ore":  ("fulgora",),   # also reachable via scrap-recycling byproduct
     "uranium-ore":  ("nauvis",),
+    # V3 partial Gleba support: yumako / jellynut / pentapod-egg are harvested
+    # from agricultural towers (0 module slots — no agricultural quality path).
+    # The only legendary route is self-recycle: yumako-recycling gives 0.25 of
+    # the input back at a quality roll, identical to the coal/stone loop.
+    # NOTE: spoilage timing is NOT modelled here; long quality loops on
+    # spoiling intermediates (bioflux, nutrients) give optimistic counts.
+    "yumako":       ("gleba",),
+    "jellynut":     ("gleba",),
+    "pentapod-egg": ("gleba",),
 }
 
 # Planet key each item/raw is tied to.  An item is usable whenever the user

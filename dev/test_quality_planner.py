@@ -877,5 +877,76 @@ class TestAssemblyModules(unittest.TestCase):
         self.assertIn("prod-3-legendary", text)
 
 
+class TestGlebaPartial(unittest.TestCase):
+    """V3 item 4 (partial): Gleba bio-raws via self-recycle (no spoilage model).
+
+    Yumako / jellynut / pentapod-egg are added to ``MINED_RAW_PLANETS`` so the
+    walker treats them as legendary-source-able via the same self-recycle DP
+    used for coal/stone.  Spoilage timing is NOT modelled — long quality loops
+    on spoiling intermediates (bioflux, nutrients) report optimistic numbers.
+    """
+
+    def test_bioflux_target(self):
+        out = qp.plan("bioflux", 60, _data(), planets=["gleba"])
+        self.assertGreater(out["total_machine_count"], 0)
+        # Both yumako and jellynut required (recipe: 15 yumako-mash + 12 jelly).
+        self.assertIn("yumako", out["mined_input"])
+        self.assertIn("jellynut", out["mined_input"])
+        self.assertGreater(out["mined_input"]["yumako"], 0)
+        self.assertGreater(out["mined_input"]["jellynut"], 0)
+
+    def test_plastic_bar_uses_bioplastic_on_gleba(self):
+        # Without nauvis, plastic-bar must route through bioplastic
+        # (bioflux + yumako-mash); coal must NOT appear.
+        out = qp.plan("plastic-bar", 60, _data(), planets=["gleba"])
+        self.assertNotIn("coal", out["mined_input"])
+        self.assertIn("yumako", out["mined_input"])
+
+    def test_sulfur_uses_biosulfur_on_gleba(self):
+        out = qp.plan("sulfur", 60, _data(), planets=["gleba"])
+        self.assertGreater(out["total_machine_count"], 0)
+        self.assertIn("yumako", out["mined_input"])
+
+    def test_lubricant_uses_biolubricant_on_gleba(self):
+        out = qp.plan("lubricant", 60, _data(), planets=["gleba"])
+        self.assertGreater(out["total_machine_count"], 0)
+        self.assertIn("jellynut", out["mined_input"])
+
+    def test_nutrients_target(self):
+        out = qp.plan("nutrients", 60, _data(), planets=["gleba"])
+        self.assertGreater(out["total_machine_count"], 0)
+        self.assertIn("yumako", out["mined_input"])
+
+    def test_assembly_modules_reduce_gleba_chain(self):
+        out_off = qp.plan("bioflux", 60, _data(), planets=["gleba"])
+        out_on = qp.plan(
+            "bioflux", 60, _data(),
+            planets=["gleba"], assembly_modules=True,
+        )
+        # Biochambers have 4 slots and +50% inherent prod → big drop.
+        self.assertLess(
+            out_on["total_machine_count"], out_off["total_machine_count"] / 3,
+        )
+        self.assertLess(
+            out_on["mined_input"]["yumako"], out_off["mined_input"]["yumako"] / 3,
+        )
+
+    def test_yumako_self_recycle_yield(self):
+        v, _ = qp.solve_mined_raw_self_recycle_loop(
+            "yumako", _data(), "legendary", 3,
+        )
+        self.assertGreater(v, 0.0)
+        self.assertLess(v, 0.01)  # tiny, similar to coal
+
+    def test_no_gleba_unlocked_still_errors(self):
+        with self.assertRaises(ValueError) as cm:
+            qp.plan("bioflux", 60, _data(), planets=["nauvis"])
+        msg = str(cm.exception).lower()
+        self.assertTrue(
+            "yumako" in msg or "gleba" in msg or "no recipe" in msg,
+            f"Unexpected error: {cm.exception}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
