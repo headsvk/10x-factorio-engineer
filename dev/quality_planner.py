@@ -1734,6 +1734,25 @@ def _plan_self_recycle_target(
         st["power_kw"] = _stage_power_kw(st, machine_power_w)
     total_power_mw = sum(s["power_kw"] for s in all_stages) / 1000.0
 
+    # Stage-cost summary (by role).
+    by_role: dict[str, dict[str, float]] = {}
+    for st in all_stages:
+        role = st.get("role", "unknown")
+        bucket = by_role.setdefault(
+            role, {"machines": 0.0, "power_kw": 0.0, "stage_count": 0},
+        )
+        bucket["machines"] += float(st.get("machine_count", 0.0))
+        bucket["power_kw"] += float(st.get("power_kw", 0.0))
+        bucket["stage_count"] += 1
+    for bucket in by_role.values():
+        bucket["machines_pct"] = (
+            bucket["machines"] / total_machines * 100.0 if total_machines > 0 else 0.0
+        )
+        bucket["power_pct"] = (
+            bucket["power_kw"] / (total_power_mw * 1000.0) * 100.0
+            if total_power_mw > 0 else 0.0
+        )
+
     return {
         "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
         "asteroid_input": {},
@@ -1747,6 +1766,7 @@ def _plan_self_recycle_target(
         "stages": [self_stage] + list(reversed(normal_stages)),
         "total_machine_count": total_machines,
         "total_power_mw": total_power_mw,
+        "summary": {"by_role": by_role},
         "module_quality": module_quality,
         "assembler_level": assembler_level,
         "research_levels": dict(research_levels),
@@ -2155,6 +2175,28 @@ def plan(
         st["power_kw"] = _stage_power_kw(st, machine_power_w)
     total_power_mw = sum(s["power_kw"] for s in all_stages_for_power) / 1000.0
 
+    # Stage-cost summary: aggregate machine_count + power_kw by stage role.
+    # Helps the user see where machine count is concentrated (e.g. 80 % in
+    # asteroid-reprocessing → reach for --enable-lds-shuffle, etc.).
+    by_role: dict[str, dict[str, float]] = {}
+    for st in all_stages_for_power:
+        role = st.get("role", "unknown")
+        bucket = by_role.setdefault(
+            role, {"machines": 0.0, "power_kw": 0.0, "stage_count": 0},
+        )
+        bucket["machines"] += float(st.get("machine_count", 0.0))
+        bucket["power_kw"] += float(st.get("power_kw", 0.0))
+        bucket["stage_count"] += 1
+    # Compute % of total for each role (machines + power separately).
+    for role, bucket in by_role.items():
+        bucket["machines_pct"] = (
+            bucket["machines"] / total_machines * 100.0 if total_machines > 0 else 0.0
+        )
+        bucket["power_pct"] = (
+            bucket["power_kw"] / (total_power_mw * 1000.0) * 100.0
+            if total_power_mw > 0 else 0.0
+        )
+
     notes: list[str] = list(extra_notes)
     # Detect if we used fluid transparency
     for st in stages:
@@ -2183,6 +2225,7 @@ def plan(
         ),
         "total_machine_count": total_machines,
         "total_power_mw": total_power_mw,
+        "summary": {"by_role": by_role},
         "module_quality": module_quality,
         "assembler_level": assembler_level,
         "research_levels": dict(research_levels),
@@ -2322,6 +2365,26 @@ def format_human(out: dict) -> str:
             L.append(f"Total power:    {pwr_mw / 1000.0:.2f} GW (electric machines only)")
         else:
             L.append(f"Total power:    {pwr_mw:.2f} MW (electric machines only)")
+    by_role = (out.get("summary") or {}).get("by_role")
+    if by_role:
+        L.append("")
+        L.append("=== Cost Breakdown by Stage Role ===")
+        # Sort by descending machine count.
+        items = sorted(
+            by_role.items(), key=lambda kv: kv[1].get("machines", 0.0), reverse=True,
+        )
+        L.append(f"  {'Role':<28} {'Stages':>6}  {'Machines':>10} {'%':>6}  {'Power':>10} {'%':>6}")
+        for role, b in items:
+            stages_n = int(b.get("stage_count", 0))
+            mc = float(b.get("machines", 0.0))
+            mp = float(b.get("machines_pct", 0.0))
+            pk = float(b.get("power_kw", 0.0))
+            pp = float(b.get("power_pct", 0.0))
+            pwr_label = f"{pk / 1000.0:.2f}MW" if pk >= 1000 else f"{pk:.1f}kW"
+            L.append(
+                f"  {role:<28} {stages_n:>6}  {mc:>10.2f} {mp:>5.1f}%  "
+                f"{pwr_label:>10} {pp:>5.1f}%"
+            )
     if out.get("notes"):
         L.append("")
         L.append("Notes:")

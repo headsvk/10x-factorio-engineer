@@ -1238,5 +1238,70 @@ class TestNoAsteroids(unittest.TestCase):
         self.assertIn("Mined Raws", text)
 
 
+class TestStageSummary(unittest.TestCase):
+    """V3 small: summary.by_role aggregates machine_count + power_kw per
+    stage role with stage_count and percentage breakdown."""
+
+    def _out(self, **kwargs):
+        return qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True, **kwargs,
+        )
+
+    def test_summary_present(self):
+        out = self._out()
+        self.assertIn("summary", out)
+        self.assertIn("by_role", out["summary"])
+
+    def test_machines_sum_matches_total(self):
+        out = self._out()
+        by_role = out["summary"]["by_role"]
+        total = sum(b["machines"] for b in by_role.values())
+        self.assertAlmostEqual(total, out["total_machine_count"], delta=1e-6)
+
+    def test_power_sum_matches_total(self):
+        out = self._out()
+        by_role = out["summary"]["by_role"]
+        total_kw = sum(b["power_kw"] for b in by_role.values())
+        self.assertAlmostEqual(total_kw, out["total_power_mw"] * 1000.0, delta=1e-6)
+
+    def test_pct_sums_to_100(self):
+        out = self._out()
+        by_role = out["summary"]["by_role"]
+        m_pct = sum(b["machines_pct"] for b in by_role.values())
+        self.assertAlmostEqual(m_pct, 100.0, delta=0.01)
+        p_pct = sum(b["power_pct"] for b in by_role.values())
+        self.assertAlmostEqual(p_pct, 100.0, delta=0.01)
+
+    def test_stage_count_present(self):
+        out = self._out()
+        by_role = out["summary"]["by_role"]
+        # processing-unit chain has multiple assembly stages.
+        self.assertIn("assembly", by_role)
+        self.assertGreater(by_role["assembly"]["stage_count"], 1)
+
+    def test_self_recycle_target_has_summary(self):
+        # The dedicated _plan_self_recycle_target path also emits summary.
+        out = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["nauvis", "fulgora"],
+        )
+        self.assertIn("summary", out)
+        self.assertIn("self-recycle-target", out["summary"]["by_role"])
+
+    def test_asteroid_reprocessing_role_in_default(self):
+        # Default plan (asteroid path) should have asteroid-reprocessing role.
+        out = qp.plan("iron-plate", 60, _data())
+        roles = set(out["summary"]["by_role"].keys())
+        self.assertIn("asteroid-reprocessing", roles)
+        self.assertIn("assembly", roles)
+
+    def test_human_format_renders_summary(self):
+        out = self._out()
+        text = qp.format_human(out)
+        self.assertIn("Cost Breakdown by Stage Role", text)
+        self.assertIn("assembly", text)
+
+
 if __name__ == "__main__":
     unittest.main()
