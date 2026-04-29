@@ -62,6 +62,12 @@ machines only; burner machines like biochamber report 0).  Output gains
 (self-recycle: craft + recycler; cross-item-shuffle: foundry + recycler).
 Helper `_stage_power_kw` dispatches on stage role.
 
+Machine quality: `--machine-quality {normal,uncommon,rare,epic,legendary}`
+applies `cli.MACHINE_QUALITY_SPEED` to every assembly / crusher /
+recycler machine speed.  Legendary machines (+150% speed) reduce
+machine count by 1/2.5; total power scales linearly.  Each assembly
+stage is annotated with the chosen `machine_quality` tag.
+
 V3 item 3 (self-recycle targets): items whose recycle returns themselves
 (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`,
 `lithium`) can now be used as planner targets. New solver
