@@ -617,12 +617,14 @@ topics (e.g. "how do I defend my Gleba factory" → `combat-defense.md` + `plane
 
 ---
 
-## 11. Legendary Planning via Asteroid Reprocessing
+## 11. Legendary Planning
 
-For **legendary-tier production planning**, prefer `dev/quality_planner.py` over
-`assets/cli.py`.  The planner implements a backward-induction DP quality loop
-solver and the canonical asteroid-reprocessing strategy (80 % aggregate chunk
-retention, quality modules on crushers, fluid-transparent foundry casting).
+For **legendary-tier production planning**, prefer `dev/quality_planner.py`
+over `assets/cli.py`.  The planner implements a backward-induction DP quality
+loop solver across asteroid reprocessing, mined-raw self-recycle (coal,
+stone, tungsten-ore, scrap, holmium-ore, uranium-ore, gleba bio-raws), LDS
+shuffle (cross-item legendary loop), and self-recycle-target items
+(superconductor, holmium-plate, tungsten-carbide, fusion-power-cell, lithium).
 
 ### When to call it
 
@@ -631,6 +633,8 @@ Invoke `quality_planner.py` when the player asks for:
 - "How do I make N legendary &lt;item&gt; per minute?"
 - "Cheapest asteroid input for legendary circuits / gears / plates?"
 - "How many crushers for legendary &lt;chunk&gt; upcycling?"
+- "What's the cost of legendary tungsten-carbide / holmium-plate / superconductor?"
+- "I don't have space platforms yet — how do I quality on Nauvis only?"
 
 Keep using `assets/cli.py` for everything else — raw / uncommon / rare
 throughput, bus sizing, bottleneck analysis, and all non-quality math.
@@ -639,37 +643,70 @@ throughput, bus sizing, bottleneck analysis, and all non-quality math.
 
 ```
 python dev/quality_planner.py --item <item-id> --rate <N>
-    [--module-quality normal|uncommon|rare|epic|legendary]   # default: legendary
-    [--assembler-level 2|3]                                   # default: 3
-    [--research NAME=LEVEL ...]                               # e.g. asteroid-productivity=5
-    [--format json|human]                                     # default: human
+    [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
+    [--module-quality normal|uncommon|rare|epic|legendary] # default: legendary
+    [--quality-module-tier 1|2|3]                          # default: 3
+    [--assembler-level 2|3]                                # default: 3
+    [--machine-quality normal|uncommon|rare|epic|legendary] # default: normal
+    [--assembly-modules]                                   # fill assembly slots with prod modules
+    [--prod-module-tier 1|2|3]                             # default: 3
+    [--research NAME=LEVEL ...]                            # e.g. asteroid-productivity=5
+    [--enable-lds-shuffle]                                 # cross-item plastic shuffle
+    [--no-asteroids]                                       # no space platform yet
+    [--format json|human]                                  # default: human
 ```
 
-### V1 scope and fail-fast
+### Planet flag
 
-V1 supports **Nauvis-style assembly items whose raws are all reachable via
-asteroid reprocessing**: iron, copper, stone, calcite, ice (and water via ice
-melting).  Items requiring planet exclusives or oil-chain fluids fail fast with
-a specific error:
+`--planets` widens the reachable item set:
+- `nauvis` unlocks oil-chain items (plastic-bar, sulfur, lubricant, processing-unit)
+- `vulcanus` unlocks tungsten-plate, calcite-as-raw, lava-fluid casting
+- `fulgora` unlocks scrap, holmium-ore, electrolyte
+- `gleba` unlocks yumako/jellynut/pentapod-egg + bio recipes (no spoilage modelling)
+- `aquilo` unlocks ammonia, fluorine, lithium-brine, ice-as-raw
 
-- `ERROR: item '<x>' requires '<raw>', which needs planet '<P>' — not supported in V1`
-- `ERROR: recipe '<r>' is self-recycling (output recycles to itself) — not supported in V1`
-- `ERROR: no asteroid path to required raw '<raw>'`
+Without `--planets`, only asteroid-reachable items work (iron, copper, stone, ice, calcite, carbon, sulfur via crushing).
 
-Fail-fast items include tungsten products (Vulcanus), holmium / superconductor
-(Fulgora self-recycling), and anything depending on plastic / sulfur / lubricant
-/ explosives / rocket-fuel (oil chain).  Tell the player why the V1 planner
-cannot handle their item and point them to the CLI for a regular throughput
-calculation or to `references/quality.md` for manual planning guidance.
+### Common flags to recommend
+
+- **Default for serious planning:** `--planets <unlocked> --assembly-modules
+  --machine-quality legendary` cuts machine count >20× compared to defaults
+  by routing inherent +50 % prod (foundry/EM/biochamber) through the chain
+  and using legendary machines (+150 % speed).
+- **Early game (no space platform):** `--no-asteroids --planets nauvis`
+  routes iron/copper-ore through Nauvis self-recycle (240k+ ore/min for
+  60/min legendary plates — high but realistic without asteroids).
+- **Plastic-heavy chains:** `--enable-lds-shuffle` replaces plastic-bar's
+  asteroid leg with the LDS cross-item shuffle (foundry-cast LDS + recycle
+  → legendary plastic + copper/steel byproducts).
+
+### Fail-fast errors
+
+Surface the error verbatim — most are actionable:
+
+- `requires '<raw>'... — add --planets <P>`: tell the player which planet to add
+- `recipe '<r>' is self-recycling`: occurs when the item is needed as an
+  *intermediate* (these ARE valid as targets — superconductor, holmium-plate,
+  tungsten-carbide, fusion-power-cell, lithium). Suggest the player target
+  the self-recycler directly or supply the item externally
+- `chain needs '<chunk>'... but --no-asteroids is set`: tell the player which
+  planet would supply the raw natively
+- `asteroid reprocessing for '<chunk>' yields 0 legendary`: indicates a
+  config issue (zero quality modules / wrong tier) — check `--module-quality`
+  and `--quality-module-tier`
 
 ### Output summary
 
 The planner emits:
 
-- `asteroid_input` — normal-chunk rate per chunk type needed
-- `stages[]` — reprocessing, raw-crushing, casting, and assembly stages with
-  machine counts and module configurations per quality tier
-- `total_machine_count` — sum across all stages
+- `asteroid_input` — normal-chunk rate per chunk type
+- `mined_input` — normal mined raws/min (coal, stone, tungsten-ore, etc.)
+- `fluid_input` — fluid raws (quality-transparent)
+- `normal_solid_input` / `normal_fluid_input` — non-quality inputs (LDS shuffle plastic-leg, self-recycle target ingredients)
+- `stages[]` — assembly + asteroid-reprocessing + raw-crushing + mined-raw-self-recycle + cross-item-shuffle + self-recycle-target stages with machine counts, power, module configs per tier
+- `total_machine_count`, `total_power_mw`
+- `shuffle_byproduct_legendary/credited/overflow` (when LDS shuffle active)
+- `notes[]` — surplus byproducts, fluid-transparency markers
 
 For strategic / qualitative questions about quality mechanics, module placement,
 beacon interactions with quality, and upcycling mindset — read
