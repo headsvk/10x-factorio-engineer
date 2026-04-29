@@ -49,11 +49,18 @@ These numbers are sanity anchors, not committed expectations — if a refactor m
 
 **V2 shipped.** **V3-partial shipped:** items 1 (LDS shuffle), 3
 (self-recycle targets), 4 (Gleba bio-raws, no spoilage), 5 (per-stage
-assembly module optimization).  `dev/test_quality_planner.py` now at
-101 tests (7 new in `TestLDSShuffleWiring`, 8 new in
-`TestSelfRecycleTarget`, 8 new in `TestAssemblyModules`, 8 new in
-`TestGlebaPartial`, 3 obsolete `TestFailFast` tests removed for the
+assembly module optimization), and per-stage power accounting.
+`dev/test_quality_planner.py` now at 109 tests (7 new in
+`TestLDSShuffleWiring`, 8 new in `TestSelfRecycleTarget`, 8 new in
+`TestAssemblyModules`, 8 new in `TestGlebaPartial`, 8 new in
+`TestStagePower`, 3 obsolete `TestFailFast` tests removed for the
 items that V3 now supports as targets). Zero new dependencies.
+
+Power accounting: every stage gains a `power_kw` field (electric
+machines only; burner machines like biochamber report 0).  Output gains
+`total_power_mw`.  Compound stages split power between machine types
+(self-recycle: craft + recycler; cross-item-shuffle: foundry + recycler).
+Helper `_stage_power_kw` dispatches on stage role.
 
 V3 item 3 (self-recycle targets): items whose recycle returns themselves
 (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`,
