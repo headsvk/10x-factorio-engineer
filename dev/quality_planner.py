@@ -208,6 +208,23 @@ PLANET_UNLOCKS: dict[str, tuple[str, ...]] = {
 # listed in PLANET_UNLOCKS (the "canonical" home for error messages).
 PLANET_EXCLUSIVE_RAWS: dict[str, str] = {k: v[0] for k, v in PLANET_UNLOCKS.items()}
 
+# Mined raws that are normally asteroid-routed but have a planet-mining
+# fallback used by ``--no-asteroids``.  Each has a ``<raw>-recycling`` recipe
+# (0.25 retention) so the recycler self-loop produces legendary versions.
+#
+# carbon and sulfur are NOT in this table because they are chemistry products
+# (no native mining); when asteroids are disabled, the walker expands their
+# normal recipes (carbon-from-coal-and-sulfuric-acid / sulfur-from-petgas)
+# which require coal+sulfuric-acid or petgas — those pull in further planet
+# raws via the regular planet-unlock mechanism.  water has no recycling so
+# ``--no-asteroids`` requires Nauvis (offshore-pump quality-transparent).
+MINED_RAW_NO_ASTEROID_FALLBACK: dict[str, tuple[str, ...]] = {
+    "iron-ore":   ("nauvis",),
+    "copper-ore": ("nauvis",),
+    "ice":        ("aquilo",),
+    "calcite":    ("vulcanus",),
+}
+
 # All known Space Age planets (for argparse choices / validation).
 KNOWN_PLANETS: tuple[str, ...] = ("nauvis", "vulcanus", "fulgora", "gleba", "aquilo", "space-platform")
 
@@ -1161,6 +1178,7 @@ def walk_recipe_tree(
     assembly_module_quality: str = "legendary",
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
+    no_asteroids: bool = False,
 ) -> tuple[list[dict], dict[str, float]]:
     """Walk recipe tree; return (stages, raw_demand_rates).
 
@@ -1185,9 +1203,23 @@ def walk_recipe_tree(
     # (RAW_TO_CHUNK) + asteroid chunks + Nauvis-offshore water.  We do NOT
     # auto-include every Nauvis resource: items like coal/stone are solids
     # that need a dedicated quality source (self-recycle) to become legendary.
-    base_raw_set: set[str] = set(RAW_TO_CHUNK.keys())
-    base_raw_set |= {"metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk"}
-    base_raw_set.add("water")
+    if no_asteroids:
+        # Asteroids disabled: only items reachable via planet mining can be raws.
+        # iron-ore / copper-ore / ice / calcite become raws when their planet is
+        # unlocked (handled below via MINED_RAW_NO_ASTEROID_FALLBACK).  Asteroid
+        # chunks are not raws — anything that would route to them must come
+        # from a planet self-recycle path or fail-fast.
+        base_raw_set: set[str] = set()
+        for raw, raw_planets in MINED_RAW_NO_ASTEROID_FALLBACK.items():
+            if any(p in planets for p in raw_planets):
+                base_raw_set.add(raw)
+        # water is offshore-pump on Nauvis (quality-transparent); allowed.
+        if "nauvis" in planets:
+            base_raw_set.add("water")
+    else:
+        base_raw_set = set(RAW_TO_CHUNK.keys())
+        base_raw_set |= {"metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk"}
+        base_raw_set.add("water")
     # Extend with planet-local raws the user has unlocked.  Fluids always count
     # (quality-transparent).  Solids only count if they have a self-recycle
     # quality path (MINED_RAW_PLANETS) — otherwise legendary isn't producible.
@@ -1353,7 +1385,26 @@ def walk_recipe_tree(
 
     # Filter raws to solid raws only (fluids like water get treated in crushing)
     # Keep only items the asteroid chain produces OR raws unlocked via --planets.
-    asteroid_raws = set(RAW_TO_CHUNK.keys()) | set(ASTEROID_REPROCESSING_RECIPES.keys())
+    if no_asteroids:
+        asteroid_raws: set[str] = set()
+        # With asteroids disabled, no stage may use an asteroid-crushing recipe
+        # (chunk recipes self-cycle, so the chunk never appears in raw_demand —
+        # we have to detect the recipe usage instead).  Fail fast pointing at
+        # the leaf raw whose only path goes through asteroids.
+        crush_keys = set(ASTEROID_CRUSHING_RECIPES.values())
+        for st in stages:
+            if st.get("recipe") in crush_keys:
+                product = st.get("product", "?")
+                raise ValueError(
+                    f"ERROR: '{item_key}' chain needs '{product}' which "
+                    f"resolves to asteroid-crushing recipe '{st['recipe']}' "
+                    f"but --no-asteroids is set. Unlock the planet that "
+                    f"produces '{product}' natively via --planets "
+                    f"(e.g. --planets vulcanus for calcite, "
+                    f"--planets aquilo for ice)."
+                )
+    else:
+        asteroid_raws = set(RAW_TO_CHUNK.keys()) | set(ASTEROID_REPROCESSING_RECIPES.keys())
     # Fluid raws that ARE reachable via the asteroid+Nauvis chain (water from ice).
     allowed_fluid_raws = {"water"}
     for raw in list(raw_demand.keys()):
@@ -1722,6 +1773,7 @@ def plan(
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
+    no_asteroids: bool = False,
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
     scale stages, assemble full output.
@@ -1775,6 +1827,7 @@ def plan(
         assembly_module_quality=module_quality,
         prod_module_tier=prod_module_tier,
         machine_quality=machine_quality,
+        no_asteroids=no_asteroids,
     )
 
     # ---- LDS shuffle wiring (V3 partial: replace plastic-bar leg) ----
@@ -1814,6 +1867,7 @@ def plan(
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
+                    no_asteroids=no_asteroids,
                 )
                 raw_demand.pop("plastic-bar", None)
 
@@ -1844,6 +1898,7 @@ def plan(
                         assembly_module_quality=module_quality,
                         prod_module_tier=prod_module_tier,
                         machine_quality=machine_quality,
+                        no_asteroids=no_asteroids,
                     )
                     raw_demand.pop("plastic-bar", None)
 
@@ -1862,6 +1917,7 @@ def plan(
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
+                    no_asteroids=no_asteroids,
                 )
                 for st in n_stages:
                     st["normal_quality_chain"] = True
@@ -1900,14 +1956,22 @@ def plan(
     # Group raw demand by chunk type.  Each chunk is produced by one crushing recipe
     # (e.g. metallic-asteroid-crushing -> iron-ore+copper-ore).  We scale to satisfy
     # the max-demanding raw among a chunk's outputs.
+    #
+    # When ``no_asteroids`` is set, skip the asteroid path entirely; raws like
+    # iron-ore / copper-ore / ice / calcite stay in ``raw_demand`` and route
+    # through ``mined_recycle_stages`` below via MINED_RAW_NO_ASTEROID_FALLBACK.
     chunk_demand: dict[str, float] = defaultdict(float)
     # Direct chunk demand (e.g. calcite only comes from advanced-oxide-asteroid-crushing
     # which takes oxide-asteroid-chunk — raw_demand already contains the chunk directly).
-    for chunk in ASTEROID_REPROCESSING_RECIPES:
-        if chunk in raw_demand and raw_demand[chunk] > 0:
-            chunk_demand[chunk] += raw_demand[chunk]
+    if not no_asteroids:
+        for chunk in ASTEROID_REPROCESSING_RECIPES:
+            if chunk in raw_demand and raw_demand[chunk] > 0:
+                chunk_demand[chunk] += raw_demand[chunk]
     crushing_stages: list[dict] = []
-    for chunk, crush_recipe_key in ASTEROID_CRUSHING_RECIPES.items():
+    asteroid_crushing_iter = (
+        ASTEROID_CRUSHING_RECIPES.items() if not no_asteroids else ()
+    )
+    for chunk, crush_recipe_key in asteroid_crushing_iter:
         crush = _recipe_by_key(data, crush_recipe_key)
         if crush is None:
             continue
@@ -2011,20 +2075,30 @@ def plan(
     mined_recycle_stages: list[dict] = []
     mined_input: dict[str, float] = {}
     fluid_raws_demand: dict[str, float] = {}
+    # When asteroids are disabled, iron-ore / copper-ore / ice / calcite need
+    # a self-recycle quality path on an unlocked planet.  Merge their planet
+    # mappings into MINED_RAW_PLANETS for routing purposes (does not mutate
+    # the module-level constant).
+    mined_raw_lookup: dict[str, tuple[str, ...]] = dict(MINED_RAW_PLANETS)
+    if no_asteroids:
+        for k, v in MINED_RAW_NO_ASTEROID_FALLBACK.items():
+            mined_raw_lookup[k] = v
     for raw_key, demand_rate in raw_demand.items():
         if demand_rate <= 0:
             continue
-        # Skip asteroid-routed raws (already consumed by chunk_demand).
-        if raw_key in RAW_TO_CHUNK:
+        # Skip asteroid-routed raws (already consumed by chunk_demand).  When
+        # ``no_asteroids`` is set, the fallback iron-ore/copper-ore/ice/calcite
+        # entries override this skip via mined_raw_lookup below.
+        if raw_key in RAW_TO_CHUNK and not (no_asteroids and raw_key in MINED_RAW_NO_ASTEROID_FALLBACK):
             continue
         # Fluids: quality-transparent, just record demand (no loop).
         if raw_key in fluids:
             fluid_raws_demand[raw_key] = demand_rate
             continue
-        if raw_key in MINED_RAW_PLANETS:
+        if raw_key in mined_raw_lookup:
             # Check user has an appropriate planet unlocked.
-            if not any(p in planets_fs for p in MINED_RAW_PLANETS[raw_key]):
-                needed = MINED_RAW_PLANETS[raw_key]
+            if not any(p in planets_fs for p in mined_raw_lookup[raw_key]):
+                needed = mined_raw_lookup[raw_key]
                 raise ValueError(
                     f"ERROR: item '{item_key}' requires mined raw '{raw_key}' on planet(s) "
                     f"{list(needed)} — add --planets {','.join(needed)}"
@@ -2340,6 +2414,17 @@ def parse_args() -> argparse.Namespace:
             "low-density-structure-recycling productivity research."
         ),
     )
+    p.add_argument(
+        "--no-asteroids", action="store_true",
+        help=(
+            "Disable the asteroid-reprocessing path (no space platform yet). "
+            "Quality for iron-ore, copper-ore, ice, calcite is sourced via the "
+            "recycler self-loop on an unlocked planet (Nauvis for iron/copper, "
+            "Aquilo for ice, Vulcanus for calcite).  carbon and sulfur fall "
+            "back to their normal chemistry recipes (require coal + sulfuric-"
+            "acid or petgas via planet chains)."
+        ),
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
 
@@ -2361,6 +2446,7 @@ def main() -> None:
             assembly_modules=args.assembly_modules,
             prod_module_tier=args.prod_module_tier,
             machine_quality=args.machine_quality,
+            no_asteroids=args.no_asteroids,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)

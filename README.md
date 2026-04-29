@@ -30,7 +30,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (198 tests, stdlib only)
   quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
-  test_quality_planner.py   # unittest suite (116 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (125 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -207,6 +207,13 @@ python dev/quality_planner.py --item superconductor --rate 60 \
 python dev/quality_planner.py --item tungsten-carbide --rate 60 \
     --planets nauvis,vulcanus
 python dev/quality_planner.py --item holmium-plate --rate 60 --planets fulgora
+
+# V3 small: --no-asteroids — no space platform yet, route quality through
+# planet self-recycle paths only. iron-ore/copper-ore self-recycle on Nauvis,
+# calcite on Vulcanus, ice on Aquilo. Errors out naming the missing planet
+# when a chunk would be needed (e.g. molten-iron needs calcite -> Vulcanus).
+python dev/quality_planner.py --item iron-plate --rate 60 \
+    --planets nauvis,vulcanus --no-asteroids
 ```
 
 Reachable items today:
