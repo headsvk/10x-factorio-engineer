@@ -364,9 +364,31 @@ Answer depends on which recipe loops have productivity research (asteroid-produc
 
 Estimated size: ~300-400 LoC + a dedicated test class.
 
-### 2. Research-state tracking
+### 2. Research-state tracking — **partially shipped (2026-04-30)**
 
-User brought this up mid-V2: *"what if I can't use asteroids yet"*. V2 assumes everything is unlocked.
+**`--no-asteroids` shipped:** the most-requested gating subset is now in tree.
+When set, the planner skips the asteroid path entirely and routes
+iron-ore / copper-ore / ice / calcite through planet self-recycle via
+`MINED_RAW_NO_ASTEROID_FALLBACK` (nauvis for iron/copper, aquilo for ice,
+vulcanus for calcite). carbon and sulfur fall back to chemistry recipes
+(coal+sulfuric-acid / petgas) which require their own planet unlocks.
+
+When the chain still resolves to an asteroid-crushing recipe (because the
+needed leaf raw isn't mineable on any unlocked planet), the planner fails
+fast with a message naming the recipe and pointing at the planet flag:
+
+```
+ERROR: 'iron-plate' chain needs 'calcite' which resolves to asteroid-
+crushing recipe 'advanced-oxide-asteroid-crushing' but --no-asteroids is
+set. Unlock the planet that produces 'calcite' natively via --planets
+(e.g. --planets vulcanus for calcite, --planets aquilo for ice).
+```
+
+Tests: `TestNoAsteroids` (9 tests).
+
+**Still pending (full V3 item 2):**
+
+User brought this up mid-V2: *"what if I can't use asteroids yet"*. V2 assumes everything is unlocked. The `--no-asteroids` answer to that exact question is shipped (above); what's still missing is generic tech-gating for the rest of the surface.
 
 Gating surface:
 - **Quality module tier**: quality-module-1 available after `quality-module` tech; t2/t3 after `quality-module-2`/`-3`. V2 takes `--quality-module-tier {1,2,3}` but doesn't check if it's actually researched.
