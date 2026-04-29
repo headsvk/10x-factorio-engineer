@@ -1040,6 +1040,70 @@ def _stage_power_kw(stage: dict, power_w: dict[str, int]) -> float:
     return _w(stage.get("machine", "")) * float(stage.get("machine_count", 0)) / 1000.0
 
 
+def _hot_spot_suggestions(
+    by_role: dict[str, dict[str, float]],
+    *,
+    threshold_pct: float = 50.0,
+    enable_lds_shuffle: bool = False,
+    assembly_modules: bool = False,
+    has_plastic: bool = False,
+    machine_quality: str = "normal",
+    module_quality: str = "legendary",
+    quality_module_tier: int = 3,
+    planets: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Inspect the by-role cost breakdown and emit actionable suggestions
+    when a single role exceeds ``threshold_pct`` of total machines.
+
+    Each suggestion names the dominant role, its share, and the specific
+    flag the user can try next.  Avoids suggesting flags already enabled.
+    """
+    suggestions: list[str] = []
+    at_max_quality = module_quality == "legendary" and quality_module_tier == 3
+    for role, bucket in by_role.items():
+        pct = float(bucket.get("machines_pct", 0.0))
+        if pct < threshold_pct:
+            continue
+        if role == "asteroid-reprocessing":
+            if has_plastic and not enable_lds_shuffle:
+                suggestions.append(
+                    f"hot spot: asteroid-reprocessing is {pct:.0f}% of machines — "
+                    f"try --enable-lds-shuffle (offloads plastic-bar from carbonic chunks)"
+                )
+            elif not at_max_quality:
+                suggestions.append(
+                    f"hot spot: asteroid-reprocessing is {pct:.0f}% of machines — "
+                    f"upgrade --module-quality (legendary T3 quality modules) or "
+                    f"--quality-module-tier to improve loop yield"
+                )
+            # else: already at legendary T3 — no actionable suggestion.
+        elif role == "mined-raw-self-recycle":
+            tips: list[str] = []
+            if has_plastic and not enable_lds_shuffle:
+                tips.append("--enable-lds-shuffle (cuts coal demand)")
+            if "vulcanus" not in planets:
+                tips.append("--planets vulcanus (lava casting bypasses ore mining for iron/copper)")
+            if not tips:
+                tips.append("upgrade --module-quality / --quality-module-tier")
+            suggestions.append(
+                f"hot spot: mined-raw-self-recycle is {pct:.0f}% of machines — "
+                f"try " + " or ".join(tips)
+            )
+        elif role == "assembly":
+            if not assembly_modules:
+                suggestions.append(
+                    f"hot spot: assembly is {pct:.0f}% of machines — "
+                    f"try --assembly-modules (fills slots with prod-3, cuts ingredient demand)"
+                )
+            elif machine_quality != "legendary":
+                suggestions.append(
+                    f"hot spot: assembly is {pct:.0f}% of machines — "
+                    f"try --machine-quality legendary (+150 % machine speed → "
+                    f"~40 % machine count)"
+                )
+    return suggestions
+
+
 def _assembly_prod_bonus(
     machine_key: str,
     recipe: dict,
@@ -1753,6 +1817,18 @@ def _plan_self_recycle_target(
             if total_power_mw > 0 else 0.0
         )
 
+    # Hot-spot suggestions for self-recycle target plan.
+    notes.extend(_hot_spot_suggestions(
+        by_role,
+        enable_lds_shuffle=False,
+        assembly_modules=assembly_modules,
+        has_plastic=False,
+        machine_quality=machine_quality,
+        module_quality=module_quality,
+        quality_module_tier=quality_module_tier,
+        planets=planets,
+    ))
+
     return {
         "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
         "asteroid_input": {},
@@ -2198,6 +2274,23 @@ def plan(
         )
 
     notes: list[str] = list(extra_notes)
+    # Cost hot-spot suggestions (V3 small): pointers when a single role
+    # dominates total machine count.  Surfaces at the top of notes so users
+    # see the actionable bit before fluid-transparency markers.
+    has_plastic = any(
+        s.get("product") == "plastic-bar" or s.get("recipe") == "plastic-bar"
+        for s in stages
+    )
+    notes.extend(_hot_spot_suggestions(
+        by_role,
+        enable_lds_shuffle=enable_lds_shuffle,
+        assembly_modules=assembly_modules,
+        has_plastic=has_plastic,
+        machine_quality=machine_quality,
+        module_quality=module_quality,
+        quality_module_tier=quality_module_tier,
+        planets=planets_fs,
+    ))
     # Detect if we used fluid transparency
     for st in stages:
         if st.get("fluid_inputs"):

@@ -1303,5 +1303,133 @@ class TestStageSummary(unittest.TestCase):
         self.assertIn("assembly", text)
 
 
+class TestHotSpotAdvisor(unittest.TestCase):
+    """V3 small: cost hot-spot suggestions in notes[] when one stage role
+    exceeds 50% of total machine count."""
+
+    def test_helper_emits_suggestion_above_threshold(self):
+        # Direct unit test on the helper
+        by_role = {
+            "asteroid-reprocessing": {
+                "machines": 90, "machines_pct": 90.0, "power_kw": 0, "power_pct": 0,
+            },
+            "assembly": {
+                "machines": 10, "machines_pct": 10.0, "power_kw": 0, "power_pct": 0,
+            },
+        }
+        sugs = qp._hot_spot_suggestions(
+            by_role,
+            has_plastic=True,
+            module_quality="legendary",
+            quality_module_tier=3,
+        )
+        self.assertEqual(len(sugs), 1)
+        self.assertIn("--enable-lds-shuffle", sugs[0])
+
+    def test_no_suggestion_below_threshold(self):
+        by_role = {
+            "asteroid-reprocessing": {
+                "machines": 30, "machines_pct": 30.0, "power_kw": 0, "power_pct": 0,
+            },
+            "assembly": {
+                "machines": 30, "machines_pct": 30.0, "power_kw": 0, "power_pct": 0,
+            },
+            "raw-crushing": {
+                "machines": 40, "machines_pct": 40.0, "power_kw": 0, "power_pct": 0,
+            },
+        }
+        sugs = qp._hot_spot_suggestions(by_role, has_plastic=True)
+        self.assertEqual(sugs, [])
+
+    def test_no_suggestion_at_max_quality_no_plastic(self):
+        # iron-plate at default (legendary T3) — asteroid is 90%+ but already
+        # at max quality and no plastic chain to offload, so no suggestion.
+        by_role = {
+            "asteroid-reprocessing": {
+                "machines": 95, "machines_pct": 95.0, "power_kw": 0, "power_pct": 0,
+            },
+        }
+        sugs = qp._hot_spot_suggestions(
+            by_role,
+            has_plastic=False,
+            module_quality="legendary",
+            quality_module_tier=3,
+        )
+        self.assertEqual(sugs, [])
+
+    def test_assembly_hot_spot_suggests_assembly_modules(self):
+        by_role = {
+            "assembly": {
+                "machines": 80, "machines_pct": 80.0, "power_kw": 0, "power_pct": 0,
+            },
+        }
+        sugs = qp._hot_spot_suggestions(by_role, assembly_modules=False)
+        self.assertEqual(len(sugs), 1)
+        self.assertIn("--assembly-modules", sugs[0])
+
+    def test_assembly_hot_spot_suggests_machine_quality_when_modules_on(self):
+        by_role = {
+            "assembly": {
+                "machines": 80, "machines_pct": 80.0, "power_kw": 0, "power_pct": 0,
+            },
+        }
+        sugs = qp._hot_spot_suggestions(
+            by_role,
+            assembly_modules=True,
+            machine_quality="normal",
+        )
+        self.assertEqual(len(sugs), 1)
+        self.assertIn("--machine-quality legendary", sugs[0])
+
+    def test_mined_recycle_suggests_lds_shuffle_when_plastic(self):
+        by_role = {
+            "mined-raw-self-recycle": {
+                "machines": 70, "machines_pct": 70.0, "power_kw": 0, "power_pct": 0,
+            },
+        }
+        sugs = qp._hot_spot_suggestions(
+            by_role,
+            has_plastic=True,
+            enable_lds_shuffle=False,
+            planets=frozenset(["nauvis"]),
+        )
+        self.assertEqual(len(sugs), 1)
+        self.assertIn("--enable-lds-shuffle", sugs[0])
+
+    def test_mined_recycle_suggests_vulcanus_when_locked(self):
+        by_role = {
+            "mined-raw-self-recycle": {
+                "machines": 70, "machines_pct": 70.0, "power_kw": 0, "power_pct": 0,
+            },
+        }
+        sugs = qp._hot_spot_suggestions(
+            by_role,
+            has_plastic=False,
+            planets=frozenset(["nauvis"]),
+        )
+        self.assertEqual(len(sugs), 1)
+        self.assertIn("--planets vulcanus", sugs[0])
+
+    def test_e2e_processing_unit_emits_suggestion(self):
+        # processing-unit on Nauvis with --assembly-modules: mined-coal
+        # dominates → expect mined-raw hot-spot note suggesting --enable-lds-shuffle.
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+        )
+        notes = out.get("notes", [])
+        self.assertTrue(
+            any("hot spot" in n and "--enable-lds-shuffle" in n for n in notes),
+            f"expected hot-spot suggestion in notes; got {notes}",
+        )
+
+    def test_e2e_default_iron_plate_no_suggestion(self):
+        # iron-plate default (legendary T3, no plastic) — asteroid is dominant
+        # but nothing actionable, so no hot-spot note.
+        out = qp.plan("iron-plate", 60, _data())
+        hot_notes = [n for n in out.get("notes", []) if "hot spot" in n]
+        self.assertEqual(hot_notes, [])
+
+
 if __name__ == "__main__":
     unittest.main()
