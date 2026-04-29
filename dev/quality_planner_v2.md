@@ -48,11 +48,12 @@ These numbers are sanity anchors, not committed expectations — if a refactor m
 ## Status (2026-04-26)
 
 **V2 shipped.** **V3-partial shipped:** items 1 (LDS shuffle), 3
-(self-recycle targets), 5 (per-stage assembly module optimization).
-`dev/test_quality_planner.py` now at 93 tests (7 new in
-`TestLDSShuffleWiring`, 8 new in `TestSelfRecycleTarget`, 8 new in
-`TestAssemblyModules`, 3 obsolete `TestFailFast` tests removed for
-the items that V3 now supports as targets). Zero new dependencies.
+(self-recycle targets), 4 (Gleba bio-raws, no spoilage), 5 (per-stage
+assembly module optimization).  `dev/test_quality_planner.py` now at
+101 tests (7 new in `TestLDSShuffleWiring`, 8 new in
+`TestSelfRecycleTarget`, 8 new in `TestAssemblyModules`, 8 new in
+`TestGlebaPartial`, 3 obsolete `TestFailFast` tests removed for the
+items that V3 now supports as targets). Zero new dependencies.
 
 V3 item 3 (self-recycle targets): items whose recycle returns themselves
 (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`,
@@ -405,11 +406,39 @@ normal_solid_input; legendary modules >2× normal yield; rate doubles =>
 machines double; per-tier config exposed; human format renders;
 unknown-item solver returns 0.
 
-### 4. Gleba biolocals + spoilage
+### 4. Gleba biolocals + spoilage — **partially shipped (2026-04-27)**
 
-Yumako, jellynut, bioflux, pentapod eggs, nutrients — each has a spoilage timer. Quality loops that take more than the spoilage window are infeasible. Needs a time-budget constraint layered over the DP. Complex because spoilage applies at multiple stages.
+What landed:
+- `yumako`, `jellynut`, `pentapod-egg` added to `MINED_RAW_PLANETS` keyed
+  to `("gleba",)`.  Each has a `*-recycling` recipe with 0.25 retention,
+  so `solve_mined_raw_self_recycle_loop` works on them identically to
+  coal/stone (~0.04% yield with legendary T3 quality modules).
+- Walker now resolves all biochamber chains: `bioflux`, `nutrients`
+  (-from-yumako-mash and -from-bioflux), `bioplastic`, `biosulfur`,
+  `biolubricant`, `rocket-fuel-from-jelly`, etc.  Recipe selection on
+  Gleba-only chains correctly picks bio-* substitutes (no coal/petgas).
+- Assembly modules combine cleanly: `--assembly-modules` cuts biochamber
+  chain ≥3× because biochambers have 4 slots + 50% inherent prod.
+- 8 new tests in `TestGlebaPartial`.
 
-Estimated size: ~400 LoC + a new timing model.
+What's still missing (V3.x):
+- **Spoilage timing.** Self-recycle yields a tiny fraction (~0.04%) per
+  cycle, which means thousands of cycles to reach legendary.  Bioflux
+  spoils in 1 hour, nutrients in 5 minutes — many cycles is more time
+  than the items have.  The current planner reports machine counts as if
+  there's no spoilage budget; real builds need either short loops, deep
+  spoilage research, or accept some legendary loss to spoilage.
+- **Pentapod-egg as target.** Recipe is `1 egg + 30 nutrients + 60 water
+  → 2 eggs` — a doubling self-loop where the input is also the output.
+  `solve_self_recycle_target_loop` assumes external ingredients; it
+  doesn't handle ingredient = output.  Pentapod-egg as an *ingredient*
+  works (treated as raw).
+- **Agricultural quality.** Agricultural towers have 0 module slots so
+  yumako/jellynut can't be quality-rolled at harvest.  All quality must
+  come from self-recycle.
+
+Remaining estimated size for full Gleba: ~250 LoC (down from ~400) — the
+big remaining piece is the spoilage timing model.
 
 ### 5. Per-stage assembly module optimization — **SHIPPED (2026-04-27)**
 

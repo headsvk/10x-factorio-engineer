@@ -30,7 +30,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (198 tests, stdlib only)
   quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
-  test_quality_planner.py   # unittest suite (93 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (101 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -153,7 +153,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-198 CLI tests + 93 quality-planner tests, stdlib only.
+198 CLI tests + 101 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner (V1 + V2 + V3-partial)
 
@@ -183,6 +183,13 @@ python dev/quality_planner.py --item processing-unit --rate 60 \
     --research low-density-structure-productivity=10 \
     --research plastic-bar-productivity=10
 
+# V3 item 4 partial: Gleba bio-raws (yumako, jellynut, pentapod-egg)
+# via self-recycle. Spoilage timing is NOT modelled yet — long quality
+# loops on bioflux/nutrients give optimistic counts.
+python dev/quality_planner.py --item bioflux --rate 60 --planets gleba
+python dev/quality_planner.py --item plastic-bar --rate 60 --planets gleba
+python dev/quality_planner.py --item rocket-fuel --rate 60 --planets gleba
+
 # V3 item 5: prod modules in every assembly stage (drops machines ~20× on
 # fluid-cast chains because each foundry/EM-plant/cryogenic-plant gets
 # 4-8 prod-3-legendary modules + inherent +50%, capped at +300%).
@@ -204,12 +211,17 @@ Reachable items today:
   mined-coal self-recycle + petgas via crude-oil.
 - **+ Vulcanus / Fulgora / Aquilo**: planet-exclusive raws (tungsten-ore,
   scrap, holmium-ore, ammoniacal-solution).
+- **+ Gleba** (partial): yumako / jellynut / pentapod-egg via self-recycle;
+  bioflux, nutrients, biosulfur, biolubricant, bioplastic, rocket-fuel via
+  biochamber recipes.  **Spoilage timing is NOT modelled** — long quality
+  loops on spoiling intermediates give optimistic counts.
 - **Self-recycle targets**: `tungsten-carbide`, `superconductor`, `holmium-plate`,
   `fusion-power-cell`, `lithium`.
 
-Items deferred (still fail fast): Gleba biolocals (spoilage timing), self-recycling
-items as **intermediate ingredients** of another chain.  See `dev/quality_planner_v2.md`
-for the full V3 roadmap.
+Items deferred (still fail fast or imprecise): Gleba pentapod-egg as a target
+(self-multiplying recipe needs a bespoke solver), Gleba spoilage timing,
+self-recycling items as **intermediate ingredients** of another chain.  See
+`dev/quality_planner_v2.md` for the full V3 roadmap.
 
 ---
 
