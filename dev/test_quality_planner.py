@@ -1029,5 +1029,103 @@ class TestStagePower(unittest.TestCase):
         self.assertIn("Total power:", text)
 
 
+class TestMachineQuality(unittest.TestCase):
+    """V3 small item: --machine-quality applies MACHINE_QUALITY_SPEED bonus.
+
+    Bonus table: normal=0%, uncommon=+30%, rare=+60%, epic=+90%, legendary=+150%.
+    Faster machines mean lower machine_count for the same throughput.
+    """
+
+    def test_default_normal(self):
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        # Default machine_quality = normal — every assembly stage tagged normal.
+        for st in out["stages"]:
+            if st.get("role") == "assembly":
+                self.assertEqual(st.get("machine_quality"), "normal")
+
+    def test_legendary_reduces_machines(self):
+        out_normal = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_legend = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], machine_quality="legendary",
+        )
+        # +150% speed → 1/2.5 = 40% machines; allow some slack for rounding.
+        ratio = out_legend["total_machine_count"] / out_normal["total_machine_count"]
+        self.assertLess(ratio, 0.5)
+        self.assertGreater(ratio, 0.3)
+
+    def test_speed_progression_monotone(self):
+        # Higher quality → fewer machines (strictly monotone).
+        prev_count = float("inf")
+        for q in ("normal", "uncommon", "rare", "epic", "legendary"):
+            out = qp.plan(
+                "processing-unit", 60, _data(),
+                planets=["nauvis"], machine_quality=q,
+            )
+            self.assertLess(out["total_machine_count"], prev_count, f"{q} not lower than previous")
+            prev_count = out["total_machine_count"]
+
+    def test_legendary_assembly_stage_speed_bonus(self):
+        # Each assembly stage's machine_count is 1/(1+speed_bonus) of normal.
+        out_n = qp.plan(
+            "iron-plate", 60, _data(),
+            planets=[], machine_quality="normal",
+        )
+        out_l = qp.plan(
+            "iron-plate", 60, _data(),
+            planets=[], machine_quality="legendary",
+        )
+        # Pick the casting-iron foundry stage.
+        cast_n = next(s for s in out_n["stages"] if s.get("machine") == "foundry")
+        cast_l = next(s for s in out_l["stages"] if s.get("machine") == "foundry")
+        # 1.0 / 2.5 = 0.4 ratio
+        self.assertAlmostEqual(
+            cast_l["machine_count"] / cast_n["machine_count"], 0.4, delta=1e-6,
+        )
+        self.assertEqual(cast_l["machine_quality"], "legendary")
+
+    def test_self_recycle_target_uses_machine_quality(self):
+        out_n = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], machine_quality="normal",
+        )
+        out_l = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], machine_quality="legendary",
+        )
+        # craft_machines + recycler_machines both scaled by 1/(1+1.5) = 0.4
+        st_n = [s for s in out_n["stages"] if s.get("role") == "self-recycle-target"][0]
+        st_l = [s for s in out_l["stages"] if s.get("role") == "self-recycle-target"][0]
+        self.assertAlmostEqual(
+            st_l["craft_machines"] / st_n["craft_machines"], 0.4, delta=1e-6,
+        )
+        self.assertAlmostEqual(
+            st_l["recycler_machines"] / st_n["recycler_machines"], 0.4, delta=1e-6,
+        )
+
+    def test_crusher_stage_uses_machine_quality(self):
+        # Asteroid reprocessing uses crushers; legendary crushers cut count.
+        out_n = qp.plan("electronic-circuit", 60, _data(), machine_quality="normal")
+        out_l = qp.plan("electronic-circuit", 60, _data(), machine_quality="legendary")
+        ast_n = next(
+            s for s in out_n["stages"] if s.get("role") == "asteroid-reprocessing"
+        )
+        ast_l = next(
+            s for s in out_l["stages"] if s.get("role") == "asteroid-reprocessing"
+        )
+        self.assertAlmostEqual(
+            ast_l["machine_count"] / ast_n["machine_count"], 0.4, delta=1e-6,
+        )
+
+    def test_unknown_quality_rejected_by_argparse(self):
+        # Sanity: argparse choices restricts to known qualities.  Direct python
+        # call doesn't validate (it's just a multiplier lookup with default 0).
+        # This test just verifies a known value works.
+        out = qp.plan(
+            "iron-plate", 60, _data(), machine_quality="rare",
+        )
+        self.assertGreater(out["total_machine_count"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

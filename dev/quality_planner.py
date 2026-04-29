@@ -1160,6 +1160,7 @@ def walk_recipe_tree(
     assembly_modules: bool = False,
     assembly_module_quality: str = "legendary",
     prod_module_tier: int = 3,
+    machine_quality: str = "normal",
 ) -> tuple[list[dict], dict[str, float]]:
     """Walk recipe tree; return (stages, raw_demand_rates).
 
@@ -1301,7 +1302,9 @@ def walk_recipe_tree(
             raw_demand[item] += demand[item]
             continue
         machine_key, machine_speed = cli.get_machine(recipe["category"], assembler_level, "electric")
-        machine_speed_f = float(machine_speed)
+        machine_speed_f = float(machine_speed) * (
+            1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+        )
         research_prod = _research_prod_for_recipe(recipe["key"], research_levels)
         module_prod, prod_slots_filled = _assembly_prod_bonus(
             machine_key, recipe, slots_map,
@@ -1343,6 +1346,7 @@ def walk_recipe_tree(
             "prod_modules": prod_slots_filled,
             "prod_module_tier": prod_module_tier if prod_slots_filled > 0 else 0,
             "prod_module_quality": assembly_module_quality if prod_slots_filled > 0 else "normal",
+            "machine_quality": machine_quality,
             "prod_capped": capped,
             "inputs_all_legendary": all(k not in fluids for k in inputs) if solid_inputs else True,
         })
@@ -1519,6 +1523,7 @@ def _plan_self_recycle_target(
     planets: frozenset[str],
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
+    machine_quality: str = "normal",
 ) -> dict:
     """Plan a chain whose target self-recycles (e.g. superconductor).
 
@@ -1545,7 +1550,9 @@ def _plan_self_recycle_target(
     machine_key, machine_speed = cli.get_machine(
         craft_recipe["category"], assembler_level, "electric",
     )
-    machine_speed_f = float(machine_speed)
+    machine_speed_f = float(machine_speed) * (
+        1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    )
     module_slots_map = cli.build_machine_module_slots(data)
     machine_slots = int(module_slots_map.get(machine_key, 0))
     machine_allow_prod = True  # all crafting machines that allow modules accept prod
@@ -1589,7 +1596,8 @@ def _plan_self_recycle_target(
     )
     total_recycle_crafts = crafts_per_min * items_per_craft / max(1.0 - retention, 1e-6)
     rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-    recycler_machines = total_recycle_crafts * rec_time / (RECYCLER_SPEED * 60.0)
+    qm_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    recycler_machines = total_recycle_crafts * rec_time / (RECYCLER_SPEED * qm_mult * 60.0)
 
     # Walk ingredients at NORMAL quality.  Each ingredient's demand =
     # amount × crafts_per_min.  Solid raws + intermediates need normal-quality
@@ -1614,6 +1622,7 @@ def _plan_self_recycle_target(
                     assembly_modules=assembly_modules,
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
+                    machine_quality=machine_quality,
                 )
             except ValueError:
                 # Ingredient may itself be planet-gated or unreachable — record
@@ -1712,6 +1721,7 @@ def plan(
     enable_lds_shuffle: bool = False,
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
+    machine_quality: str = "normal",
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
     scale stages, assemble full output.
@@ -1746,6 +1756,7 @@ def plan(
             planets=planets_fs,
             assembly_modules=assembly_modules,
             prod_module_tier=prod_module_tier,
+            machine_quality=machine_quality,
         )
     if item_key in PLANET_UNLOCKS:
         if not _planet_unlocks_item(item_key, planets_fs) and item_key not in RAW_TO_CHUNK:
@@ -1757,11 +1768,13 @@ def plan(
 
     fluids = build_fluid_set(data)
     planet_props = _combined_planet_props(data, planets_fs)
+    qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
     stages, raw_demand = walk_recipe_tree(
         item_key, rate, data, research_levels, assembler_level, fluids, planet_props, planets_fs,
         assembly_modules=assembly_modules,
         assembly_module_quality=module_quality,
         prod_module_tier=prod_module_tier,
+        machine_quality=machine_quality,
     )
 
     # ---- LDS shuffle wiring (V3 partial: replace plastic-bar leg) ----
@@ -1800,6 +1813,7 @@ def plan(
                     assembly_modules=assembly_modules,
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
+                    machine_quality=machine_quality,
                 )
                 raw_demand.pop("plastic-bar", None)
 
@@ -1829,6 +1843,7 @@ def plan(
                         assembly_modules=assembly_modules,
                         assembly_module_quality=module_quality,
                         prod_module_tier=prod_module_tier,
+                        machine_quality=machine_quality,
                     )
                     raw_demand.pop("plastic-bar", None)
 
@@ -1846,6 +1861,7 @@ def plan(
                     assembly_modules=assembly_modules,
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
+                    machine_quality=machine_quality,
                 )
                 for st in n_stages:
                     st["normal_quality_chain"] = True
@@ -1931,7 +1947,7 @@ def plan(
             chunk_demand[chunk] = max_crushes_per_min
             # machines: crusher speed 1.0, time=2s typically
             crushing_time = float(crush.get("energy_required", 2))
-            machine_count = max_crushes_per_min * crushing_time / (CRUSHER_SPEED * 60.0)
+            machine_count = max_crushes_per_min * crushing_time / (CRUSHER_SPEED * qm_speed_mult * 60.0)
             crushing_stages.append({
                 "role": "raw-crushing",
                 "recipe": crush_recipe_key,
@@ -1968,7 +1984,7 @@ def plan(
         # Geometric avg across 4 tiers; in practice use V to back out cycles.
         # Total processing load ≈ normal_input_per_min / (1 - retention) crafts/min.
         total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
-        machine_count = total_crafts_per_min * 2.0 / (CRUSHER_SPEED * 60.0)
+        machine_count = total_crafts_per_min * 2.0 / (CRUSHER_SPEED * qm_speed_mult * 60.0)
         reprocessing_stages.append({
             "role": "asteroid-reprocessing",
             "chunk": chunk,
@@ -2026,7 +2042,7 @@ def plan(
             retention = _recipe_result_amount(rec_recipe, raw_key) if rec_recipe else 0.25
             total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
             rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-            machine_count = total_crafts_per_min * rec_time / (RECYCLER_SPEED * 60.0)
+            machine_count = total_crafts_per_min * rec_time / (RECYCLER_SPEED * qm_speed_mult * 60.0)
             mined_recycle_stages.append({
                 "role": "mined-raw-self-recycle",
                 "raw": raw_key,
@@ -2305,6 +2321,16 @@ def parse_args() -> argparse.Namespace:
         help="Tier of prod modules used by --assembly-modules (default 3).",
     )
     p.add_argument(
+        "--machine-quality", default="normal",
+        choices=list(cli.MACHINE_QUALITY_SPEED.keys()),
+        help=(
+            "Quality tier of every assembly / crusher / recycler machine "
+            "(applies MACHINE_QUALITY_SPEED bonus: +30/+60/+90/+150%% for "
+            "uncommon/rare/epic/legendary).  Affects machine_count and total "
+            "machines. Default normal."
+        ),
+    )
+    p.add_argument(
         "--enable-lds-shuffle", action="store_true",
         help=(
             "Replace the legendary plastic-bar chain with the LDS shuffle "
@@ -2334,6 +2360,7 @@ def main() -> None:
             enable_lds_shuffle=args.enable_lds_shuffle,
             assembly_modules=args.assembly_modules,
             prod_module_tier=args.prod_module_tier,
+            machine_quality=args.machine_quality,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)
