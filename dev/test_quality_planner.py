@@ -948,5 +948,86 @@ class TestGlebaPartial(unittest.TestCase):
         )
 
 
+class TestStagePower(unittest.TestCase):
+    """V3 small item: per-stage power_kw + top-level total_power_mw."""
+
+    def test_total_power_present_and_positive(self):
+        out = qp.plan("electronic-circuit", 60, _data())
+        self.assertIn("total_power_mw", out)
+        self.assertGreater(out["total_power_mw"], 0.0)
+
+    def test_assembly_stage_has_power_kw(self):
+        out = qp.plan("electronic-circuit", 60, _data())
+        for st in out["stages"]:
+            self.assertIn("power_kw", st)
+            self.assertGreaterEqual(st["power_kw"], 0.0)
+
+    def test_assembly_power_matches_machine_count(self):
+        # Roughly: power_kw ≈ machine_power_w × machine_count / 1000
+        out = qp.plan("iron-plate", 60, _data())
+        data = _data()
+        power_w = qp.cli.build_machine_power_w(data)
+        for st in out["stages"]:
+            if st.get("role") in ("assembly", None):
+                continue
+        # Pick a foundry (casting-iron) stage if present
+        stages = [s for s in out["stages"] if s.get("machine") == "foundry"]
+        if stages:
+            st = stages[0]
+            expected = power_w["foundry"] * st["machine_count"] / 1000
+            self.assertAlmostEqual(st["power_kw"], expected, delta=1e-6)
+
+    def test_compound_stage_self_recycle_splits_power(self):
+        # holmium-plate target = foundry (craft) + recycler (recycle).
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
+        data = _data()
+        power_w = qp.cli.build_machine_power_w(data)
+        expected = (
+            power_w["foundry"] * st["craft_machines"]
+            + power_w["recycler"] * st["recycler_machines"]
+        ) / 1000
+        self.assertAlmostEqual(st["power_kw"], expected, delta=1e-6)
+
+    def test_compound_stage_shuffle_splits_power(self):
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], enable_lds_shuffle=True,
+        )
+        st = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"][0]
+        data = _data()
+        power_w = qp.cli.build_machine_power_w(data)
+        expected = (
+            power_w["foundry"] * st["foundry_machines"]
+            + power_w["recycler"] * st["recycler_machines"]
+        ) / 1000
+        self.assertAlmostEqual(st["power_kw"], expected, delta=1e-6)
+
+    def test_burner_machine_zero_power(self):
+        # Biochamber is burner-fuelled (no electric power); stages on biochamber
+        # contribute 0 kW.
+        out = qp.plan("bioflux", 60, _data(), planets=["gleba"])
+        biochamber_stages = [
+            s for s in out["stages"] if s.get("machine") == "biochamber"
+        ]
+        self.assertGreater(len(biochamber_stages), 0)
+        for s in biochamber_stages:
+            self.assertEqual(s["power_kw"], 0.0)
+
+    def test_assembly_modules_reduce_power(self):
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_on = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+        )
+        # Modules cut machine count → power drops proportionally.
+        self.assertLess(out_on["total_power_mw"], out_off["total_power_mw"] / 5)
+
+    def test_human_format_shows_total_power(self):
+        out = qp.plan("electronic-circuit", 60, _data())
+        text = qp.format_human(out)
+        self.assertIn("Total power:", text)
+
+
 if __name__ == "__main__":
     unittest.main()

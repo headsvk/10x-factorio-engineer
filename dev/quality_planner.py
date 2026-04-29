@@ -990,6 +990,39 @@ def _research_prod_for_recipe(recipe_key: str, research_levels: dict[str, int]) 
     return bonus
 
 
+def _stage_power_kw(stage: dict, power_w: dict[str, int]) -> float:
+    """Compute electrical power draw (kW) for a stage, dispatching on role.
+
+    Compound stages (cross-item-shuffle has foundry + recycler; self-recycle-
+    target has craft + recycler) use the machine-specific counts.  Asteroid /
+    crushing stages always run on crushers; mined-raw-self-recycle on recyclers.
+
+    Returns 0.0 when the stage's machine is burner-fuelled (e.g. biochamber)
+    or otherwise has no electric power entry.
+    """
+    role = stage.get("role")
+
+    def _w(machine: str) -> int:
+        return int(power_w.get(machine) or 0)
+
+    if role == "cross-item-shuffle":
+        return (
+            _w("foundry") * float(stage.get("foundry_machines", 0))
+            + _w("recycler") * float(stage.get("recycler_machines", 0))
+        ) / 1000.0
+    if role == "self-recycle-target":
+        return (
+            _w(stage.get("machine", "")) * float(stage.get("craft_machines", 0))
+            + _w("recycler") * float(stage.get("recycler_machines", 0))
+        ) / 1000.0
+    if role in ("asteroid-reprocessing", "raw-crushing"):
+        return _w("crusher") * float(stage.get("machine_count", 0)) / 1000.0
+    if role == "mined-raw-self-recycle":
+        return _w("recycler") * float(stage.get("machine_count", 0)) / 1000.0
+    # default: assembly-style stage
+    return _w(stage.get("machine", "")) * float(stage.get("machine_count", 0)) / 1000.0
+
+
 def _assembly_prod_bonus(
     machine_key: str,
     recipe: dict,
@@ -1634,6 +1667,13 @@ def _plan_self_recycle_target(
         f"inherent prod={inherent_prod:.2f}); ingredients consumed at normal quality"
     ]
 
+    # Per-stage power + total (V3 power accounting).
+    machine_power_w = cli.build_machine_power_w(data)
+    all_stages = [self_stage] + normal_stages
+    for st in all_stages:
+        st["power_kw"] = _stage_power_kw(st, machine_power_w)
+    total_power_mw = sum(s["power_kw"] for s in all_stages) / 1000.0
+
     return {
         "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
         "asteroid_input": {},
@@ -1646,6 +1686,7 @@ def _plan_self_recycle_target(
         "shuffle_byproduct_overflow": {},
         "stages": [self_stage] + list(reversed(normal_stages)),
         "total_machine_count": total_machines,
+        "total_power_mw": total_power_mw,
         "module_quality": module_quality,
         "assembler_level": assembler_level,
         "research_levels": dict(research_levels),
@@ -2014,6 +2055,16 @@ def plan(
         + sum(s["machine_count"] for s in normal_chain_stages)
     )
 
+    # Annotate per-stage power and total (V3 power accounting).
+    machine_power_w = cli.build_machine_power_w(data)
+    all_stages_for_power = (
+        stages + crushing_stages + reprocessing_stages
+        + mined_recycle_stages + shuffle_stages + normal_chain_stages
+    )
+    for st in all_stages_for_power:
+        st["power_kw"] = _stage_power_kw(st, machine_power_w)
+    total_power_mw = sum(s["power_kw"] for s in all_stages_for_power) / 1000.0
+
     notes: list[str] = list(extra_notes)
     # Detect if we used fluid transparency
     for st in stages:
@@ -2041,6 +2092,7 @@ def plan(
             + list(reversed(stages))
         ),
         "total_machine_count": total_machines,
+        "total_power_mw": total_power_mw,
         "module_quality": module_quality,
         "assembler_level": assembler_level,
         "research_levels": dict(research_levels),
@@ -2174,6 +2226,12 @@ def format_human(out: dict) -> str:
             )
     L.append("")
     L.append(f"Total machines: {out['total_machine_count']:.2f}")
+    if "total_power_mw" in out:
+        pwr_mw = float(out["total_power_mw"])
+        if pwr_mw >= 1000.0:
+            L.append(f"Total power:    {pwr_mw / 1000.0:.2f} GW (electric machines only)")
+        else:
+            L.append(f"Total power:    {pwr_mw:.2f} MW (electric machines only)")
     if out.get("notes"):
         L.append("")
         L.append("Notes:")

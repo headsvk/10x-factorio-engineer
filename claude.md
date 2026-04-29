@@ -121,7 +121,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/test_cli.py` | `unittest` suite (204 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
-| `dev/test_quality_planner.py` | `unittest` suite (101 tests) for quality_planner |
+| `dev/test_quality_planner.py` | `unittest` suite (109 tests) for quality_planner |
 | `dev/quality_planner_v1.md` | Spec document for the V1 planner — scope, algorithm, deferred features |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
@@ -447,7 +447,7 @@ python -m unittest dev.test_cli -v
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
 | `TestUseCeil` | `--use-ceil` two-pass re-solve: single-step bus-only line gives integer `machine_count`; two-step chain tops out at integer with intermediate correctly sized; binding-is-intermediate case leaves rate unchanged; already-integer counts produce no rescaling; `use_ceil: true` echoed in JSON output |
 
-### `dev/test_quality_planner.py` (101 tests)
+### `dev/test_quality_planner.py` (109 tests)
 
 Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-partial LDS-shuffle wiring:
 
@@ -471,6 +471,7 @@ Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-part
 | `TestSelfRecycleTarget` (V3 item 3) | Self-recycling targets work: `holmium-plate` (foundry, 4 slots, +50% inherent prod), `tungsten-carbide` (assembler-3, 4 slots), `superconductor` (EM plant, 5 slots, +50% inherent prod); ingredients consumed at NORMAL quality (tungsten-ore appears in `normal_solid_input`); legendary modules >2× normal-modules yield; rate doubles → total machines double linearly; per-tier module config exposed; human format renders `[self-recycle]` line; `solve_self_recycle_target_loop` returns 0 for unknown items |
 | `TestAssemblyModules` (V3 item 5) | `--assembly-modules` flag default off (stages have prod_modules=0); flag on cuts total machines >5× and asteroid input >5× on processing-unit chain (fluid-cast foundry/EM-plant/cryogenic with 4–8 prod-3-legendary modules + inherent +50%); `_assembly_prod_bonus` helper returns 0 when `allow_productivity=False`, returns inherent only when `slots_map` empty; +300% cap engages at high research; human format shows `Nx prod-3-legendary (+X%)` per stage |
 | `TestGlebaPartial` (V3 item 4 partial) | Gleba bio-targets work: `bioflux` (yumako + jellynut both in mined_input), `plastic-bar` routes to bioplastic when only Gleba unlocked (no coal), `sulfur` to biosulfur, `lubricant` to biolubricant, `nutrients`; assembly-modules cuts biochamber chain >3×; `solve_mined_raw_self_recycle_loop("yumako")` positive but tiny (~coal yield); without --planets gleba, bioflux fails-fast with "yumako" / "gleba" / "no recipe" in error. **Spoilage timing NOT modelled.** |
+| `TestStagePower` (V3 power accounting) | Every stage has `power_kw`; output has `total_power_mw`; assembly stage power = `machine_power × machine_count / 1000`; compound stages split correctly (self-recycle: craft-machine power × craft_machines + recycler power × recycler_machines; cross-item-shuffle: foundry × foundry_machines + recycler × recycler_machines); biochamber stages report 0 kW (burner-fuelled); assembly-modules cut total_power_mw >5×; human format shows `Total power:` line. |
 
 ---
 
