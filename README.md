@@ -233,7 +233,7 @@ Reachable items today:
 Items deferred (still fail fast or imprecise): Gleba pentapod-egg as a target
 (self-multiplying recipe needs a bespoke solver), Gleba spoilage timing,
 self-recycling items as **intermediate ingredients** of another chain.  See
-`dev/quality_planner_v2.md` for the full V3 roadmap.
+`dev/quality_planner.md` for the full roadmap.
 
 ---
 
