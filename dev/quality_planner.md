@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-04-30. Tests: `python -m unittest dev.test_quality_planner -v` — **164 tests, all passing, ~0.15 s.**
+**Last updated:** 2026-04-30. Tests: `python -m unittest dev.test_quality_planner -v` — **166 tests, all passing, ~0.15 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -324,6 +324,8 @@ Stock Space Age yields **16 candidates**:
 
 **Cycle detection:** the greedy processes each leaf once and a chosen shuffle's byproducts can only *remove* leaves from the queue (never re-add them).  Mutually-feeding shuffles (e.g. LDS produces copper, hypothetical copper-shuffle would produce plastic) cannot both activate.  Naturally cycle-free.
 
+**Cost gate (`--enable-shuffles all` only).**  Under `--enable-shuffles all`, the planner runs once with the greedy's chosen shuffles, then again with no shuffles, and keeps whichever has the lower `total_machine_count`.  When the no-shuffle path wins, the result includes a note explaining the fallback (`"--enable-shuffles all: greedy proposed shuffles totalling X machines, but no-shuffle baseline is Y machines — kept baseline"`).  Under explicit `--enable-shuffle NAME`, the user's choice is honoured unconditionally — the gate is not applied.
+
 ### Self-recycle target
 
 When the target is in `SELF_RECYCLE_TARGETS` (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`, `lithium`):
@@ -474,12 +476,9 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 
 In rough priority order (fully shipped items removed):
 
-### Shuffle-vs-asteroid cost comparison (V3 item 1.y — ~50 LoC)
+### Cross-feeding shuffle optimization (V3 item 1.x — ~150 LoC)
 
-Generic shuffle enumeration is shipped (16 candidates auto-discovered, greedy selection per leaf, see §Algorithms).  Remaining polish:
-
-- Currently `--enable-shuffles all` activates every applicable shuffle, which can INCREASE total machine count at low research (each shuffle has overhead).  A coarse asteroid-baseline cost comparison would let the greedy reject shuffles that are objectively worse than the default path.
-- For LP / subset-DP selection (provably optimal across cross-feeding shuffles), see the V3 item 1.x deferred work.
+Greedy selection + baseline-fallback cost gate are shipped (see §Algorithms).  For users who need provably-optimal selection across cross-feeding shuffles (e.g. LDS produces copper, hypothetical copper-shuffle would produce plastic — but only one can be active per chain), a subset-DP across legendary leaves would search every combination of (asteroid, shuffle-A, shuffle-B, ...) per leaf and return the global minimum machine count.  The greedy approximates this with O(leaves × candidates) lookups; the DP would be O(2^leaves × leaves × candidates), still <50ms for typical chains (3-5 leaves).
 
 ### Full research-state tracking (V3 item 2 — ~150 LoC)
 
