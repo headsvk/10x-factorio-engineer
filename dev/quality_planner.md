@@ -12,14 +12,14 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-04-30. Tests: `python -m unittest dev.test_quality_planner -v` — **142 tests, all passing, ~0.07 s.**
+**Last updated:** 2026-04-30. Tests: `python -m unittest dev.test_quality_planner -v` — **164 tests, all passing, ~0.15 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
 - Multi-planet support (`--planets`)
 - Per-stage assembly module optimization (`--assembly-modules`)
 - Machine-quality plumbing (`--machine-quality`)
-- LDS cross-item shuffle (`--enable-lds-shuffle`)
+- **Generic cross-item shuffle enumeration (`--enable-shuffle NAME` / `--enable-shuffles all`)** — auto-discovers 16 candidate recipes from the dataset (LDS, advanced-circuit, engine-unit, battery, processing-unit, ...).  Replaces the old hardcoded `--enable-lds-shuffle`.
 - Self-recycle targets (superconductor, holmium-plate, tungsten-carbide, fusion-power-cell, lithium)
 - Gleba bio-raws (yumako, jellynut, pentapod-egg) — **no spoilage timing**
 - Per-stage power accounting (`total_power_mw`)
@@ -50,7 +50,7 @@ python dev/quality_planner.py --item superconductor --rate 60 \
 
 # Plastic-heavy chain via cross-item shuffle
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis --assembly-modules --enable-lds-shuffle
+    --planets nauvis --assembly-modules --enable-shuffle low-density-structure
 
 # Early game (no space platform)
 python dev/quality_planner.py --item iron-plate --rate 60 \
@@ -93,7 +93,8 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--assembly-modules` | off | Fill assembly slots with prod modules at `--module-quality` and `--prod-module-tier`. Inherent +50 % prod (foundry/EM-plant/biochamber) is always applied |
 | `--prod-module-tier {1,2,3}` | `3` | Tier of prod modules used by `--assembly-modules` |
 | `--research NAME=LEVEL` | empty | Repeatable. Productivity research per recipe family (e.g. `--research asteroid-productivity=5`) |
-| `--enable-lds-shuffle` | off | Replace plastic-bar leg with LDS cross-item shuffle |
+| `--enable-shuffle NAME` | none | Repeatable. Activate cross-item shuffle by output-item key (e.g. `low-density-structure`). 16 candidates discovered from dataset; see [Shuffle enumeration](#shuffle-enumeration--selection) for the full list. |
+| `--enable-shuffles all` | off | Activate every applicable shuffle; greedy selector picks the best primary per legendary leaf. Mutually exclusive with `--enable-shuffle`. |
 | `--no-asteroids` | off | Skip asteroid path; route iron-ore/copper-ore/ice/calcite via planet self-recycle |
 | `--format {human,json}` | `human` | Output format |
 
@@ -273,16 +274,55 @@ Routing per leaf raw:
 - Mined raw with planet unlocked → `mined-raw-self-recycle`.
 - Otherwise → fail-fast with actionable `add --planets X` hint.
 
-### LDS shuffle wiring
+### Shuffle enumeration + selection
 
-When `--enable-lds-shuffle` and `plastic-bar` is in the chain:
+The planner discovers cross-item shuffle candidates by introspecting the dataset (no hardcoded recipe list).  A candidate is a recipe that:
 
-1. Compute legendary-plastic demand from the initial walker pass.
-2. `compute_lds_shuffle_stage` returns `normal_plastic_in_per_min`, `foundry_machines`, `recycler_machines`, `byproduct_legendary`, `fluid_demand`.
-3. Re-walk with `extra_raws={'plastic-bar'}` so the chain treats plastic as supplied externally.
-4. Cap `byproduct_legendary` at observed demand → `capped_credits`. Surplus → `shuffle_byproduct_overflow` + a note.
-5. If any credit > 0, re-walk a third time with `byproduct_credits=capped_credits` so demand for credited items propagates correctly through the chain.
-6. Walk the normal-quality plastic-bar leg separately at `normal_plastic_in_per_min`; route its raws into `normal_solid_input` / `normal_fluid_input`.
+1. Produces an item I (with `allow_productivity=True`)
+2. Has a corresponding `<I>-recycling` recipe that returns 2+ distinct **solid** items (multi-output filter — single-output recyclers are degenerate self-recycles already covered by `solve_self_recycle_target_loop`)
+3. The recycler's solid outputs are a subset of the recipe's solid ingredients
+
+When multiple cast-recipe variants exist for the same output (e.g. `casting-low-density-structure` foundry vs `low-density-structure` assembler), `enumerate_shuffle_candidates` picks the **fluid-preferred variant** — most fluid ingredients = most quality-transparent inputs = best legendary efficiency.  For LDS this picks the foundry variant (1 solid input + 2 fluids).
+
+Stock Space Age yields **16 candidates**:
+
+| Output item | Cast recipe | Solid ingredients | Solid recycle returns |
+|---|---|---|---|
+| `advanced-circuit` | `advanced-circuit` | copper-cable, electronic-circuit, plastic-bar | (same) |
+| `artificial-jellynut-soil` | (same) | jellynut-seed, landfill, nutrients | (same) |
+| `artificial-yumako-soil` | (same) | landfill, nutrients, yumako-seed | (same) |
+| `battery` | `battery` | copper-plate, iron-plate | (same) |
+| `concrete` | `concrete-from-molten-iron` | stone-brick | iron-ore, stone-brick |
+| `electric-engine-unit` | (same) | electronic-circuit, engine-unit | (same) |
+| `electronic-circuit` | `electronic-circuit` | copper-cable, iron-plate | (same) |
+| `engine-unit` | (same) | iron-gear-wheel, pipe, steel-plate | (same) |
+| `flying-robot-frame` | (same) | battery, electric-engine-unit, electronic-circuit, steel-plate | (same) |
+| `low-density-structure` | `casting-low-density-structure` | plastic-bar | copper-plate, plastic-bar, steel-plate |
+| `nuclear-fuel` | `nuclear-fuel` | rocket-fuel, uranium-235 | (same) |
+| `overgrowth-jellynut-soil` | (same) | artificial-jellynut-soil, biter-egg, jellynut-seed, spoilage | (same) |
+| `overgrowth-yumako-soil` | (same) | artificial-yumako-soil, biter-egg, spoilage, yumako-seed | (same) |
+| `processing-unit` | `processing-unit` | advanced-circuit, electronic-circuit | (same) |
+| `quantum-processor` | `quantum-processor` | carbon-fiber, lithium-plate, processing-unit, superconductor, tungsten-carbide | (same) |
+| `supercapacitor` | `supercapacitor` | battery, electronic-circuit, holmium-plate, superconductor | (same) |
+
+**Greedy selection** runs per `plan()` invocation:
+
+1. **Identify legendary solid leaves** from the initial walker pass — assembly products + raws with positive demand, **excluding** the top-level target item (preserves the user's request: don't shuffle the target away).
+2. **Iterate leaves by descending demand.**  For each leaf:
+   - Find candidates whose recycle returns it (as a primary or byproduct).
+   - For each candidate, score by total `machine_count` (cast + recycler) at the scale needed to cover this leaf's demand.
+   - Pick the lowest-cost match.
+3. **Cumulative byproduct credits** track legendary outputs already produced by activated shuffles; subsequent leaves are checked against credits before scoring (a single LDS activation often covers both plastic-bar and copper-plate demand).
+4. **Merge duplicate `(recipe, primary)` selections** — if a leaf's best source is a primary already activated for a different reason, sum the throughputs into one stage.
+
+**Wiring into `plan()`** for each chosen shuffle:
+
+1. Re-walk the main chain with all chosen primaries as `extra_raws`.
+2. Cap byproducts at observed demand → `capped_credits`. Surplus → `shuffle_byproduct_overflow` + a note.
+3. If any credit > 0, re-walk a third time with `byproduct_credits=capped_credits` so demand for credited items propagates correctly through the chain.
+4. Walk each primary's normal-quality leg separately; route its raws into `normal_solid_input` / `normal_fluid_input`.
+
+**Cycle detection:** the greedy processes each leaf once and a chosen shuffle's byproducts can only *remove* leaves from the queue (never re-add them).  Mutually-feeding shuffles (e.g. LDS produces copper, hypothetical copper-shuffle would produce plastic) cannot both activate.  Naturally cycle-free.
 
 ### Self-recycle target
 
@@ -303,10 +343,10 @@ After computing `summary.by_role`, `_hot_spot_suggestions` emits a note when any
 
 | Dominant role | Condition | Suggestion |
 |---|---|---|
-| `asteroid-reprocessing` | plastic in chain, shuffle off | `--enable-lds-shuffle` |
+| `asteroid-reprocessing` | plastic in chain, shuffle off | `--enable-shuffle low-density-structure` |
 | `asteroid-reprocessing` | quality < legendary T3 | upgrade `--module-quality` / `--quality-module-tier` |
 | `asteroid-reprocessing` | already at max, no plastic | (no suggestion — nothing actionable) |
-| `mined-raw-self-recycle` | plastic in chain | `--enable-lds-shuffle` |
+| `mined-raw-self-recycle` | plastic in chain | `--enable-shuffle low-density-structure` |
 | `mined-raw-self-recycle` | vulcanus locked | `--planets vulcanus` (lava casting) |
 | `assembly` | `--assembly-modules` off | `--assembly-modules` |
 | `assembly` | modules on, machine-quality < legendary | `--machine-quality legendary` |
@@ -396,7 +436,11 @@ MACHINE_INHERENT_PROD = {
 | `TestMinedRawSelfRecycle` | Mined-raw 25 % loop; positive yield for coal/stone/tungsten-ore/holmium-ore |
 | `TestLDSShuffle` | Library-level LDS DP; research / cap / module-quality scaling |
 | `TestOtherPlanetUnlocks` | Fulgora unlocks scrap/holmium-ore (electrolyte chain) |
-| `TestLDSShuffleWiring` | `--enable-lds-shuffle` end-to-end; byproduct credit propagation; overflow notes |
+| `TestLDSShuffleWiring` | `--enable-shuffle low-density-structure` end-to-end (formerly `--enable-lds-shuffle`); byproduct credit propagation; overflow notes |
+| `TestShuffleEnumeration` | `enumerate_shuffle_candidates` returns 16 candidates with multi-output recyclers; LDS picked with foundry variant; iron-stick / copper-cable excluded; cached per dataset |
+| `TestShuffleSolver` | Generic `solve_shuffle_loop` matches legacy LDS solver byte-for-byte; positive yields for advanced-circuit / engine-unit; `compute_shuffle_stage` produces machine counts + byproducts; inherent prod auto-resolved per machine |
+| `TestShuffleSelection` | Greedy picks LDS for plastic; no shuffle when no overlap; byproducts cover other leaves (single activation); empty/disjoint inputs handled |
+| `TestEnableShufflesAll` | `--enable-shuffles all` sentinel activates every applicable shuffle; target item excluded from primaries (no quantum-processor shuffle for processing-unit target); unknown shuffle name errors; combines with `--assembly-modules` |
 | `TestSelfRecycleTarget` | superconductor/holmium-plate/tungsten-carbide as targets; ingredients in normal_solid_input |
 | `TestAssemblyModules` | `--assembly-modules` cuts machines >5×; `_assembly_prod_bonus` helper edge cases |
 | `TestGlebaPartial` | Gleba bio-targets (bioflux, plastic-bar→bioplastic, sulfur→biosulfur, lubricant→biolubricant). **Spoilage NOT modelled.** |
@@ -430,15 +474,12 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 
 In rough priority order (fully shipped items removed):
 
-### Generic shuffle enumeration (V3 item 1.x — ~300–400 LoC)
+### Shuffle-vs-asteroid cost comparison (V3 item 1.y — ~50 LoC)
 
-LDS-only path is shipped behind `--enable-lds-shuffle`. The remaining work is auto-enumeration of shuffle candidates beyond LDS:
+Generic shuffle enumeration is shipped (16 candidates auto-discovered, greedy selection per leaf, see §Algorithms).  Remaining polish:
 
-- Detect any recipe R where R's recycling returns only solids (fluids are free) and all originally non-self ingredients can be quality-rolled through R. Pre-compute the candidate list.
-- Per-shuffle yield: same shape as `solve_lds_shuffle_loop`.
-- LP / objective-aware selection between asteroid path and shuffle paths per chain. Currently shuffle is unconditionally used when the flag is on and plastic-bar is in the chain — could be objectively worse at low research.
-- Cycle-detection guard between mutually-feeding shuffles (LDS shuffle produces copper, hypothetical copper-shuffle produces plastic — guard required).
-- Candidate shuffles to investigate: rails (iron-stick), concrete, green-circuits, red-circuits.
+- Currently `--enable-shuffles all` activates every applicable shuffle, which can INCREASE total machine count at low research (each shuffle has overhead).  A coarse asteroid-baseline cost comparison would let the greedy reject shuffles that are objectively worse than the default path.
+- For LP / subset-DP selection (provably optimal across cross-feeding shuffles), see the V3 item 1.x deferred work.
 
 ### Full research-state tracking (V3 item 2 — ~150 LoC)
 

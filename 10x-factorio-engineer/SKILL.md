@@ -651,7 +651,8 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--assembly-modules]                                   # fill assembly slots with prod modules
     [--prod-module-tier 1|2|3]                             # default: 3
     [--research NAME=LEVEL ...]                            # e.g. asteroid-productivity=5
-    [--enable-lds-shuffle]                                 # cross-item plastic shuffle
+    [--enable-shuffle NAME ...]                            # cross-item shuffle by output-item key
+    [--enable-shuffles all]                                # activate every applicable shuffle
     [--no-asteroids]                                       # no space platform yet
     [--format json|human]                                  # default: human
 ```
@@ -676,9 +677,14 @@ Without `--planets`, only asteroid-reachable items work (iron, copper, stone, ic
 - **Early game (no space platform):** `--no-asteroids --planets nauvis`
   routes iron/copper-ore through Nauvis self-recycle (240k+ ore/min for
   60/min legendary plates — high but realistic without asteroids).
-- **Plastic-heavy chains:** `--enable-lds-shuffle` replaces plastic-bar's
-  asteroid leg with the LDS cross-item shuffle (foundry-cast LDS + recycle
-  → legendary plastic + copper/steel byproducts).
+- **Plastic-heavy chains:** `--enable-shuffle low-density-structure`
+  replaces plastic-bar's asteroid leg with the LDS cross-item shuffle
+  (foundry-cast LDS + recycle → legendary plastic + copper/steel
+  byproducts).  For "let the planner pick", use `--enable-shuffles all` —
+  the planner discovers 16 cross-item shuffle candidates in the dataset
+  and activates the ones whose recycle outputs overlap with the chain's
+  legendary leaves.  Common picks: `low-density-structure`,
+  `advanced-circuit`, `electronic-circuit`, `engine-unit`, `battery`.
 
 ### Fail-fast errors
 

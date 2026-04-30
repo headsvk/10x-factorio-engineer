@@ -598,7 +598,7 @@ class TestOtherPlanetUnlocks(unittest.TestCase):
 
 
 class TestLDSShuffleWiring(unittest.TestCase):
-    """V3 partial: --enable-lds-shuffle flag wires the shuffle into plan()."""
+    """V3 partial: --enable-shuffle / --enable-shuffles all wires the shuffle into plan()."""
 
     def test_flag_default_off(self):
         # Without the flag, output has no shuffle stage and no normal-input buckets.
@@ -614,12 +614,12 @@ class TestLDSShuffleWiring(unittest.TestCase):
         # mined coal eliminated (replaced by normal coal input).
         out = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], enable_lds_shuffle=True,
+            planets=["nauvis"], active_shuffles={"low-density-structure"},
         )
         shuffle = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
         self.assertEqual(len(shuffle), 1)
-        self.assertGreater(shuffle[0]["yield_per_normal_plastic_pct"], 0.0)
-        self.assertGreater(shuffle[0]["foundry_machines"], 0.0)
+        self.assertGreater(shuffle[0]["yield_per_normal_primary_pct"], 0.0)
+        self.assertGreater(shuffle[0]["cast_machines"], 0.0)
         self.assertGreater(shuffle[0]["recycler_machines"], 0.0)
         # Coal moved out of mined_input into normal_solid_input.
         self.assertNotIn("coal", out["mined_input"])
@@ -631,11 +631,11 @@ class TestLDSShuffleWiring(unittest.TestCase):
         # total machines should drop below the no-research shuffle total.
         out_low = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], enable_lds_shuffle=True,
+            planets=["nauvis"], active_shuffles={"low-density-structure"},
         )
         out_high = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], enable_lds_shuffle=True,
+            planets=["nauvis"], active_shuffles={"low-density-structure"},
             research_levels={"low-density-structure-productivity": 10},
         )
         self.assertLess(
@@ -667,7 +667,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
         # around it), so all byproduct copper-plate is surplus → overflow note.
         out = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], enable_lds_shuffle=True,
+            planets=["nauvis"], active_shuffles={"low-density-structure"},
         )
         emitted = out["shuffle_byproduct_legendary"]
         overflow = out["shuffle_byproduct_overflow"]
@@ -682,7 +682,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
         # Total machines should include foundry+recycler from the shuffle stage.
         out = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], enable_lds_shuffle=True,
+            planets=["nauvis"], active_shuffles={"low-density-structure"},
         )
         shuffle_st = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"][0]
         self.assertGreaterEqual(
@@ -692,7 +692,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
     def test_human_format_renders_shuffle(self):
         out = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], enable_lds_shuffle=True,
+            planets=["nauvis"], active_shuffles={"low-density-structure"},
         )
         text = qp.format_human(out)
         self.assertIn("Shuffle Byproducts", text)
@@ -992,13 +992,13 @@ class TestStagePower(unittest.TestCase):
     def test_compound_stage_shuffle_splits_power(self):
         out = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], enable_lds_shuffle=True,
+            planets=["nauvis"], active_shuffles={"low-density-structure"},
         )
         st = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"][0]
         data = _data()
         power_w = qp.cli.build_machine_power_w(data)
         expected = (
-            power_w["foundry"] * st["foundry_machines"]
+            power_w[st["cast_machine"]] * st["cast_machines"]
             + power_w["recycler"] * st["recycler_machines"]
         ) / 1000
         self.assertAlmostEqual(st["power_kw"], expected, delta=1e-6)
@@ -1324,7 +1324,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
             quality_module_tier=3,
         )
         self.assertEqual(len(sugs), 1)
-        self.assertIn("--enable-lds-shuffle", sugs[0])
+        self.assertIn("--enable-shuffle low-density-structure", sugs[0])
 
     def test_no_suggestion_below_threshold(self):
         by_role = {
@@ -1390,11 +1390,11 @@ class TestHotSpotAdvisor(unittest.TestCase):
         sugs = qp._hot_spot_suggestions(
             by_role,
             has_plastic=True,
-            enable_lds_shuffle=False,
+            active_shuffles=None,
             planets=frozenset(["nauvis"]),
         )
         self.assertEqual(len(sugs), 1)
-        self.assertIn("--enable-lds-shuffle", sugs[0])
+        self.assertIn("--enable-shuffle low-density-structure", sugs[0])
 
     def test_mined_recycle_suggests_vulcanus_when_locked(self):
         by_role = {
@@ -1412,14 +1412,14 @@ class TestHotSpotAdvisor(unittest.TestCase):
 
     def test_e2e_processing_unit_emits_suggestion(self):
         # processing-unit on Nauvis with --assembly-modules: mined-coal
-        # dominates → expect mined-raw hot-spot note suggesting --enable-lds-shuffle.
+        # dominates → expect mined-raw hot-spot note suggesting --enable-shuffle low-density-structure.
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
         )
         notes = out.get("notes", [])
         self.assertTrue(
-            any("hot spot" in n and "--enable-lds-shuffle" in n for n in notes),
+            any("hot spot" in n and "--enable-shuffle low-density-structure" in n for n in notes),
             f"expected hot-spot suggestion in notes; got {notes}",
         )
 
@@ -1429,6 +1429,279 @@ class TestHotSpotAdvisor(unittest.TestCase):
         out = qp.plan("iron-plate", 60, _data())
         hot_notes = [n for n in out.get("notes", []) if "hot spot" in n]
         self.assertEqual(hot_notes, [])
+
+
+class TestShuffleEnumeration(unittest.TestCase):
+    """V3 item 1: enumerate_shuffle_candidates introspects the dataset
+    and returns multi-output cross-item shuffle candidates."""
+
+    def test_enumerate_returns_expected_count(self):
+        cands = qp.enumerate_shuffle_candidates(_data())
+        # 16 candidates in stock Space Age (multi-solid-recycle-output filter).
+        # Anchor — if dataset changes, investigate before updating.
+        self.assertEqual(len(cands), 16)
+
+    def test_enumerate_excludes_single_output_recyclers(self):
+        cands = qp.enumerate_shuffle_candidates(_data())
+        outputs = {c.output_item for c in cands}
+        # iron-stick-recycling returns only iron-plate (single output) → excluded.
+        self.assertNotIn("iron-stick", outputs)
+        # copper-cable-recycling returns only copper-plate → excluded.
+        self.assertNotIn("copper-cable", outputs)
+        # iron-gear-wheel-recycling returns only iron-plate → excluded.
+        self.assertNotIn("iron-gear-wheel", outputs)
+
+    def test_enumerate_includes_lds_with_foundry_variant(self):
+        cands = qp.enumerate_shuffle_candidates(_data())
+        lds = next(c for c in cands if c.output_item == "low-density-structure")
+        # Fluid-preferred picks the foundry casting variant (1 solid + 2 fluids)
+        # over the assembler variant (3 solids).
+        self.assertEqual(lds.recipe_key, "casting-low-density-structure")
+        self.assertEqual(lds.solid_ingredients, ("plastic-bar",))
+        self.assertEqual(
+            lds.solid_recycle_returns, ("copper-plate", "plastic-bar", "steel-plate"),
+        )
+        self.assertEqual(set(lds.fluid_ingredients), {"molten-copper", "molten-iron"})
+
+    def test_enumerate_includes_meta_picks(self):
+        outputs = {c.output_item for c in qp.enumerate_shuffle_candidates(_data())}
+        for expected in [
+            "low-density-structure",
+            "advanced-circuit",
+            "electronic-circuit",
+            "engine-unit",
+            "battery",
+            "processing-unit",
+        ]:
+            self.assertIn(expected, outputs, f"expected {expected} in candidates")
+
+    def test_enumerate_caches_per_dataset(self):
+        data = _data()
+        a = qp.enumerate_shuffle_candidates(data)
+        b = qp.enumerate_shuffle_candidates(data)
+        self.assertIs(a, b)  # same list object — cached
+
+    def test_enumerate_excludes_recycling_recipes(self):
+        cands = qp.enumerate_shuffle_candidates(_data())
+        for c in cands:
+            self.assertNotIn(
+                c.category, ("recycling", "recycling-or-hand-crafting"),
+            )
+
+
+class TestShuffleSolver(unittest.TestCase):
+    """V3 item 1: generic solve_shuffle_loop is the engine; LDS is one
+    instantiation."""
+
+    def test_lds_via_generic_matches_legacy(self):
+        # solve_shuffle_loop(LDS, plastic-bar) ≡ solve_lds_shuffle_loop()
+        # (same numbers, since the legacy wrapper now calls the generic).
+        data = _data()
+        cand = qp._lds_candidate(data)
+        assert cand is not None
+        v_generic, _ = qp.solve_shuffle_loop(
+            cand, "plastic-bar", data,
+            module_quality="legendary",
+            inherent_prod=0.5,
+            cast_slots=4,
+        )
+        v_legacy, _ = qp.solve_lds_shuffle_loop(
+            data, "legendary",
+        )
+        self.assertAlmostEqual(v_generic, v_legacy, delta=1e-12)
+
+    def test_advanced_circuit_positive_yield(self):
+        data = _data()
+        cand = next(
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "advanced-circuit"
+        )
+        # advanced-circuit's recycle returns plastic-bar, copper-cable, electronic-circuit.
+        # Pick electronic-circuit as primary (it's an ingredient AND a return).
+        v, _ = qp.solve_shuffle_loop(
+            cand, "electronic-circuit", data, module_quality="legendary",
+        )
+        self.assertGreater(v, 0.0)
+        self.assertLess(v, 1.0)
+
+    def test_engine_unit_positive_yield(self):
+        data = _data()
+        cand = next(
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "engine-unit"
+        )
+        v, _ = qp.solve_shuffle_loop(
+            cand, "iron-gear-wheel", data, module_quality="legendary",
+        )
+        self.assertGreater(v, 0.0)
+
+    def test_compute_shuffle_stage_machine_count_positive(self):
+        data = _data()
+        cand = qp._lds_candidate(data)
+        assert cand is not None
+        stage = qp.compute_shuffle_stage(
+            cand, "plastic-bar", 60.0, data,
+            module_quality="legendary",
+        )
+        assert stage is not None
+        self.assertGreater(stage["machine_count"], 0.0)
+        self.assertGreater(stage["cast_machines"], 0.0)
+        self.assertGreater(stage["recycler_machines"], 0.0)
+
+    def test_compute_shuffle_stage_byproducts_present(self):
+        data = _data()
+        cand = qp._lds_candidate(data)
+        assert cand is not None
+        stage = qp.compute_shuffle_stage(
+            cand, "plastic-bar", 60.0, data,
+            module_quality="legendary",
+        )
+        assert stage is not None
+        self.assertIn("copper-plate", stage["byproduct_legendary"])
+        self.assertIn("steel-plate", stage["byproduct_legendary"])
+        self.assertGreater(stage["byproduct_legendary"]["copper-plate"], 0.0)
+
+    def test_solver_handles_inherent_prod(self):
+        # Foundry recipe (LDS): inherent_prod default lookup finds 0.5 via
+        # MACHINE_INHERENT_PROD["foundry"].  Yield should match explicit 0.5.
+        data = _data()
+        cand = qp._lds_candidate(data)
+        assert cand is not None
+        v_default, _ = qp.solve_shuffle_loop(
+            cand, "plastic-bar", data, module_quality="legendary",
+        )
+        v_explicit, _ = qp.solve_shuffle_loop(
+            cand, "plastic-bar", data, module_quality="legendary",
+            inherent_prod=0.5,
+        )
+        self.assertAlmostEqual(v_default, v_explicit, delta=1e-12)
+
+
+class TestShuffleSelection(unittest.TestCase):
+    """V3 item 1: select_shuffles_greedy picks a shuffle per legendary
+    leaf; merges duplicate (recipe, primary) selections."""
+
+    def test_picks_lds_for_plastic_when_only_lds_enabled(self):
+        data = _data()
+        lds = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "low-density-structure"
+        ]
+        chosen = qp.select_shuffles_greedy(
+            {"plastic-bar": 60.0}, lds, data, module_quality="legendary",
+        )
+        self.assertEqual(len(chosen), 1)
+        self.assertEqual(chosen[0]["primary"], "plastic-bar")
+        self.assertEqual(chosen[0]["shuffle"], "low-density-structure")
+
+    def test_no_shuffle_when_no_overlap(self):
+        data = _data()
+        # An iron-plate-only chain has no overlap with the LDS shuffle's
+        # solid_recycle_returns (copper-plate, plastic-bar, steel-plate).
+        # → greedy returns empty.
+        lds = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "low-density-structure"
+        ]
+        chosen = qp.select_shuffles_greedy(
+            {"iron-plate": 60.0}, lds, data, module_quality="legendary",
+        )
+        self.assertEqual(chosen, [])
+
+    def test_byproduct_satisfies_other_leaf(self):
+        # LDS shuffle activated for plastic-bar produces copper-plate as
+        # byproduct.  If the chain also demands ≤ that copper-plate amount,
+        # only ONE shuffle stage should be activated (not two).
+        data = _data()
+        lds = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "low-density-structure"
+        ]
+        chosen = qp.select_shuffles_greedy(
+            # 30/min plastic + small copper demand: byproduct covers copper.
+            {"plastic-bar": 30.0, "copper-plate": 20.0}, lds, data,
+            module_quality="legendary",
+        )
+        self.assertEqual(len(chosen), 1)
+        self.assertEqual(chosen[0]["primary"], "plastic-bar")
+
+    def test_empty_candidates_returns_empty(self):
+        chosen = qp.select_shuffles_greedy(
+            {"plastic-bar": 60.0}, [], _data(),
+            module_quality="legendary",
+        )
+        self.assertEqual(chosen, [])
+
+    def test_disjoint_leaves_no_error(self):
+        # Leaves that no shuffle can produce (e.g. uranium-235): greedy
+        # processes them but emits no stages.
+        data = _data()
+        lds = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "low-density-structure"
+        ]
+        chosen = qp.select_shuffles_greedy(
+            {"uranium-235": 1.0}, lds, data, module_quality="legendary",
+        )
+        self.assertEqual(chosen, [])
+
+
+class TestEnableShufflesAll(unittest.TestCase):
+    """V3 item 1: --enable-shuffles all sentinel activates every applicable
+    shuffle; target item is excluded as a primary."""
+
+    def test_all_picks_lds_for_processing_unit_chain(self):
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+            active_shuffles={"all"},
+        )
+        shuffles = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
+        # LDS shuffle should be among the activated set (plastic is in chain).
+        shuffle_names = {s.get("shuffle") for s in shuffles}
+        self.assertIn("low-density-structure", shuffle_names)
+
+    def test_all_target_excluded_from_primaries(self):
+        # Quantum-processor shuffle would pick processing-unit as a primary,
+        # but processing-unit is the target — must be excluded.
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+            active_shuffles={"all"},
+        )
+        shuffles = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
+        for s in shuffles:
+            self.assertNotEqual(
+                s.get("primary"), "processing-unit",
+                "target item must not be shuffled away",
+            )
+
+    def test_all_iron_plate_chain_activates_no_shuffle(self):
+        # Iron-plate has no plastic / advanced-circuit / engine-unit
+        # in its chain — none of the shuffles overlap, so none activate.
+        out = qp.plan(
+            "iron-plate", 60, _data(), active_shuffles={"all"},
+        )
+        shuffles = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
+        self.assertEqual(shuffles, [])
+
+    def test_unknown_shuffle_name_errors(self):
+        with self.assertRaises(ValueError) as cm:
+            qp.plan(
+                "iron-plate", 60, _data(),
+                active_shuffles={"not-a-real-shuffle"},
+            )
+        self.assertIn("unknown shuffle", str(cm.exception))
+
+    def test_all_combines_with_assembly_modules(self):
+        # Smoke: --assembly-modules + --enable-shuffles all run cleanly.
+        out = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+            active_shuffles={"all"},
+        )
+        self.assertGreater(out["total_machine_count"], 0)
+        self.assertGreater(out["total_power_mw"], 0)
 
 
 if __name__ == "__main__":

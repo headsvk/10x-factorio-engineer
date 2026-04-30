@@ -51,7 +51,7 @@ import json
 import math
 import os
 import sys
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 # Import from cli.py (sibling directory)
 _CLI_DIR = os.path.join(
@@ -224,6 +224,129 @@ MINED_RAW_NO_ASTEROID_FALLBACK: dict[str, tuple[str, ...]] = {
     "ice":        ("aquilo",),
     "calcite":    ("vulcanus",),
 }
+
+# ---------------------------------------------------------------------------
+# Cross-item shuffle enumeration (V3 item 1)
+# ---------------------------------------------------------------------------
+#
+# A "shuffle" is a recipe R producing item I where the I-recycling recipe
+# returns a subset of R's solid ingredients.  By looping cast(R) -> recycle,
+# the planner can quality-roll the SOLID ingredients (fluids are
+# quality-transparent).  One ingredient is the "primary" (becomes legendary
+# at the loop's main yield); other solid ingredients become byproducts.
+#
+# The canonical example is low-density-structure: cast 5 plastic-bar +
+# fluids -> 1 LDS, recycle LDS -> 1.25 plastic-bar + copper-plate +
+# steel-plate at 25% retention.  Plastic-bar is the primary; copper-plate
+# and steel-plate are byproducts.
+#
+# enumerate_shuffle_candidates() introspects the dataset to find ALL recipes
+# matching this pattern, restricted to multi-ingredient candidates (single-
+# ingredient recipes are degenerate self-recycles already covered by
+# solve_self_recycle_target_loop).
+
+ShuffleCandidate = namedtuple("ShuffleCandidate", [
+    "recipe_key",            # e.g. "casting-low-density-structure"
+    "output_item",           # e.g. "low-density-structure"
+    "category",              # recipe category (foundry/EM-plant/chem-plant/...)
+    "solid_ingredients",     # tuple — solid ingredients of the cast recipe
+    "fluid_ingredients",     # tuple — fluid ingredients (quality-transparent)
+    "solid_recycle_returns", # tuple — solids the recycler returns
+    "recycle_recipe_key",    # e.g. "low-density-structure-recycling"
+])
+
+# Module-level cache keyed by id(data); avoids re-enumerating per plan() call.
+_SHUFFLE_CANDIDATES_CACHE: dict[int, list[ShuffleCandidate]] = {}
+
+
+def enumerate_shuffle_candidates(data: dict) -> list[ShuffleCandidate]:
+    """Return all multi-output shuffle candidates in the dataset.
+
+    A candidate is keyed by an output item I such that:
+      * Some recipe R produces I with ``allow_productivity=True``
+      * ``<I>-recycling`` exists
+      * The recycler returns 2 or more distinct solid items (multi-output
+        filter — single-output recyclers are degenerate self-recycles
+        already covered by ``solve_self_recycle_target_loop``)
+      * The recycler's solid outputs are a subset of R's solid ingredients
+      * R is not a recycling / barrel-handling recipe
+
+    When multiple cast recipes exist for the same output (e.g. foundry
+    `casting-low-density-structure` vs assembler `low-density-structure`),
+    the fluid-preferred variant wins (more fluid ingredients = quality-
+    transparent path = better legendary efficiency).
+
+    Cached per dataset; safe to call repeatedly.
+    """
+    cached = _SHUFFLE_CANDIDATES_CACHE.get(id(data))
+    if cached is not None:
+        return cached
+
+    fluids = build_fluid_set(data)
+    recipes_by_key = {r["key"]: r for r in data.get("recipes", [])}
+
+    # Group eligible cast recipes by output item, then pick the fluid-
+    # preferred variant per output.
+    by_output: dict[str, list[tuple[dict, tuple, tuple]]] = {}
+    for r in data.get("recipes", []):
+        if not r.get("allow_productivity"):
+            continue
+        if r.get("subgroup") in ("empty-barrel", "fill-barrel"):
+            continue
+        if r.get("category") in ("recycling", "recycling-or-hand-crafting"):
+            continue
+        ing_set = {x["name"] for x in r.get("ingredients", [])}
+        solid_ings = tuple(sorted(ing_set - fluids))
+        fluid_ings = tuple(sorted(ing_set & fluids))
+        for res in r.get("results", []):
+            output = res["name"]
+            if output in fluids:
+                continue
+            by_output.setdefault(output, []).append((r, solid_ings, fluid_ings))
+
+    out: list[ShuffleCandidate] = []
+    for output, variants in by_output.items():
+        recycle_key = f"{output}-recycling"
+        recycle = recipes_by_key.get(recycle_key)
+        if recycle is None:
+            continue
+        rec_outputs = {
+            x["name"] for x in recycle.get("results", [])
+            if x["name"] != output
+        }
+        solid_rec_outputs = tuple(sorted(rec_outputs - fluids))
+        # Multi-output filter: at least 2 distinct solid items returned.
+        if len(solid_rec_outputs) < 2:
+            continue
+
+        # Pick fluid-preferred cast variant: most fluids first, then most
+        # solids (richer recipe), then deterministic key sort.
+        variants.sort(
+            key=lambda v: (-len(v[2]), -len(v[1]), v[0]["key"]),
+        )
+        for r, solid_ings, fluid_ings in variants:
+            # Subset check on the chosen variant.  The recycler returns
+            # the assembler-variant ingredients regardless of which cast
+            # recipe was used, so this allows the foundry variant of LDS
+            # (1 solid in, 3 solids returned) — the recycle outputs come
+            # from the assembler-variant recipe definition.
+            if not set(solid_rec_outputs).issubset(set(solid_ings) | set(solid_rec_outputs)):
+                continue
+            out.append(ShuffleCandidate(
+                recipe_key=r["key"],
+                output_item=output,
+                category=r.get("category", ""),
+                solid_ingredients=solid_ings,
+                fluid_ingredients=fluid_ings,
+                solid_recycle_returns=solid_rec_outputs,
+                recycle_recipe_key=recycle_key,
+            ))
+            break  # one variant per output_item
+
+    out.sort(key=lambda c: c.output_item)
+    _SHUFFLE_CANDIDATES_CACHE[id(data)] = out
+    return out
+
 
 # All known Space Age planets (for argparse choices / validation).
 KNOWN_PLANETS: tuple[str, ...] = ("nauvis", "vulcanus", "fulgora", "gleba", "aquilo", "space-platform")
@@ -686,6 +809,143 @@ def solve_asteroid_reprocessing_loop(
     return V[0], configs
 
 
+def solve_shuffle_loop(
+    candidate: ShuffleCandidate,
+    primary: str,
+    data: dict,
+    module_quality: str,
+    quality_module_tier: int = 3,
+    prod_module_tier: int = 3,
+    research_prod: float = 0.0,
+    inherent_prod: float | None = None,
+    cast_slots: int | None = None,
+) -> tuple[float, dict]:
+    """Generic cross-item shuffle DP.
+
+    Given a ``ShuffleCandidate`` (cast recipe + recycle recipe + ingredients)
+    and a ``primary`` ingredient, return ``(V[0], configs)`` where:
+      * V[0] = legendary ``primary`` per normal ``primary`` invested
+      * configs = per-tier ``{cast_prod, cast_quality, recycle_quality}``
+
+    The math mirrors :func:`solve_lds_shuffle_loop` (which is now a thin
+    wrapper around this function) but is parametrised over the recipe pair.
+
+    ``inherent_prod`` defaults to ``MACHINE_INHERENT_PROD`` for the cast
+    recipe's machine.  ``cast_slots`` defaults to the machine's module
+    slots (via :func:`cli.build_machine_module_slots`).
+    """
+    cast_recipe = _recipe_by_key(data, candidate.recipe_key)
+    rec_recipe = _recipe_by_key(data, candidate.recycle_recipe_key)
+    if cast_recipe is None or rec_recipe is None:
+        return 0.0, {}
+
+    # The "primary" must be a recycler output (the loop only re-feeds what
+    # the recycler returns).  If the primary is also a cast ingredient, the
+    # in-per-cast amount is taken from the cast recipe; if it isn't (e.g.
+    # foundry-LDS where copper-plate is a recycler return but the cast uses
+    # molten-copper instead), then the loop doesn't self-feed for that
+    # primary — fall back to a 0-yield result.
+    primary_in_per_cast = _recipe_ing_amount(cast_recipe, primary)
+    primary_back_per_output = _recipe_result_amount(rec_recipe, primary)
+    if primary_in_per_cast <= 0 or primary_back_per_output <= 0:
+        return 0.0, {}
+
+    # Determine inherent prod from the cast machine.
+    if inherent_prod is None:
+        machine_key, _ = cli.get_machine(
+            cast_recipe.get("category", ""), 3, "electric",
+        )
+        inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+
+    # Determine module slots for the cast machine.
+    if cast_slots is None:
+        machine_key, _ = cli.get_machine(
+            cast_recipe.get("category", ""), 3, "electric",
+        )
+        slots_map = cli.build_machine_module_slots(data)
+        cast_slots = int(slots_map.get(machine_key, 0))
+        if cast_slots <= 0:
+            cast_slots = 4  # safe default
+
+    output_per_cast = _recipe_result_amount(cast_recipe, candidate.output_item)
+    if output_per_cast <= 0:
+        return 0.0, {}
+
+    V = [0.0] * 5
+    V[4] = 1.0
+    configs: dict[int, dict] = {}
+
+    cast_allow_prod = bool(cast_recipe.get("allow_productivity", False))
+    for t in range(3, -1, -1):
+        best_v = -1.0
+        best_cfg = None
+        for cp in range(cast_slots + 1):
+            if not cast_allow_prod and cp > 0:
+                continue
+            for cq in range(cast_slots - cp + 1):
+                for rq in range(RECYCLER_SLOTS + 1):
+                    prod = inherent_prod + research_prod + _prod_bonus(
+                        cp, prod_module_tier, module_quality,
+                    )
+                    if prod > 3.0:
+                        prod = 3.0
+                    items_per_craft = output_per_cast * (1.0 + prod)
+                    # primary return per primary invested, per loop.
+                    # primary_back_per_output already encodes recycler
+                    # retention (recipe data stores post-retention amounts,
+                    # e.g. LDS-recycling has 1.25 plastic-bar = 5 × 0.25).
+                    per_input_yield = (
+                        items_per_craft / primary_in_per_cast
+                    ) * primary_back_per_output
+
+                    q_cast = _quality_chance(cq, quality_module_tier, module_quality)
+                    q_rec = _quality_chance(rq, quality_module_tier, module_quality)
+
+                    cast_probs = _tier_skip_probs(q_cast, t)
+                    probs = [0.0] * (5 - t)
+                    for u_off, cp_prob in enumerate(cast_probs):
+                        u = t + u_off
+                        rec_probs = _tier_skip_probs(q_rec, u)
+                        for s_off, rp in enumerate(rec_probs):
+                            s = u + s_off
+                            probs[s - t] += cp_prob * rp * per_input_yield
+
+                    stay = probs[0]
+                    if stay >= 1.0 - 1e-15:
+                        v = 0.0
+                    else:
+                        numer = sum(probs[k] * V[t + k] for k in range(1, len(probs)))
+                        v = numer / (1.0 - stay)
+                    if v > best_v:
+                        best_v = v
+                        best_cfg = {
+                            "cast_prod": cp,
+                            "cast_quality": cq,
+                            "recycle_quality": rq,
+                        }
+        V[t] = max(best_v, 0.0)
+        configs[t] = best_cfg or {"cast_prod": 0, "cast_quality": 0, "recycle_quality": 0}
+
+    return V[0], configs
+
+
+# Cached LDS candidate (dataset-static).
+_LDS_CANDIDATE_CACHE: dict[int, ShuffleCandidate | None] = {}
+
+
+def _lds_candidate(data: dict) -> ShuffleCandidate | None:
+    """Convenience: find the LDS candidate (foundry variant) in the dataset."""
+    cached = _LDS_CANDIDATE_CACHE.get(id(data))
+    if cached is not None or id(data) in _LDS_CANDIDATE_CACHE:
+        return cached
+    for c in enumerate_shuffle_candidates(data):
+        if c.output_item == "low-density-structure":
+            _LDS_CANDIDATE_CACHE[id(data)] = c
+            return c
+    _LDS_CANDIDATE_CACHE[id(data)] = None
+    return None
+
+
 def solve_lds_shuffle_loop(
     data: dict,
     module_quality: str,
@@ -722,76 +982,344 @@ def solve_lds_shuffle_loop(
     Returns (V[0], configs_per_tier).  ``V[0]`` is legendary plastic-bar per
     normal plastic-bar invested.  Caller is responsible for also tracking the
     molten-iron/molten-copper fluid demand and the copper/steel byproducts.
+
+    Implemented as a thin wrapper around :func:`solve_shuffle_loop` for
+    backwards compatibility with the V2 LDS-only API.
     """
-    cast_recipe = _recipe_by_key(data, "casting-low-density-structure")
-    rec_recipe = _recipe_by_key(data, "low-density-structure-recycling")
+    candidate = _lds_candidate(data)
+    if candidate is None:
+        return 0.0, {}
+    return solve_shuffle_loop(
+        candidate, "plastic-bar", data,
+        module_quality=module_quality,
+        quality_module_tier=quality_module_tier,
+        prod_module_tier=prod_module_tier,
+        research_prod=research_prod,
+        inherent_prod=foundry_inherent_prod,
+        cast_slots=4,
+    )
+
+
+def compute_shuffle_stage(
+    candidate: ShuffleCandidate,
+    primary: str,
+    legendary_primary_per_min: float,
+    data: dict,
+    *,
+    module_quality: str,
+    quality_module_tier: int = 3,
+    prod_module_tier: int = 3,
+    research_prod: float = 0.0,
+    inherent_prod: float | None = None,
+    cast_slots: int | None = None,
+    cast_speed: float | None = None,
+    recycler_speed: float = RECYCLER_SPEED,
+    machine_quality: str = "normal",
+) -> dict | None:
+    """Size a generic cross-item shuffle stage producing ``legendary_primary_per_min``.
+
+    Returns a dict consumed by :func:`plan` with keys:
+
+      * role: "cross-item-shuffle"
+      * shuffle: short tag (the candidate's output_item)
+      * primary: the legendary-bearing ingredient
+      * machine: cast-machine + recycler
+      * cast_machine: e.g. "foundry"
+      * <cast>_machines, recycler_machines, machine_count
+      * yield_per_normal_primary, legendary_primary_per_min, normal_primary_in_per_min
+      * byproduct_legendary: {item: rate, ...}  (other recycler outputs)
+      * fluid_demand: {item: rate, ...}
+      * configs_per_tier
+      * recipe: "<cast> + <output>-recycling"
+
+    Returns ``None`` if recipes are missing or yield is zero (caller should
+    fall back to asteroid path).
+    """
+    if legendary_primary_per_min <= 0:
+        return None
+    cast_recipe = _recipe_by_key(data, candidate.recipe_key)
+    rec_recipe = _recipe_by_key(data, candidate.recycle_recipe_key)
     if cast_recipe is None or rec_recipe is None:
-        return 0.0, {}
+        return None
 
-    # Plastic-bar in per craft, LDS out per craft, plastic-bar returned per LDS
-    plastic_in_per_cast = _recipe_ing_amount(cast_recipe, "plastic-bar")  # 5
-    lds_out_per_cast = _recipe_result_amount(cast_recipe, "low-density-structure")  # 1
-    plastic_back_per_lds = _recipe_result_amount(rec_recipe, "plastic-bar")  # 1.25
+    primary_in_per_cast = _recipe_ing_amount(cast_recipe, primary)
+    primary_back_per_output = _recipe_result_amount(rec_recipe, primary)
+    output_per_cast = _recipe_result_amount(cast_recipe, candidate.output_item)
+    if primary_in_per_cast <= 0 or primary_back_per_output <= 0 or output_per_cast <= 0:
+        return None
 
-    if plastic_in_per_cast <= 0:
-        return 0.0, {}
+    # Lookup machine + speed for the cast recipe.
+    machine_key, base_speed = cli.get_machine(
+        cast_recipe.get("category", ""), 3, "electric",
+    )
+    qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    if cast_speed is None:
+        cast_speed = float(base_speed) * qm_speed_mult
+    rec_speed = float(recycler_speed) * qm_speed_mult
 
-    FOUNDRY_SLOTS = 4  # foundry module slots (quality-independent)
+    if inherent_prod is None:
+        inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+    if cast_slots is None:
+        slots_map = cli.build_machine_module_slots(data)
+        cast_slots = int(slots_map.get(machine_key, 0))
+        if cast_slots <= 0:
+            cast_slots = 4
 
-    V = [0.0] * 5
-    V[4] = 1.0
-    configs: dict[int, dict] = {}
+    v, configs = solve_shuffle_loop(
+        candidate, primary, data,
+        module_quality=module_quality,
+        quality_module_tier=quality_module_tier,
+        prod_module_tier=prod_module_tier,
+        research_prod=research_prod,
+        inherent_prod=inherent_prod,
+        cast_slots=cast_slots,
+    )
+    if v <= 0:
+        return None
 
-    for t in range(3, -1, -1):
-        best_v = -1.0
-        best_cfg = None
-        # Foundry cast: p prod + q quality (p+q ≤ 4). Prod allowed by metallurgy.
-        for cp in range(FOUNDRY_SLOTS + 1):
-            for cq in range(FOUNDRY_SLOTS - cp + 1):
-                # Recycler: rq quality (0..4), quality-only
-                for rq in range(RECYCLER_SLOTS + 1):
-                    prod = foundry_inherent_prod + research_prod + _prod_bonus(
-                        cp, prod_module_tier, module_quality,
-                    )
-                    if prod > 3.0:
-                        prod = 3.0
-                    items_per_craft = lds_out_per_cast * (1.0 + prod)
-                    # plastic-bar return per plastic-bar invested, per loop
-                    per_input_yield = (
-                        items_per_craft / plastic_in_per_cast
-                    ) * plastic_back_per_lds
+    normal_primary_in_per_min = legendary_primary_per_min / v
 
-                    q_cast = _quality_chance(cq, quality_module_tier, module_quality)
-                    q_rec = _quality_chance(rq, quality_module_tier, module_quality)
+    # Approximate machine counts using tier-0 (normal) module config.  Same
+    # approximation as the V2 LDS code: most cycles happen at low tiers.
+    cfg0 = configs.get(0, {"cast_prod": 0, "cast_quality": 0, "recycle_quality": 4})
+    cp0 = cfg0.get("cast_prod", 0)
+    prod = inherent_prod + research_prod + _prod_bonus(
+        cp0, prod_module_tier, module_quality,
+    )
+    if prod > 3.0:
+        prod = 3.0
+    items_per_craft = output_per_cast * (1.0 + prod)
+    primary_back_per_craft = items_per_craft * primary_back_per_output
 
-                    # Quality compose: starting at tier t, cast-roll places LDS
-                    # at tier u ≥ t; recycle-roll from u places plastic at s ≥ u.
-                    cast_probs = _tier_skip_probs(q_cast, t)
-                    probs = [0.0] * (5 - t)
-                    for u_off, cp_prob in enumerate(cast_probs):
-                        u = t + u_off
-                        rec_probs = _tier_skip_probs(q_rec, u)
-                        for s_off, rp in enumerate(rec_probs):
-                            s = u + s_off
-                            probs[s - t] += cp_prob * rp * per_input_yield
+    # Cycle-count multiplier (recirculation): per-cast primary returns
+    # divided by primary invested.  Self-sustaining loops clamped at 0.999.
+    r_per_cycle = primary_back_per_craft / primary_in_per_cast
+    if r_per_cycle >= 1.0 - 1e-9:
+        r_per_cycle = 0.999
 
-                    stay = probs[0]
-                    if stay >= 1.0 - 1e-15:
-                        v = 0.0
-                    else:
-                        numer = sum(probs[k] * V[t + k] for k in range(1, len(probs)))
-                        v = numer / (1.0 - stay)
-                    if v > best_v:
-                        best_v = v
-                        best_cfg = {
-                            "cast_prod": cp,
-                            "cast_quality": cq,
-                            "recycle_quality": rq,
-                        }
-        V[t] = max(best_v, 0.0)
-        configs[t] = best_cfg or {"cast_prod": 0, "cast_quality": 0, "recycle_quality": 0}
+    total_casts_per_min = (
+        normal_primary_in_per_min / primary_in_per_cast / (1.0 - r_per_cycle)
+    )
+    cast_time = float(cast_recipe.get("energy_required", 1.0))
+    cast_machines = total_casts_per_min * cast_time / (cast_speed * 60.0)
 
-    return V[0], configs
+    total_recycles_per_min = total_casts_per_min * items_per_craft
+    rec_time = float(rec_recipe.get("energy_required", 0.9375))
+    recycler_machines = total_recycles_per_min * rec_time / (rec_speed * 60.0)
+
+    # Byproducts: each non-primary solid recycle return scaled by the
+    # ratio of (byproduct output / primary output) per LDS recycle cycle.
+    byproduct_legendary: dict[str, float] = {}
+    for byprod in candidate.solid_recycle_returns:
+        if byprod == primary:
+            continue
+        amt = _recipe_result_amount(rec_recipe, byprod)
+        if amt <= 0:
+            continue
+        byproduct_legendary[byprod] = legendary_primary_per_min * (
+            amt / primary_back_per_output
+        )
+
+    # Fluid demand from cast recipe (quality-transparent, but caller may
+    # want to display it).  Includes BOTH cast fluids and recycler fluid
+    # outputs (rare, but possible — not modelled here; keep cast-fluids only).
+    fluid_demand: dict[str, float] = {}
+    for ing in cast_recipe.get("ingredients", []):
+        if ing["name"] in candidate.fluid_ingredients:
+            fluid_demand[ing["name"]] = float(ing.get("amount", 0)) * total_casts_per_min
+
+    return {
+        "role": "cross-item-shuffle",
+        "shuffle": candidate.output_item,
+        "primary": primary,
+        "recipe": f"{candidate.recipe_key} + {candidate.recycle_recipe_key}",
+        "cast_machine": machine_key,
+        "machine": f"{machine_key}+recycler",
+        "machine_count": float(cast_machines + recycler_machines),
+        f"{machine_key}_machines": float(cast_machines),
+        "cast_machines": float(cast_machines),  # duplicate generic key
+        "recycler_machines": float(recycler_machines),
+        "yield_per_normal_primary": float(v),
+        "yield_per_normal_primary_pct": float(v) * 100.0,
+        "legendary_primary_per_min": float(legendary_primary_per_min),
+        "normal_primary_in_per_min": float(normal_primary_in_per_min),
+        "total_casts_per_min": float(total_casts_per_min),
+        "total_recycles_per_min": float(total_recycles_per_min),
+        "byproduct_legendary": byproduct_legendary,
+        "fluid_demand": fluid_demand,
+        "configs_per_tier": configs,
+        "machine_quality": machine_quality,
+    }
+
+
+def select_shuffles_greedy(
+    legendary_leaves: dict[str, float],
+    candidates: list[ShuffleCandidate],
+    data: dict,
+    *,
+    module_quality: str,
+    quality_module_tier: int = 3,
+    prod_module_tier: int = 3,
+    research_levels: dict[str, int] | None = None,
+    machine_quality: str = "normal",
+) -> list[dict]:
+    """Per-leaf greedy: activate shuffles that produce the chain's legendary leaves.
+
+    Algorithm:
+      1. For each enabled candidate, identify its valid primaries
+         (intersection of solid_ingredients and solid_recycle_returns; the
+         primary must be both fed in AND returned by the recycler).
+      2. Iterate legendary_leaves in descending demand order.  For each leaf:
+         - Find candidates that produce it (as primary or byproduct).
+         - Pick the (candidate, primary) with the lowest machine count for
+           the demanded throughput.
+         - If the leaf is the chosen candidate's primary, activate the
+           shuffle at the scale needed to cover demand.  If the leaf is a
+           byproduct of an already-activated shuffle, skip (already covered).
+      3. Track cumulative byproduct credits; subtract from remaining
+         leaf demand before scoring subsequent shuffles.
+
+    Returns a list of stage dicts (one per activated shuffle), each as
+    produced by :func:`compute_shuffle_stage`.
+
+    The greedy processes each leaf at most once; cycles are impossible by
+    construction (a chosen shuffle's byproducts can only remove leaves
+    from the queue, never re-add them).
+    """
+    if not legendary_leaves or not candidates:
+        return []
+    research_levels = research_levels or {}
+
+    remaining = dict(legendary_leaves)
+    # Track activated (recipe, primary) → accumulated legendary primary rate
+    # so multiple selections of the same shuffle merge into one stage.
+    activated: dict[tuple[str, str], float] = {}
+    covered_byproducts: dict[str, float] = defaultdict(float)
+
+    # Iterate by descending demand so we make decisions for high-demand
+    # leaves first (their chosen shuffle's byproducts may cover lower-
+    # demand leaves "for free").
+    sorted_leaves = sorted(remaining.items(), key=lambda kv: -kv[1])
+
+    for leaf, _ in sorted_leaves:
+        # Net demand after credits from already-activated shuffles.
+        net_demand = remaining.get(leaf, 0.0) - covered_byproducts.get(leaf, 0.0)
+        if net_demand <= 0:
+            continue  # already covered by a chosen shuffle's byproducts
+
+        best: tuple[float, ShuffleCandidate, str, dict] | None = None
+        for cand in candidates:
+            # Determine valid primaries for this candidate.  A primary must
+            # be both fed in (solid_ingredients) AND returned (recycle).
+            valid_primaries = (
+                set(cand.solid_ingredients) & set(cand.solid_recycle_returns)
+            )
+            if not valid_primaries:
+                # Shuffle can't self-feed any primary — skip.  (This is
+                # rare but possible: e.g. concrete-from-molten-iron has
+                # solid_ingredients=(stone-brick,) and solid_recycle_returns=
+                # (iron-ore, stone-brick); valid primary = stone-brick.)
+                continue
+
+            # Case A: leaf is a valid primary of this candidate.
+            if leaf in valid_primaries:
+                research_prod = _research_prod_for_recipe(
+                    cand.recipe_key, research_levels,
+                )
+                stage = compute_shuffle_stage(
+                    cand, leaf, net_demand, data,
+                    module_quality=module_quality,
+                    quality_module_tier=quality_module_tier,
+                    prod_module_tier=prod_module_tier,
+                    research_prod=research_prod,
+                    machine_quality=machine_quality,
+                )
+                if stage is None:
+                    continue
+                cost = stage["machine_count"]
+                if best is None or cost < best[0]:
+                    best = (cost, cand, leaf, stage)
+
+            # Case B: leaf is a byproduct (in solid_recycle_returns but
+            # not solid_ingredients).  We can still activate the shuffle
+            # to satisfy the leaf — pick a primary that's NOT in
+            # legendary_leaves (so we don't disturb other choices) OR pick
+            # the highest-demand primary candidate (so other leaves
+            # benefit too).
+            elif leaf in cand.solid_recycle_returns:
+                # Pick the primary with highest leaf demand among valid
+                # primaries (so the activated shuffle helps other leaves
+                # too).  If none of the valid primaries are leaves,
+                # picking one means we'd produce extra legendary primary
+                # for no purpose — skip in that case.
+                primary_demand = [
+                    (remaining.get(p, 0.0), p) for p in valid_primaries
+                ]
+                primary_demand.sort(reverse=True)
+                if not primary_demand or primary_demand[0][0] <= 0:
+                    continue
+                primary = primary_demand[0][1]
+                # Scale shuffle to cover THIS leaf's demand via byproduct,
+                # which means producing more legendary primary than needed
+                # (overflow).  Compute scale: byprod_per_legendary_primary
+                # × x = net_demand → x = net_demand / ratio.
+                rec_recipe = _recipe_by_key(data, cand.recycle_recipe_key)
+                if rec_recipe is None:
+                    continue
+                amt_leaf = _recipe_result_amount(rec_recipe, leaf)
+                amt_primary = _recipe_result_amount(rec_recipe, primary)
+                if amt_leaf <= 0 or amt_primary <= 0:
+                    continue
+                ratio = amt_leaf / amt_primary
+                if ratio <= 0:
+                    continue
+                primary_legendary_needed = net_demand / ratio
+                research_prod = _research_prod_for_recipe(
+                    cand.recipe_key, research_levels,
+                )
+                stage = compute_shuffle_stage(
+                    cand, primary, primary_legendary_needed, data,
+                    module_quality=module_quality,
+                    quality_module_tier=quality_module_tier,
+                    prod_module_tier=prod_module_tier,
+                    research_prod=research_prod,
+                    machine_quality=machine_quality,
+                )
+                if stage is None:
+                    continue
+                cost = stage["machine_count"]
+                if best is None or cost < best[0]:
+                    best = (cost, cand, primary, stage)
+
+        if best is None:
+            continue
+        cost, cand, primary, stage = best
+        key = (cand.recipe_key, primary)
+        prior = activated.get(key, 0.0)
+        activated[key] = prior + float(stage["legendary_primary_per_min"])
+        # Track byproduct credits from this stage; remove leaves it covers.
+        for byprod, byrate in stage["byproduct_legendary"].items():
+            covered_byproducts[byprod] += float(byrate)
+        covered_byproducts[primary] += float(stage["legendary_primary_per_min"])
+
+    # Re-emit each activated (recipe, primary) at its accumulated total
+    # so the caller sees one stage per shuffle (not one per leaf).
+    chosen: list[dict] = []
+    cand_by_key = {c.recipe_key: c for c in candidates}
+    for (recipe_key, primary), total_rate in activated.items():
+        cand = cand_by_key[recipe_key]
+        research_prod = _research_prod_for_recipe(recipe_key, research_levels)
+        stage = compute_shuffle_stage(
+            cand, primary, total_rate, data,
+            module_quality=module_quality,
+            quality_module_tier=quality_module_tier,
+            prod_module_tier=prod_module_tier,
+            research_prod=research_prod,
+            machine_quality=machine_quality,
+        )
+        if stage is not None:
+            chosen.append(stage)
+    return chosen
 
 
 def compute_lds_shuffle_stage(
@@ -825,102 +1353,40 @@ def compute_lds_shuffle_stage(
       steel_legendary   = legendary_plastic_per_min * 0.5  / 1.25
     (each legendary plastic-bar exits via the same recycler stream as the
     byproducts — the ratio is fixed by the recipe, independent of modules.)
+
+    Implemented as a thin wrapper around :func:`compute_shuffle_stage` for
+    backwards compatibility with the V2 LDS-only API.  Translates generic
+    keys back to the V2 schema (``foundry_machines``,
+    ``yield_per_normal_plastic``, etc.) so callers don't need to change.
     """
-    if legendary_plastic_per_min <= 0:
+    candidate = _lds_candidate(data)
+    if candidate is None:
         return None
-    cast_recipe = _recipe_by_key(data, "casting-low-density-structure")
-    rec_recipe = _recipe_by_key(data, "low-density-structure-recycling")
-    if cast_recipe is None or rec_recipe is None:
+    g = compute_shuffle_stage(
+        candidate, "plastic-bar", legendary_plastic_per_min, data,
+        module_quality=module_quality,
+        quality_module_tier=quality_module_tier,
+        prod_module_tier=prod_module_tier,
+        research_prod=research_prod,
+        inherent_prod=foundry_inherent_prod,
+        cast_slots=4,
+        cast_speed=foundry_speed,
+        recycler_speed=recycler_speed,
+    )
+    if g is None:
         return None
-
-    plastic_in_per_cast = _recipe_ing_amount(cast_recipe, "plastic-bar")  # 5
-    lds_out_per_cast = _recipe_result_amount(cast_recipe, "low-density-structure")  # 1
-    plastic_back_per_lds = _recipe_result_amount(rec_recipe, "plastic-bar")  # 1.25
-    copper_back_per_lds = _recipe_result_amount(rec_recipe, "copper-plate")  # 5
-    steel_back_per_lds = _recipe_result_amount(rec_recipe, "steel-plate")  # 0.5
-    if plastic_in_per_cast <= 0 or plastic_back_per_lds <= 0:
-        return None
-
-    v, configs = solve_lds_shuffle_loop(
-        data,
-        module_quality,
-        quality_module_tier,
-        prod_module_tier,
-        research_prod,
-        foundry_inherent_prod,
-    )
-    if v <= 0:
-        return None
-
-    # Normal plastic-bar invested per minute to produce target legendary.
-    normal_plastic_in_per_min = legendary_plastic_per_min / v
-
-    # Approximate machine counts: take the tier-0 (normal) module config as
-    # the dominant configuration (most throughput happens at low tiers since
-    # the upgrade ladder narrows toward legendary).  Foundry prod from cp0
-    # determines per-craft throughput; recycler is purely quality-rolling.
-    cfg0 = configs.get(0, {"cast_prod": 0, "cast_quality": 0, "recycle_quality": 4})
-    cp0 = cfg0.get("cast_prod", 0)
-    prod = foundry_inherent_prod + research_prod + _prod_bonus(
-        cp0, prod_module_tier, module_quality,
-    )
-    if prod > 3.0:
-        prod = 3.0
-    items_per_craft = lds_out_per_cast * (1.0 + prod)
-    plastic_back_per_craft = items_per_craft * plastic_back_per_lds  # plastic in 5 -> back
-
-    # Cycle-count multiplier across all tiers: each plastic-bar normal-input
-    # cycles repeatedly until it lands at legendary or escapes via tier-skip.
-    # Effective recirculation ratio per craft is plastic_back_per_craft/plastic_in_per_cast;
-    # total castings ≈ normal_plastic_in_per_min / plastic_in_per_cast / (1 - r).
-    r_per_cycle = plastic_back_per_craft / plastic_in_per_cast
-    if r_per_cycle >= 1.0 - 1e-9:
-        # Self-sustaining loop — per-cycle throughput is unbounded; clamp.
-        # In practice the quality roll always upgrades some fraction out.
-        r_per_cycle = 0.999
-    total_castings_per_min = (
-        normal_plastic_in_per_min / plastic_in_per_cast / (1.0 - r_per_cycle)
-    )
-    cast_time = float(cast_recipe.get("energy_required", 15.0))
-    foundry_machines = total_castings_per_min * cast_time / (foundry_speed * 60.0)
-
-    # Recycler throughput equals casting LDS output rate.
-    total_recycles_per_min = total_castings_per_min * items_per_craft
-    rec_time = float(rec_recipe.get("energy_required", 0.9375))
-    recycler_machines = total_recycles_per_min * rec_time / (recycler_speed * 60.0)
-
-    # Byproduct legendary rates: ratio fixed by recipe (modules don't change
-    # the recipe outputs, only quality distribution).  Each legendary plastic-bar
-    # exits the recycler alongside copper-plate (5/1.25) and steel-plate (0.5/1.25).
-    copper_legendary_per_min = legendary_plastic_per_min * (
-        copper_back_per_lds / plastic_back_per_lds
-    )
-    steel_legendary_per_min = legendary_plastic_per_min * (
-        steel_back_per_lds / plastic_back_per_lds
-    )
-
-    # Fluid demand (quality-transparent, but caller may want to display it).
-    molten_iron_per_cast = _recipe_ing_amount(cast_recipe, "molten-iron")
-    molten_copper_per_cast = _recipe_ing_amount(cast_recipe, "molten-copper")
-    fluid_demand = {
-        "molten-iron": molten_iron_per_cast * total_castings_per_min,
-        "molten-copper": molten_copper_per_cast * total_castings_per_min,
-    }
-
+    # Translate generic schema → V2 LDS schema.
     return {
-        "yield_per_normal_plastic": v,
-        "legendary_plastic_per_min": legendary_plastic_per_min,
-        "normal_plastic_in_per_min": normal_plastic_in_per_min,
-        "total_castings_per_min": total_castings_per_min,
-        "total_recycles_per_min": total_recycles_per_min,
-        "foundry_machines": foundry_machines,
-        "recycler_machines": recycler_machines,
-        "byproduct_legendary": {
-            "copper-plate": copper_legendary_per_min,
-            "steel-plate": steel_legendary_per_min,
-        },
-        "fluid_demand": fluid_demand,
-        "configs_per_tier": configs,
+        "yield_per_normal_plastic": g["yield_per_normal_primary"],
+        "legendary_plastic_per_min": g["legendary_primary_per_min"],
+        "normal_plastic_in_per_min": g["normal_primary_in_per_min"],
+        "total_castings_per_min": g["total_casts_per_min"],
+        "total_recycles_per_min": g["total_recycles_per_min"],
+        "foundry_machines": g["cast_machines"],
+        "recycler_machines": g["recycler_machines"],
+        "byproduct_legendary": dict(g["byproduct_legendary"]),
+        "fluid_demand": dict(g["fluid_demand"]),
+        "configs_per_tier": g["configs_per_tier"],
     }
 
 
@@ -1023,8 +1489,16 @@ def _stage_power_kw(stage: dict, power_w: dict[str, int]) -> float:
         return int(power_w.get(machine) or 0)
 
     if role == "cross-item-shuffle":
+        # Generic shape: stage["cast_machine"] is the cast-side machine
+        # (foundry, electromagnetic-plant, assembling-machine-3, …).  Fall
+        # back to "foundry" for the V2 LDS-only shape that didn't carry
+        # cast_machine.
+        cast_machine = stage.get("cast_machine", "foundry")
+        cast_machines = float(
+            stage.get("cast_machines", stage.get("foundry_machines", 0))
+        )
         return (
-            _w("foundry") * float(stage.get("foundry_machines", 0))
+            _w(cast_machine) * cast_machines
             + _w("recycler") * float(stage.get("recycler_machines", 0))
         ) / 1000.0
     if role == "self-recycle-target":
@@ -1044,7 +1518,7 @@ def _hot_spot_suggestions(
     by_role: dict[str, dict[str, float]],
     *,
     threshold_pct: float = 50.0,
-    enable_lds_shuffle: bool = False,
+    active_shuffles: set[str] | frozenset[str] | None = None,
     assembly_modules: bool = False,
     has_plastic: bool = False,
     machine_quality: str = "normal",
@@ -1060,15 +1534,20 @@ def _hot_spot_suggestions(
     """
     suggestions: list[str] = []
     at_max_quality = module_quality == "legendary" and quality_module_tier == 3
+    active_shuffles = active_shuffles or frozenset()
+    lds_active = (
+        "all" in active_shuffles or "low-density-structure" in active_shuffles
+    )
     for role, bucket in by_role.items():
         pct = float(bucket.get("machines_pct", 0.0))
         if pct < threshold_pct:
             continue
         if role == "asteroid-reprocessing":
-            if has_plastic and not enable_lds_shuffle:
+            if has_plastic and not lds_active:
                 suggestions.append(
                     f"hot spot: asteroid-reprocessing is {pct:.0f}% of machines — "
-                    f"try --enable-lds-shuffle (offloads plastic-bar from carbonic chunks)"
+                    f"try --enable-shuffle low-density-structure (offloads "
+                    f"plastic-bar from carbonic chunks)"
                 )
             elif not at_max_quality:
                 suggestions.append(
@@ -1079,8 +1558,8 @@ def _hot_spot_suggestions(
             # else: already at legendary T3 — no actionable suggestion.
         elif role == "mined-raw-self-recycle":
             tips: list[str] = []
-            if has_plastic and not enable_lds_shuffle:
-                tips.append("--enable-lds-shuffle (cuts coal demand)")
+            if has_plastic and not lds_active:
+                tips.append("--enable-shuffle low-density-structure (cuts coal demand)")
             if "vulcanus" not in planets:
                 tips.append("--planets vulcanus (lava casting bypasses ore mining for iron/copper)")
             if not tips:
@@ -1820,7 +2299,7 @@ def _plan_self_recycle_target(
     # Hot-spot suggestions for self-recycle target plan.
     notes.extend(_hot_spot_suggestions(
         by_role,
-        enable_lds_shuffle=False,
+        active_shuffles=None,
         assembly_modules=assembly_modules,
         has_plastic=False,
         machine_quality=machine_quality,
@@ -1865,7 +2344,7 @@ def plan(
     assembler_level: int = 3,
     quality_module_tier: int = 3,
     planets: list[str] | tuple[str, ...] | frozenset[str] | None = None,
-    enable_lds_shuffle: bool = False,
+    active_shuffles: set[str] | frozenset[str] | None = None,
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
@@ -1926,7 +2405,7 @@ def plan(
         no_asteroids=no_asteroids,
     )
 
-    # ---- LDS shuffle wiring (V3 partial: replace plastic-bar leg) ----
+    # ---- Generic shuffle wiring (V3) ----
     shuffle_stages: list[dict] = []
     normal_chain_stages: list[dict] = []
     normal_solid_input: dict[str, float] = {}
@@ -1935,79 +2414,128 @@ def plan(
     shuffle_byproduct_credited: dict[str, float] = {}
     shuffle_byproduct_overflow: dict[str, float] = {}
     extra_notes: list[str] = []
-    if enable_lds_shuffle:
-        plastic_stage = next(
-            (s for s in stages if s.get("product") == "plastic-bar"), None,
-        )
-        if plastic_stage is not None:
-            leg_plastic = float(plastic_stage["rate_per_min"])
-            research_prod_lds = _research_prod_for_recipe(
-                "casting-low-density-structure", research_levels,
+    if active_shuffles:
+        # Resolve which candidates the user enabled.  Sentinel "all" picks
+        # every candidate produced by enumeration.
+        all_candidates = enumerate_shuffle_candidates(data)
+        if "all" in active_shuffles:
+            enabled_candidates = list(all_candidates)
+        else:
+            enabled_candidates = [
+                c for c in all_candidates if c.output_item in active_shuffles
+            ]
+            unknown_shuffles = (
+                set(active_shuffles)
+                - {c.output_item for c in all_candidates}
+                - {"all"}
             )
-            shuffle = compute_lds_shuffle_stage(
-                leg_plastic, data,
-                module_quality=module_quality,
-                quality_module_tier=quality_module_tier,
-                prod_module_tier=3,
-                research_prod=research_prod_lds,
-            )
-            if shuffle is not None:
-                normal_in = float(shuffle["normal_plastic_in_per_min"])
+            if unknown_shuffles:
+                raise ValueError(
+                    f"ERROR: unknown shuffle name(s) {sorted(unknown_shuffles)} "
+                    f"in --enable-shuffle; valid output_items: "
+                    f"{sorted(c.output_item for c in all_candidates)}"
+                )
 
-                # Re-walk main chain treating plastic-bar as supplied externally.
+        # Identify legendary solid demands from the initial walker pass.
+        # Includes assembly stage products (each demanded at rate_per_min)
+        # and solid raws still in raw_demand.  The TARGET item is excluded
+        # from candidate leaves — shuffling the target away would defeat
+        # the purpose of the request (e.g. quantum-processor's recycle
+        # produces processing-unit, but using that shuffle for a
+        # processing-unit target would just push the problem upstream).
+        legendary_solid_demand: dict[str, float] = {}
+        for st in stages:
+            p = st.get("product")
+            if p and p not in fluids and p != item_key:
+                legendary_solid_demand[p] = (
+                    legendary_solid_demand.get(p, 0.0)
+                    + float(st.get("rate_per_min", 0.0))
+                )
+        for raw, dem in raw_demand.items():
+            if dem > 0 and raw not in fluids and raw != item_key:
+                legendary_solid_demand[raw] = (
+                    legendary_solid_demand.get(raw, 0.0) + float(dem)
+                )
+
+        # Greedy selection: for each demand item, pick the best shuffle
+        # candidate that produces it (as primary or byproduct).
+        chosen_stages = select_shuffles_greedy(
+            legendary_solid_demand, enabled_candidates, data,
+            module_quality=module_quality,
+            quality_module_tier=quality_module_tier,
+            prod_module_tier=prod_module_tier,
+            research_levels=research_levels,
+            machine_quality=machine_quality,
+        )
+
+        if chosen_stages:
+            # Aggregate primaries (extra_raws) and byproduct credits across
+            # all chosen shuffles.
+            primaries = frozenset(s["primary"] for s in chosen_stages)
+            aggregated_byproducts: dict[str, float] = defaultdict(float)
+            for s in chosen_stages:
+                for byprod, byrate in s["byproduct_legendary"].items():
+                    aggregated_byproducts[byprod] += float(byrate)
+
+            # Re-walk main chain treating each primary as supplied externally.
+            stages, raw_demand = walk_recipe_tree(
+                item_key, rate, data, research_levels, assembler_level,
+                fluids, planet_props, planets_fs,
+                extra_raws=primaries,
+                assembly_modules=assembly_modules,
+                assembly_module_quality=module_quality,
+                prod_module_tier=prod_module_tier,
+                machine_quality=machine_quality,
+                no_asteroids=no_asteroids,
+            )
+            for p in primaries:
+                raw_demand.pop(p, None)
+
+            # Cap byproduct credits at observed demand; flag surplus.
+            stage_demand = {s.get("product"): s["rate_per_min"] for s in stages}
+            capped_credits: dict[str, float] = {}
+            overflow: dict[str, float] = {}
+            for byprod, byrate in aggregated_byproducts.items():
+                have = float(
+                    stage_demand.get(byprod, raw_demand.get(byprod, 0.0))
+                )
+                cap = min(float(byrate), have)
+                capped_credits[byprod] = cap
+                surplus = float(byrate) - cap
+                if surplus > 1e-6:
+                    overflow[byprod] = surplus
+
+            if any(v > 0 for v in capped_credits.values()):
+                # Re-walk with credits subtracted from initial demand.
                 stages, raw_demand = walk_recipe_tree(
                     item_key, rate, data, research_levels, assembler_level,
                     fluids, planet_props, planets_fs,
-                    extra_raws=frozenset({"plastic-bar"}),
+                    extra_raws=primaries,
+                    byproduct_credits=capped_credits,
                     assembly_modules=assembly_modules,
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
                 )
-                raw_demand.pop("plastic-bar", None)
+                for p in primaries:
+                    raw_demand.pop(p, None)
 
-                # Cap byproduct credits at observed demand (no negative inputs).
-                # Demand for byproducts is the rate_per_min on their stages, OR
-                # raw_demand if the byproduct shows up as a leaf.
-                stage_demand = {s.get("product"): s["rate_per_min"] for s in stages}
-                capped_credits: dict[str, float] = {}
-                overflow: dict[str, float] = {}
-                for byprod, byprod_rate in shuffle["byproduct_legendary"].items():
-                    have = float(
-                        stage_demand.get(byprod, raw_demand.get(byprod, 0.0))
-                    )
-                    cap = min(float(byprod_rate), have)
-                    capped_credits[byprod] = cap
-                    surplus = float(byprod_rate) - cap
-                    if surplus > 1e-6:
-                        overflow[byprod] = surplus
+            for byprod, surplus in overflow.items():
+                extra_notes.append(
+                    f"shuffle byproduct surplus: {surplus:.1f} legendary "
+                    f"{byprod}/min unused (no downstream demand)"
+                )
 
-                if any(v > 0 for v in capped_credits.values()):
-                    # Re-walk with credits subtracted from initial demand.
-                    stages, raw_demand = walk_recipe_tree(
-                        item_key, rate, data, research_levels, assembler_level,
-                        fluids, planet_props, planets_fs,
-                        extra_raws=frozenset({"plastic-bar"}),
-                        byproduct_credits=capped_credits,
-                        assembly_modules=assembly_modules,
-                        assembly_module_quality=module_quality,
-                        prod_module_tier=prod_module_tier,
-                        machine_quality=machine_quality,
-                        no_asteroids=no_asteroids,
-                    )
-                    raw_demand.pop("plastic-bar", None)
-
-                for byprod, surplus in overflow.items():
-                    extra_notes.append(
-                        f"shuffle byproduct surplus: {surplus:.1f} legendary "
-                        f"{byprod}/min unused (no downstream demand)"
-                    )
-
-                # Walk the normal-quality plastic-bar leg separately, then route
-                # its raws into the normal_input bucket (no quality loop needed).
+            # Walk the normal-quality leg for each primary separately,
+            # then route its raws into the normal_input bucket.
+            for s in chosen_stages:
+                primary = s["primary"]
+                normal_in = float(s["normal_primary_in_per_min"])
+                if normal_in <= 0:
+                    continue
                 n_stages, n_raws = walk_recipe_tree(
-                    "plastic-bar", normal_in, data, research_levels, assembler_level,
+                    primary, normal_in, data, research_levels, assembler_level,
                     fluids, planet_props, planets_fs,
                     assembly_modules=assembly_modules,
                     assembly_module_quality=module_quality,
@@ -2017,37 +2545,24 @@ def plan(
                 )
                 for st in n_stages:
                     st["normal_quality_chain"] = True
-                normal_chain_stages = n_stages
+                normal_chain_stages.extend(n_stages)
                 for raw, amt in n_raws.items():
                     if raw in fluids:
                         normal_fluid_input[raw] = normal_fluid_input.get(raw, 0.0) + amt
                     else:
                         normal_solid_input[raw] = normal_solid_input.get(raw, 0.0) + amt
 
-                shuffle_byproduct_legendary = dict(shuffle["byproduct_legendary"])
-                shuffle_byproduct_credited = dict(capped_credits)
-                shuffle_byproduct_overflow = dict(overflow)
-                shuffle_stages.append({
-                    "role": "cross-item-shuffle",
-                    "shuffle": "lds",
-                    "recipe": "casting-low-density-structure + low-density-structure-recycling",
-                    "machine": "foundry+recycler",
-                    "machine_count": (
-                        float(shuffle["foundry_machines"])
-                        + float(shuffle["recycler_machines"])
-                    ),
-                    "foundry_machines": float(shuffle["foundry_machines"]),
-                    "recycler_machines": float(shuffle["recycler_machines"]),
-                    "yield_per_normal_plastic_pct": (
-                        float(shuffle["yield_per_normal_plastic"]) * 100.0
-                    ),
-                    "legendary_plastic_per_min": float(shuffle["legendary_plastic_per_min"]),
-                    "normal_plastic_in_per_min": normal_in,
-                    "byproduct_legendary": dict(shuffle["byproduct_legendary"]),
-                    "byproduct_credited": dict(capped_credits),
-                    "byproduct_overflow": dict(overflow),
-                    "fluid_demand": dict(shuffle["fluid_demand"]),
-                })
+            # Build per-shuffle stage dict for output.  Annotate each with
+            # the credits it contributed and any overflow it produced.
+            shuffle_byproduct_legendary = dict(aggregated_byproducts)
+            shuffle_byproduct_credited = dict(capped_credits)
+            shuffle_byproduct_overflow = dict(overflow)
+            for s in chosen_stages:
+                # Per-stage credit/overflow split is approximate (overflow
+                # is global, not per-stage) — annotate with the global maps.
+                s["byproduct_credited"] = dict(capped_credits)
+                s["byproduct_overflow"] = dict(overflow)
+                shuffle_stages.append(s)
 
     # Group raw demand by chunk type.  Each chunk is produced by one crushing recipe
     # (e.g. metallic-asteroid-crushing -> iron-ore+copper-ore).  We scale to satisfy
@@ -2253,7 +2768,7 @@ def plan(
 
     # Stage-cost summary: aggregate machine_count + power_kw by stage role.
     # Helps the user see where machine count is concentrated (e.g. 80 % in
-    # asteroid-reprocessing → reach for --enable-lds-shuffle, etc.).
+    # asteroid-reprocessing → reach for --enable-shuffle low-density-structure, etc.).
     by_role: dict[str, dict[str, float]] = {}
     for st in all_stages_for_power:
         role = st.get("role", "unknown")
@@ -2283,7 +2798,7 @@ def plan(
     )
     notes.extend(_hot_spot_suggestions(
         by_role,
-        enable_lds_shuffle=enable_lds_shuffle,
+        active_shuffles=active_shuffles,
         assembly_modules=assembly_modules,
         has_plastic=has_plastic,
         machine_quality=machine_quality,
@@ -2415,14 +2930,34 @@ def format_human(out: dict) -> str:
                 f"{_humanize(k)}={v:.1f}/min"
                 for k, v in st.get("byproduct_legendary", {}).items()
             )
+            # Support both V2 LDS-only shape (foundry_machines/legendary_
+            # plastic_per_min/...) and V3 generic shape (cast_machines/
+            # legendary_primary_per_min/...).
+            primary = st.get("primary", "plastic-bar")
+            normal_in = st.get(
+                "normal_primary_in_per_min",
+                st.get("normal_plastic_in_per_min", 0.0),
+            )
+            legendary_out = st.get(
+                "legendary_primary_per_min",
+                st.get("legendary_plastic_per_min", 0.0),
+            )
+            cast_machines = st.get(
+                "cast_machines", st.get("foundry_machines", 0.0),
+            )
+            cast_machine_label = _humanize(st.get("cast_machine", "foundry"))
+            yield_pct = st.get(
+                "yield_per_normal_primary_pct",
+                st.get("yield_per_normal_plastic_pct", 0.0),
+            )
             L.append(
                 f"  [shuffle]      {st.get('shuffle','?')}: "
-                f"{st['normal_plastic_in_per_min']:.2f} normal plastic-bar in -> "
-                f"{st['legendary_plastic_per_min']:.2f} legendary plastic-bar out + "
+                f"{normal_in:.2f} normal {_humanize(primary)} in -> "
+                f"{legendary_out:.2f} legendary {_humanize(primary)} out + "
                 f"byproducts [{byp}] "
-                f"({st['foundry_machines']:.1f} foundries + "
-                f"{st['recycler_machines']:.1f} recyclers, "
-                f"yield {st['yield_per_normal_plastic_pct']:.3f}%)"
+                f"({cast_machines:.1f} {cast_machine_label} + "
+                f"{st.get('recycler_machines', 0.0):.1f} recyclers, "
+                f"yield {yield_pct:.3f}%)"
             )
         elif role == "mined-raw-self-recycle":
             L.append(
@@ -2561,13 +3096,25 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--enable-lds-shuffle", action="store_true",
+        "--enable-shuffle", action="append", default=[], metavar="OUTPUT_ITEM",
         help=(
-            "Replace the legendary plastic-bar chain with the LDS shuffle "
-            "(foundry-cast LDS + recycle for legendary plastic + copper/steel "
-            "byproducts). Improves throughput when plastic-bar is in the "
-            "production tree, especially with high plastic-bar / LDS / "
-            "low-density-structure-recycling productivity research."
+            "Enable a cross-item shuffle by output-item key (repeatable). "
+            "E.g. --enable-shuffle low-density-structure replaces the "
+            "legendary plastic-bar chain with the LDS shuffle (foundry-cast "
+            "LDS + recycle, with copper-plate/steel-plate byproducts).  Run "
+            "with no targets first to see what's in the chain; the planner "
+            "discovers candidates dynamically from the dataset (16 in stock "
+            "Space Age).  Common picks: low-density-structure, "
+            "advanced-circuit, electronic-circuit, engine-unit, battery."
+        ),
+    )
+    p.add_argument(
+        "--enable-shuffles", default=None, choices=["all"],
+        help=(
+            "Shortcut: enable EVERY shuffle candidate.  The greedy selector "
+            "activates only those whose recycle outputs overlap with the "
+            "target chain's legendary leaves.  Mutually exclusive with "
+            "--enable-shuffle."
         ),
     )
     p.add_argument(
@@ -2590,6 +3137,19 @@ def main() -> None:
     data = cli.load_data("nauvis")
     research = _parse_research(args.research)
     planets_list = [p.strip() for p in args.planets.split(",") if p.strip()]
+
+    # Build the active_shuffles set: explicit names + (optional) "all" sentinel.
+    active_shuffles: set[str] | None = None
+    if args.enable_shuffles == "all":
+        if args.enable_shuffle:
+            sys.exit(
+                "ERROR: --enable-shuffles all is mutually exclusive with "
+                "--enable-shuffle (specify one or the other)."
+            )
+        active_shuffles = {"all"}
+    elif args.enable_shuffle:
+        active_shuffles = set(args.enable_shuffle)
+
     try:
         out = plan(
             args.item, args.rate, data,
@@ -2598,7 +3158,7 @@ def main() -> None:
             assembler_level=args.assembler_level,
             quality_module_tier=args.quality_module_tier,
             planets=planets_list,
-            enable_lds_shuffle=args.enable_lds_shuffle,
+            active_shuffles=active_shuffles,
             assembly_modules=args.assembly_modules,
             prod_module_tier=args.prod_module_tier,
             machine_quality=args.machine_quality,

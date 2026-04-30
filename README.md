@@ -30,7 +30,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (198 tests, stdlib only)
   quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
-  test_quality_planner.py   # unittest suite (142 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (164 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -175,13 +175,17 @@ python dev/quality_planner.py --item processing-unit --rate 60 \
 python dev/quality_planner.py --item artillery-shell --rate 60 \
     --planets nauvis,vulcanus
 
-# V3-partial: LDS shuffle replaces plastic-bar leg with foundry-cast LDS +
-# recycle (legendary plastic + copper/steel byproducts).  Cuts mined-coal
-# self-recycle entirely; benefits scale with plastic-bar / LDS productivity.
+# V3 item 1: Generic cross-item shuffle enumeration.  --enable-shuffle NAME
+# (repeatable) activates a specific shuffle by output-item key; --enable-shuffles
+# all activates every applicable shuffle (greedy selection per leaf).  16
+# candidates discovered in stock Space Age (LDS, advanced-circuit, engine-unit,
+# battery, processing-unit, ...).  Replaces the old --enable-lds-shuffle flag.
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis --enable-lds-shuffle \
+    --planets nauvis --enable-shuffle low-density-structure \
     --research low-density-structure-productivity=10 \
     --research plastic-bar-productivity=10
+python dev/quality_planner.py --item processing-unit --rate 60 \
+    --planets nauvis --assembly-modules --enable-shuffles all
 
 # V3 item 4 partial: Gleba bio-raws (yumako, jellynut, pentapod-egg)
 # via self-recycle. Spoilage timing is NOT modelled yet — long quality
