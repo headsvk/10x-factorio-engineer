@@ -1650,16 +1650,56 @@ class TestEnableShufflesAll(unittest.TestCase):
     """V3 item 1: --enable-shuffles all sentinel activates every applicable
     shuffle; target item is excluded as a primary."""
 
-    def test_all_picks_lds_for_processing_unit_chain(self):
+    def test_all_emits_baseline_fallback_note(self):
+        # At zero research with --assembly-modules, the chemistry chain is
+        # cheap enough that no shuffle helps.  The cost gate rejects every
+        # shuffle and emits a note explaining the fallback.
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             active_shuffles={"all"},
         )
         shuffles = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
-        # LDS shuffle should be among the activated set (plastic is in chain).
-        shuffle_names = {s.get("shuffle") for s in shuffles}
-        self.assertIn("low-density-structure", shuffle_names)
+        # No shuffle activated: cost gate fell back to baseline.
+        self.assertEqual(shuffles, [])
+        # The fallback note is present.
+        notes = out.get("notes", [])
+        self.assertTrue(
+            any("baseline" in n and "kept baseline" in n for n in notes),
+            f"expected baseline fallback note; got {notes}",
+        )
+
+    def test_all_skips_worse_than_baseline_at_zero_research(self):
+        # Cost gate rejects shuffles that cost more machines than the default
+        # asteroid path.  At zero research with --assembly-modules, LDS
+        # shuffle activates ~120 machines for the same plastic-bar that
+        # the assembly chain produces in ~3 machines — gate rejects.
+        out_with = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+            active_shuffles={"all"},
+        )
+        out_without = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+        )
+        # --enable-shuffles all should NEVER make total worse than baseline.
+        self.assertLessEqual(
+            out_with["total_machine_count"],
+            out_without["total_machine_count"] + 1e-6,
+        )
+
+    def test_explicit_flag_bypasses_cost_gate(self):
+        # --enable-shuffle X (explicit user opt-in) honours the user's choice
+        # even if the shuffle is more expensive than the asteroid baseline.
+        out_lds = qp.plan(
+            "processing-unit", 60, _data(),
+            planets=["nauvis"], assembly_modules=True,
+            active_shuffles={"low-density-structure"},
+        )
+        shuffles = [s for s in out_lds["stages"] if s.get("role") == "cross-item-shuffle"]
+        self.assertEqual(len(shuffles), 1)
+        self.assertEqual(shuffles[0]["shuffle"], "low-density-structure")
 
     def test_all_target_excluded_from_primaries(self):
         # Quantum-processor shuffle would pick processing-unit as a primary,

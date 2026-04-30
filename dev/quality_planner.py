@@ -1152,6 +1152,83 @@ def compute_shuffle_stage(
     }
 
 
+def _baseline_cost_for_leaf(
+    leaf: str,
+    demand: float,
+    data: dict,
+    *,
+    module_quality: str,
+    quality_module_tier: int = 3,
+    machine_quality: str = "normal",
+    chain_stages: list[dict] | None = None,
+) -> float:
+    """Estimate machines needed to produce ``demand`` legendary ``leaf`` per
+    minute via the default (non-shuffle) path.
+
+    Used by :func:`select_shuffles_greedy` to reject shuffles that are
+    objectively worse than the baseline.
+
+    For asteroid raws (RAW_TO_CHUNK): cost ≈ asteroid-reprocessing crusher
+    count for the demand at the chunk's quality yield.
+    For mined raws (MINED_RAW_PLANETS): cost ≈ recycler self-loop count.
+    For assembly-stage products: cost ≈ that stage's existing
+    ``machine_count`` (already computed by the walker).
+
+    Returns 0.0 (no baseline) if the leaf isn't recognised — the greedy
+    treats this as "accept any positive shuffle" since we can't compare.
+    """
+    if demand <= 0:
+        return 0.0
+    qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+
+    # Asteroid path: leaf → chunk → reprocessing crushers
+    if leaf in RAW_TO_CHUNK:
+        chunk = RAW_TO_CHUNK[leaf]
+        v, _ = solve_asteroid_reprocessing_loop(
+            chunk, data, module_quality, quality_module_tier,
+        )
+        if v <= 0:
+            return float("inf")
+        normal_input = demand / v
+        # Per-cycle retention for asteroid reprocessing is ~0.8.
+        rep_recipe = _recipe_by_key(data, ASTEROID_REPROCESSING_RECIPES.get(chunk, ""))
+        retention = (
+            _recipe_result_amount(rep_recipe, chunk) if rep_recipe else 0.8
+        )
+        total_crafts = normal_input / max(1.0 - retention, 1e-6)
+        return total_crafts * 2.0 / (CRUSHER_SPEED * qm_speed_mult * 60.0)
+
+    # Mined raw: recycler self-loop
+    if leaf in MINED_RAW_PLANETS:
+        v, _ = solve_mined_raw_self_recycle_loop(
+            leaf, data, module_quality, quality_module_tier,
+        )
+        if v <= 0:
+            return float("inf")
+        normal_input = demand / v
+        rec_recipe = _recipe_by_key(data, f"{leaf}-recycling")
+        retention = (
+            _recipe_result_amount(rec_recipe, leaf) if rec_recipe else 0.25
+        )
+        total_crafts = normal_input / max(1.0 - retention, 1e-6)
+        rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
+        return total_crafts * rec_time / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+
+    # Assembly product: use the existing chain's machine_count for that stage.
+    if chain_stages:
+        for st in chain_stages:
+            if st.get("product") == leaf:
+                stage_rate = float(st.get("rate_per_min", 0.0))
+                stage_machines = float(st.get("machine_count", 0.0))
+                if stage_rate > 0:
+                    # Pro-rate the stage's machines to the demand portion.
+                    return stage_machines * (demand / stage_rate)
+                return stage_machines
+
+    # Unknown — let any positive shuffle through.
+    return 0.0
+
+
 def select_shuffles_greedy(
     legendary_leaves: dict[str, float],
     candidates: list[ShuffleCandidate],
@@ -1294,6 +1371,7 @@ def select_shuffles_greedy(
         if best is None:
             continue
         cost, cand, primary, stage = best
+
         key = (cand.recipe_key, primary)
         prior = activated.get(key, 0.0)
         activated[key] = prior + float(stage["legendary_primary_per_min"])
@@ -2438,21 +2516,23 @@ def plan(
 
         # Identify legendary solid demands from the initial walker pass.
         # Includes assembly stage products (each demanded at rate_per_min)
-        # and solid raws still in raw_demand.  The TARGET item is excluded
-        # from candidate leaves — shuffling the target away would defeat
-        # the purpose of the request (e.g. quantum-processor's recycle
-        # produces processing-unit, but using that shuffle for a
-        # processing-unit target would just push the problem upstream).
+        # and solid raws still in raw_demand.
+        #
+        # The top-level target IS included — a shuffle CAN be a valid
+        # production path for the target itself (e.g. LDS shuffle for a
+        # plastic-bar target).  The cost gate (under --enable-shuffles all)
+        # rejects shuffles that don't actually help, including weird cases
+        # like quantum-processor shuffle for a processing-unit target.
         legendary_solid_demand: dict[str, float] = {}
         for st in stages:
             p = st.get("product")
-            if p and p not in fluids and p != item_key:
+            if p and p not in fluids:
                 legendary_solid_demand[p] = (
                     legendary_solid_demand.get(p, 0.0)
                     + float(st.get("rate_per_min", 0.0))
                 )
         for raw, dem in raw_demand.items():
-            if dem > 0 and raw not in fluids and raw != item_key:
+            if dem > 0 and raw not in fluids:
                 legendary_solid_demand[raw] = (
                     legendary_solid_demand.get(raw, 0.0) + float(dem)
                 )
@@ -2840,6 +2920,34 @@ def plan(
         "planets": sorted(planets_fs),
         "notes": notes,
     }
+
+    # Cost gate for `--enable-shuffles all`: when the planner is auto-
+    # selecting shuffles, compare against the no-shuffle baseline and pick
+    # whichever is cheaper.  Explicit `--enable-shuffle NAME` honours the
+    # user's choice unconditionally.
+    if active_shuffles and "all" in active_shuffles and shuffle_stages:
+        baseline = plan(
+            item_key, rate, data,
+            module_quality=module_quality,
+            research_levels=research_levels,
+            assembler_level=assembler_level,
+            quality_module_tier=quality_module_tier,
+            planets=planets_fs,
+            active_shuffles=None,
+            assembly_modules=assembly_modules,
+            prod_module_tier=prod_module_tier,
+            machine_quality=machine_quality,
+            no_asteroids=no_asteroids,
+        )
+        if baseline["total_machine_count"] < total_machines:
+            baseline.setdefault("notes", []).append(
+                f"--enable-shuffles all: greedy proposed shuffles totalling "
+                f"{total_machines:.1f} machines, but no-shuffle baseline is "
+                f"{baseline['total_machine_count']:.1f} machines — kept baseline. "
+                f"Use --enable-shuffle NAME to override."
+            )
+            return baseline
+
     return out
 
 
