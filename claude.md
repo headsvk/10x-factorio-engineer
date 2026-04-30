@@ -122,7 +122,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/test_cli.py` | `unittest` suite (198 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (142 tests) for quality_planner |
-| `dev/quality_planner_v1.md` | Spec document for the V1 planner — scope, algorithm, deferred features |
+| `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
 | `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki/crawl.py crawl` (~15 min) |
