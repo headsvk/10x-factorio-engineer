@@ -216,14 +216,14 @@ class TestFluidTransparency(unittest.TestCase):
 class TestAssemblyPropagation(unittest.TestCase):
 
     def test_electronic_circuit_all_legendary(self):
-        out = qp.plan("electronic-circuit", 60, _data())
+        out = qp.plan("electronic-circuit", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         # final stage must be assembly with all-legendary inputs flag True
         final = out["stages"][-1]
         self.assertEqual(final["recipe"], "electronic-circuit")
         self.assertTrue(final.get("inputs_all_legendary"))
 
     def test_iron_gear_wheel_chain(self):
-        out = qp.plan("iron-gear-wheel", 60, _data())
+        out = qp.plan("iron-gear-wheel", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("metallic-asteroid-reprocessing", recipes)
         self.assertIn("advanced-metallic-asteroid-crushing", recipes)
@@ -250,10 +250,11 @@ class TestResearchProd(unittest.TestCase):
         self.assertEqual(b, 0.0)
 
     def test_research_reduces_machine_count(self):
-        out_no = qp.plan("electronic-circuit", 60, _data(), research_levels={})
+        out_no = qp.plan("electronic-circuit", 60, _data(), research_levels={}, tech_state=qp.ALL_TECH_UNLOCKED)
         out_hi = qp.plan(
             "electronic-circuit", 60, _data(),
             research_levels={"asteroid-productivity": 10},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # With asteroid prod, crushing+reprocessing loops produce more legendary chunks
         # per raw input -> fewer raw chunks required.
@@ -271,7 +272,7 @@ class TestFailFast(unittest.TestCase):
 
     def test_tungsten_plate_errors(self):
         with self.assertRaises(ValueError) as cm:
-            qp.plan("tungsten-plate", 60, _data())
+            qp.plan("tungsten-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertIn("vulcanus", str(cm.exception))
 
     # NOTE: holmium-plate, superconductor, tungsten-carbide were previously
@@ -281,7 +282,7 @@ class TestFailFast(unittest.TestCase):
 
     def test_plastic_bar_errors_no_oil(self):
         with self.assertRaises(ValueError) as cm:
-            qp.plan("plastic-bar", 60, _data())
+            qp.plan("plastic-bar", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         # plastic-bar needs oil chain → blocked without --planets
         msg = str(cm.exception)
         self.assertIn("plastic-bar", msg)
@@ -290,14 +291,14 @@ class TestFailFast(unittest.TestCase):
     def test_processing_unit_errors_sulfuric_acid(self):
         # processing unit needs sulfuric-acid -> sulfur -> petroleum-gas (no crude-oil)
         with self.assertRaises(ValueError) as cm:
-            qp.plan("processing-unit", 60, _data())
+            qp.plan("processing-unit", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         msg = str(cm.exception)
         self.assertIn("--planets", msg)
 
     def test_artillery_shell_errors(self):
         # artillery shell needs tungsten-plate (Vulcanus) + explosives (oil)
         with self.assertRaises(ValueError):
-            qp.plan("artillery-shell", 60, _data())
+            qp.plan("artillery-shell", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +308,7 @@ class TestFailFast(unittest.TestCase):
 class TestEndToEnd(unittest.TestCase):
 
     def test_electronic_circuit_60_per_min(self):
-        out = qp.plan("electronic-circuit", 60, _data())
+        out = qp.plan("electronic-circuit", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertEqual(out["target"]["item"], "electronic-circuit")
         self.assertEqual(out["target"]["rate_per_min"], 60)
         self.assertEqual(out["target"]["tier"], "legendary")
@@ -318,7 +319,7 @@ class TestEndToEnd(unittest.TestCase):
         self.assertLess(out["total_machine_count"], 10000.0)
 
     def test_iron_plate_simple_chain(self):
-        out = qp.plan("iron-plate", 60, _data())
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         # iron-plate via casting-iron (foundry)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("casting-iron", recipes)
@@ -326,26 +327,26 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("metallic-asteroid-reprocessing", recipes)
 
     def test_copper_plate_chain(self):
-        out = qp.plan("copper-plate", 60, _data())
+        out = qp.plan("copper-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("casting-copper", recipes)
 
     def test_json_serializable(self):
-        out = qp.plan("iron-plate", 60, _data())
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         # Must be JSON-serializable (dashboard-compatible)
         j = json.dumps(out, default=str)
         self.assertIn("target", j)
 
     def test_human_format_runs(self):
-        out = qp.plan("iron-plate", 60, _data())
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
         self.assertIn("Target:", text)
         self.assertIn("Asteroid Input", text)
         self.assertIn("Production Stages", text)
 
     def test_higher_rate_scales_linearly(self):
-        a = qp.plan("iron-plate", 60, _data())
-        b = qp.plan("iron-plate", 120, _data())
+        a = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        b = qp.plan("iron-plate", 120, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         # Asteroid input should roughly double
         ai_a = sum(a["asteroid_input"].values())
         ai_b = sum(b["asteroid_input"].values())
@@ -409,8 +410,8 @@ class TestPlanetsFlag(unittest.TestCase):
 
     def test_empty_planets_same_as_v1(self):
         # Without --planets, V1 items still work identically.
-        out_v1 = qp.plan("iron-plate", 60, _data())
-        out_v2 = qp.plan("iron-plate", 60, _data(), planets=[])
+        out_v1 = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        out_v2 = qp.plan("iron-plate", 60, _data(), planets=[], tech_state=qp.ALL_TECH_UNLOCKED)
         # Same asteroid input (allow tiny float jitter).
         self.assertAlmostEqual(
             sum(out_v1["asteroid_input"].values()),
@@ -420,12 +421,12 @@ class TestPlanetsFlag(unittest.TestCase):
 
     def test_unknown_planet_errors(self):
         with self.assertRaises(ValueError) as cm:
-            qp.plan("iron-plate", 60, _data(), planets=["atlantis"])
+            qp.plan("iron-plate", 60, _data(), planets=["atlantis"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertIn("unknown planet", str(cm.exception))
 
     def test_nauvis_unlocks_plastic_bar(self):
         # Plastic-bar was blocked in V1 (oil chain unavailable); --planets nauvis unlocks it.
-        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("plastic-bar", recipes)
         # Coal comes through mined-recycle, not asteroid.
@@ -434,7 +435,7 @@ class TestPlanetsFlag(unittest.TestCase):
         self.assertIn("crude-oil", out["fluid_input"])
 
     def test_vulcanus_unlocks_tungsten_plate(self):
-        out = qp.plan("tungsten-plate", 60, _data(), planets=["vulcanus"])
+        out = qp.plan("tungsten-plate", 60, _data(), planets=["vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
         # Tungsten-ore routed through mined-recycle.
         self.assertIn("tungsten-ore", out["mined_input"])
         # Lava used as fluid raw.
@@ -446,17 +447,17 @@ class TestPlanetsFlag(unittest.TestCase):
     def test_plastic_bar_still_blocks_without_planets(self):
         # No --planets → plastic-bar still blocked with a helpful hint.
         with self.assertRaises(ValueError) as cm:
-            qp.plan("plastic-bar", 60, _data())
+            qp.plan("plastic-bar", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertIn("--planets", str(cm.exception))
 
     def test_processing_unit_with_nauvis(self):
-        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("processing-unit", recipes)
         self.assertIn("sulfuric-acid", recipes)
 
     def test_artillery_shell_with_nauvis_vulcanus(self):
-        out = qp.plan("artillery-shell", 60, _data(), planets=["nauvis", "vulcanus"])
+        out = qp.plan("artillery-shell", 60, _data(), planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
         # Needs both oil chain (explosives) and tungsten-plate.
         self.assertIn("coal", out["mined_input"])
         self.assertIn("tungsten-ore", out["mined_input"])
@@ -464,12 +465,12 @@ class TestPlanetsFlag(unittest.TestCase):
         self.assertIn("artillery-shell", recipes)
 
     def test_planets_listed_in_output(self):
-        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertEqual(out["planets"], ["nauvis"])
 
     def test_fluid_raws_quality_transparent(self):
         # Crude-oil and lava should appear in fluid_input but never in asteroid_input.
-        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         for k in out["fluid_input"]:
             self.assertNotIn(k, out["asteroid_input"])
 
@@ -581,12 +582,12 @@ class TestOtherPlanetUnlocks(unittest.TestCase):
     def test_fulgora_unlocks_scrap(self):
         # electrolyte → stone + holmium-ore + heavy-oil (fulgora offshore).
         # With --planets fulgora, holmium-ore and stone are unlocked as mined raws.
-        out = qp.plan("electrolyte", 60, _data(), planets=["fulgora", "nauvis"])
+        out = qp.plan("electrolyte", 60, _data(), planets=["fulgora", "nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertIn("holmium-ore", out["mined_input"])
         self.assertIn("stone", out["mined_input"])
 
     def test_mined_recycle_stage_shape(self):
-        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"])
+        out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         mined_stages = [s for s in out["stages"] if s.get("role") == "mined-raw-self-recycle"]
         self.assertEqual(len(mined_stages), 1)
         st = mined_stages[0]
@@ -602,7 +603,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
 
     def test_flag_default_off(self):
         # Without the flag, output has no shuffle stage and no normal-input buckets.
-        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         shuffle_stages = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
         self.assertEqual(shuffle_stages, [])
         self.assertEqual(out.get("normal_solid_input"), {})
@@ -615,6 +616,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], active_shuffles={"low-density-structure"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         shuffle = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
         self.assertEqual(len(shuffle), 1)
@@ -632,11 +634,13 @@ class TestLDSShuffleWiring(unittest.TestCase):
         out_low = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], active_shuffles={"low-density-structure"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         out_high = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], active_shuffles={"low-density-structure"},
             research_levels={"low-density-structure-productivity": 10},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertLess(
             out_high["total_machine_count"], out_low["total_machine_count"]
@@ -651,11 +655,13 @@ class TestLDSShuffleWiring(unittest.TestCase):
         _, raws_base = qp.walk_recipe_tree(
             "solar-panel", 60, data, {}, 3, fluids, planet_props,
             frozenset({"nauvis"}),
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         _, raws_credited = qp.walk_recipe_tree(
             "solar-panel", 60, data, {}, 3, fluids, planet_props,
             frozenset({"nauvis"}),
             byproduct_credits={"copper-plate": 100.0},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # copper-ore demand should drop by 100 (1:1 via molten-copper chain).
         self.assertAlmostEqual(
@@ -668,6 +674,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], active_shuffles={"low-density-structure"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         emitted = out["shuffle_byproduct_legendary"]
         overflow = out["shuffle_byproduct_overflow"]
@@ -683,6 +690,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], active_shuffles={"low-density-structure"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         shuffle_st = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"][0]
         self.assertGreaterEqual(
@@ -693,6 +701,7 @@ class TestLDSShuffleWiring(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], active_shuffles={"low-density-structure"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         text = qp.format_human(out)
         self.assertIn("Shuffle Byproducts", text)
@@ -704,7 +713,7 @@ class TestSelfRecycleTarget(unittest.TestCase):
     """V3 item 3: items whose recycle returns themselves can now be targets."""
 
     def test_holmium_plate_target(self):
-        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         sts = [s for s in out["stages"] if s.get("role") == "self-recycle-target"]
         self.assertEqual(len(sts), 1)
         st = sts[0]
@@ -716,7 +725,7 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertGreater(st["recycler_machines"], 0.0)
 
     def test_tungsten_carbide_target(self):
-        out = qp.plan("tungsten-carbide", 60, _data(), planets=["nauvis", "vulcanus"])
+        out = qp.plan("tungsten-carbide", 60, _data(), planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
         st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
         self.assertEqual(st["target"], "tungsten-carbide")
         self.assertGreater(st["yield_per_normal_craft"], 0.0)
@@ -724,7 +733,7 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertIn("tungsten-ore", out["normal_solid_input"])
 
     def test_superconductor_target(self):
-        out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"])
+        out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
         self.assertEqual(st["machine"], "electromagnetic-plant")
         # EM plant has 5 slots + 50% inherent prod → high yield, low crafts/min
@@ -734,10 +743,12 @@ class TestSelfRecycleTarget(unittest.TestCase):
         out_leg = qp.plan(
             "holmium-plate", 60, _data(),
             planets=["fulgora"], module_quality="legendary",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         out_nor = qp.plan(
             "holmium-plate", 60, _data(),
             planets=["fulgora"], module_quality="normal",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         leg_st = [s for s in out_leg["stages"] if s.get("role") == "self-recycle-target"][0]
         nor_st = [s for s in out_nor["stages"] if s.get("role") == "self-recycle-target"][0]
@@ -758,15 +769,15 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertEqual(cfg, {})
 
     def test_rate_doubles_machines_double(self):
-        out_60 = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
-        out_120 = qp.plan("holmium-plate", 120, _data(), planets=["fulgora"])
+        out_60 = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
+        out_120 = qp.plan("holmium-plate", 120, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertAlmostEqual(
             out_120["total_machine_count"] / out_60["total_machine_count"],
             2.0, delta=0.01,
         )
 
     def test_module_config_per_tier_present(self):
-        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
         self.assertIn("module_config_per_tier", st)
         self.assertIn("normal", st["module_config_per_tier"])
@@ -776,7 +787,7 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertIn("recycle", n)
 
     def test_human_format_renders_self_recycle(self):
-        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
         self.assertIn("[self-recycle]", text)
         self.assertIn("Holmium Plate", text)
@@ -786,7 +797,7 @@ class TestAssemblyModules(unittest.TestCase):
     """V3 item 5: --assembly-modules fills assembly stage slots with prod modules."""
 
     def test_default_off(self):
-        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         # Without flag, stages have no prod modules.
         for st in out["stages"]:
             if st.get("role") == "assembly":
@@ -794,10 +805,11 @@ class TestAssemblyModules(unittest.TestCase):
                 self.assertEqual(st.get("module_prod", 0.0), 0.0)
 
     def test_flag_reduces_total_machines(self):
-        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Modules cut total machines by an order of magnitude on chained
         # foundry/EM-plant/cryogenic chains.
@@ -806,10 +818,11 @@ class TestAssemblyModules(unittest.TestCase):
         )
 
     def test_flag_reduces_raw_demand(self):
-        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Asteroid input drops because every assembly stage's ingredient demand
         # is divided by (1+prod).
@@ -823,6 +836,7 @@ class TestAssemblyModules(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         em_stages = [
             s for s in out["stages"]
@@ -839,6 +853,7 @@ class TestAssemblyModules(unittest.TestCase):
             "plastic-bar", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             research_levels={"plastic-bar-productivity": 30},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         plastic_stages = [
             s for s in out["stages"]
@@ -872,6 +887,7 @@ class TestAssemblyModules(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         text = qp.format_human(out)
         self.assertIn("prod-3-legendary", text)
@@ -887,7 +903,7 @@ class TestGlebaPartial(unittest.TestCase):
     """
 
     def test_bioflux_target(self):
-        out = qp.plan("bioflux", 60, _data(), planets=["gleba"])
+        out = qp.plan("bioflux", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertGreater(out["total_machine_count"], 0)
         # Both yumako and jellynut required (recipe: 15 yumako-mash + 12 jelly).
         self.assertIn("yumako", out["mined_input"])
@@ -898,30 +914,31 @@ class TestGlebaPartial(unittest.TestCase):
     def test_plastic_bar_uses_bioplastic_on_gleba(self):
         # Without nauvis, plastic-bar must route through bioplastic
         # (bioflux + yumako-mash); coal must NOT appear.
-        out = qp.plan("plastic-bar", 60, _data(), planets=["gleba"])
+        out = qp.plan("plastic-bar", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertNotIn("coal", out["mined_input"])
         self.assertIn("yumako", out["mined_input"])
 
     def test_sulfur_uses_biosulfur_on_gleba(self):
-        out = qp.plan("sulfur", 60, _data(), planets=["gleba"])
+        out = qp.plan("sulfur", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertGreater(out["total_machine_count"], 0)
         self.assertIn("yumako", out["mined_input"])
 
     def test_lubricant_uses_biolubricant_on_gleba(self):
-        out = qp.plan("lubricant", 60, _data(), planets=["gleba"])
+        out = qp.plan("lubricant", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertGreater(out["total_machine_count"], 0)
         self.assertIn("jellynut", out["mined_input"])
 
     def test_nutrients_target(self):
-        out = qp.plan("nutrients", 60, _data(), planets=["gleba"])
+        out = qp.plan("nutrients", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertGreater(out["total_machine_count"], 0)
         self.assertIn("yumako", out["mined_input"])
 
     def test_assembly_modules_reduce_gleba_chain(self):
-        out_off = qp.plan("bioflux", 60, _data(), planets=["gleba"])
+        out_off = qp.plan("bioflux", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "bioflux", 60, _data(),
             planets=["gleba"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Biochambers have 4 slots and +50% inherent prod → big drop.
         self.assertLess(
@@ -940,7 +957,7 @@ class TestGlebaPartial(unittest.TestCase):
 
     def test_no_gleba_unlocked_still_errors(self):
         with self.assertRaises(ValueError) as cm:
-            qp.plan("bioflux", 60, _data(), planets=["nauvis"])
+            qp.plan("bioflux", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         msg = str(cm.exception).lower()
         self.assertTrue(
             "yumako" in msg or "gleba" in msg or "no recipe" in msg,
@@ -952,19 +969,19 @@ class TestStagePower(unittest.TestCase):
     """V3 small item: per-stage power_kw + top-level total_power_mw."""
 
     def test_total_power_present_and_positive(self):
-        out = qp.plan("electronic-circuit", 60, _data())
+        out = qp.plan("electronic-circuit", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertIn("total_power_mw", out)
         self.assertGreater(out["total_power_mw"], 0.0)
 
     def test_assembly_stage_has_power_kw(self):
-        out = qp.plan("electronic-circuit", 60, _data())
+        out = qp.plan("electronic-circuit", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         for st in out["stages"]:
             self.assertIn("power_kw", st)
             self.assertGreaterEqual(st["power_kw"], 0.0)
 
     def test_assembly_power_matches_machine_count(self):
         # Roughly: power_kw ≈ machine_power_w × machine_count / 1000
-        out = qp.plan("iron-plate", 60, _data())
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         data = _data()
         power_w = qp.cli.build_machine_power_w(data)
         for st in out["stages"]:
@@ -979,7 +996,7 @@ class TestStagePower(unittest.TestCase):
 
     def test_compound_stage_self_recycle_splits_power(self):
         # holmium-plate target = foundry (craft) + recycler (recycle).
-        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"])
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
         data = _data()
         power_w = qp.cli.build_machine_power_w(data)
@@ -993,6 +1010,7 @@ class TestStagePower(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], active_shuffles={"low-density-structure"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         st = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"][0]
         data = _data()
@@ -1006,7 +1024,7 @@ class TestStagePower(unittest.TestCase):
     def test_burner_machine_zero_power(self):
         # Biochamber is burner-fuelled (no electric power); stages on biochamber
         # contribute 0 kW.
-        out = qp.plan("bioflux", 60, _data(), planets=["gleba"])
+        out = qp.plan("bioflux", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
         biochamber_stages = [
             s for s in out["stages"] if s.get("machine") == "biochamber"
         ]
@@ -1015,16 +1033,17 @@ class TestStagePower(unittest.TestCase):
             self.assertEqual(s["power_kw"], 0.0)
 
     def test_assembly_modules_reduce_power(self):
-        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Modules cut machine count → power drops proportionally.
         self.assertLess(out_on["total_power_mw"], out_off["total_power_mw"] / 5)
 
     def test_human_format_shows_total_power(self):
-        out = qp.plan("electronic-circuit", 60, _data())
+        out = qp.plan("electronic-circuit", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
         self.assertIn("Total power:", text)
 
@@ -1037,17 +1056,18 @@ class TestMachineQuality(unittest.TestCase):
     """
 
     def test_default_normal(self):
-        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         # Default machine_quality = normal — every assembly stage tagged normal.
         for st in out["stages"]:
             if st.get("role") == "assembly":
                 self.assertEqual(st.get("machine_quality"), "normal")
 
     def test_legendary_reduces_machines(self):
-        out_normal = qp.plan("processing-unit", 60, _data(), planets=["nauvis"])
+        out_normal = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         out_legend = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], machine_quality="legendary",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # +150% speed → 1/2.5 = 40% machines; allow some slack for rounding.
         ratio = out_legend["total_machine_count"] / out_normal["total_machine_count"]
@@ -1061,7 +1081,8 @@ class TestMachineQuality(unittest.TestCase):
             out = qp.plan(
                 "processing-unit", 60, _data(),
                 planets=["nauvis"], machine_quality=q,
-            )
+                tech_state=qp.ALL_TECH_UNLOCKED,
+        )
             self.assertLess(out["total_machine_count"], prev_count, f"{q} not lower than previous")
             prev_count = out["total_machine_count"]
 
@@ -1070,10 +1091,12 @@ class TestMachineQuality(unittest.TestCase):
         out_n = qp.plan(
             "iron-plate", 60, _data(),
             planets=[], machine_quality="normal",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         out_l = qp.plan(
             "iron-plate", 60, _data(),
             planets=[], machine_quality="legendary",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Pick the casting-iron foundry stage.
         cast_n = next(s for s in out_n["stages"] if s.get("machine") == "foundry")
@@ -1088,10 +1111,12 @@ class TestMachineQuality(unittest.TestCase):
         out_n = qp.plan(
             "holmium-plate", 60, _data(),
             planets=["fulgora"], machine_quality="normal",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         out_l = qp.plan(
             "holmium-plate", 60, _data(),
             planets=["fulgora"], machine_quality="legendary",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # craft_machines + recycler_machines both scaled by 1/(1+1.5) = 0.4
         st_n = [s for s in out_n["stages"] if s.get("role") == "self-recycle-target"][0]
@@ -1105,8 +1130,8 @@ class TestMachineQuality(unittest.TestCase):
 
     def test_crusher_stage_uses_machine_quality(self):
         # Asteroid reprocessing uses crushers; legendary crushers cut count.
-        out_n = qp.plan("electronic-circuit", 60, _data(), machine_quality="normal")
-        out_l = qp.plan("electronic-circuit", 60, _data(), machine_quality="legendary")
+        out_n = qp.plan("electronic-circuit", 60, _data(), machine_quality="normal", tech_state=qp.ALL_TECH_UNLOCKED)
+        out_l = qp.plan("electronic-circuit", 60, _data(), machine_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         ast_n = next(
             s for s in out_n["stages"] if s.get("role") == "asteroid-reprocessing"
         )
@@ -1123,6 +1148,7 @@ class TestMachineQuality(unittest.TestCase):
         # This test just verifies a known value works.
         out = qp.plan(
             "iron-plate", 60, _data(), machine_quality="rare",
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertGreater(out["total_machine_count"], 0)
 
@@ -1134,7 +1160,7 @@ class TestNoAsteroids(unittest.TestCase):
 
     def test_default_off(self):
         # Without --no-asteroids, iron-plate uses asteroid input as before.
-        out = qp.plan("iron-plate", 60, _data())
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertGreater(
             sum(out["asteroid_input"].values()), 0,
             "default behaviour must use asteroids",
@@ -1148,7 +1174,8 @@ class TestNoAsteroids(unittest.TestCase):
             qp.plan(
                 "iron-plate", 60, _data(),
                 planets=["nauvis"], no_asteroids=True,
-            )
+                tech_state=qp.ALL_TECH_UNLOCKED,
+        )
         self.assertIn("calcite", str(cm.exception))
         self.assertIn("--planets", str(cm.exception))
 
@@ -1158,6 +1185,7 @@ class TestNoAsteroids(unittest.TestCase):
         out = qp.plan(
             "iron-plate", 60, _data(),
             planets=["nauvis", "vulcanus"], no_asteroids=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertEqual(out["asteroid_input"], {})
         self.assertIn("calcite", out["mined_input"])
@@ -1173,7 +1201,8 @@ class TestNoAsteroids(unittest.TestCase):
             qp.plan(
                 "copper-plate", 60, _data(),
                 planets=["nauvis"], no_asteroids=True,
-            )
+                tech_state=qp.ALL_TECH_UNLOCKED,
+        )
         self.assertIn("calcite", str(cm.exception))
 
     def test_iron_ore_in_mined_input_when_nauvis(self):
@@ -1182,6 +1211,7 @@ class TestNoAsteroids(unittest.TestCase):
         out = qp.plan(
             "iron-plate", 60, _data(),
             planets=["nauvis", "vulcanus"], no_asteroids=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # iron-plate via Vulcanus uses molten-iron-from-lava (no iron-ore).
         # Test on a recipe that genuinely uses iron-ore: pick automation-science-pack
@@ -1202,6 +1232,7 @@ class TestNoAsteroids(unittest.TestCase):
         out = qp.plan(
             "iron-plate", 60, _data(),
             planets=["nauvis", "vulcanus"], no_asteroids=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertEqual(out["asteroid_input"], {})
 
@@ -1210,6 +1241,7 @@ class TestNoAsteroids(unittest.TestCase):
         out = qp.plan(
             "copper-plate", 60, _data(),
             planets=["nauvis", "vulcanus"], no_asteroids=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertGreater(out["total_machine_count"], 0)
         self.assertLess(out["total_machine_count"], 1e6)
@@ -1221,6 +1253,7 @@ class TestNoAsteroids(unittest.TestCase):
             "processing-unit", 60, _data(),
             planets=["nauvis", "vulcanus"], no_asteroids=True,
             assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertGreater(out["total_machine_count"], 0)
         self.assertEqual(out["asteroid_input"], {})
@@ -1231,6 +1264,7 @@ class TestNoAsteroids(unittest.TestCase):
         out = qp.plan(
             "iron-plate", 60, _data(),
             planets=["nauvis", "vulcanus"], no_asteroids=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         text = qp.format_human(out)
         # No asteroid line should appear with values; mined-raw section visible.
@@ -1246,6 +1280,7 @@ class TestStageSummary(unittest.TestCase):
         return qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True, **kwargs,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
 
     def test_summary_present(self):
@@ -1285,13 +1320,14 @@ class TestStageSummary(unittest.TestCase):
         out = qp.plan(
             "holmium-plate", 60, _data(),
             planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertIn("summary", out)
         self.assertIn("self-recycle-target", out["summary"]["by_role"])
 
     def test_asteroid_reprocessing_role_in_default(self):
         # Default plan (asteroid path) should have asteroid-reprocessing role.
-        out = qp.plan("iron-plate", 60, _data())
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         roles = set(out["summary"]["by_role"].keys())
         self.assertIn("asteroid-reprocessing", roles)
         self.assertIn("assembly", roles)
@@ -1416,6 +1452,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         notes = out.get("notes", [])
         self.assertTrue(
@@ -1426,7 +1463,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
     def test_e2e_default_iron_plate_no_suggestion(self):
         # iron-plate default (legendary T3, no plastic) — asteroid is dominant
         # but nothing actionable, so no hot-spot note.
-        out = qp.plan("iron-plate", 60, _data())
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         hot_notes = [n for n in out.get("notes", []) if "hot spot" in n]
         self.assertEqual(hot_notes, [])
 
@@ -1658,6 +1695,7 @@ class TestEnableShufflesAll(unittest.TestCase):
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             active_shuffles={"all"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         shuffles = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
         # No shuffle activated: cost gate fell back to baseline.
@@ -1678,10 +1716,12 @@ class TestEnableShufflesAll(unittest.TestCase):
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             active_shuffles={"all"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         out_without = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # --enable-shuffles all should NEVER make total worse than baseline.
         self.assertLessEqual(
@@ -1696,6 +1736,7 @@ class TestEnableShufflesAll(unittest.TestCase):
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             active_shuffles={"low-density-structure"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         shuffles = [s for s in out_lds["stages"] if s.get("role") == "cross-item-shuffle"]
         self.assertEqual(len(shuffles), 1)
@@ -1708,6 +1749,7 @@ class TestEnableShufflesAll(unittest.TestCase):
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             active_shuffles={"all"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         shuffles = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
         for s in shuffles:
@@ -1721,6 +1763,7 @@ class TestEnableShufflesAll(unittest.TestCase):
         # in its chain — none of the shuffles overlap, so none activate.
         out = qp.plan(
             "iron-plate", 60, _data(), active_shuffles={"all"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         shuffles = [s for s in out["stages"] if s.get("role") == "cross-item-shuffle"]
         self.assertEqual(shuffles, [])
@@ -1730,7 +1773,8 @@ class TestEnableShufflesAll(unittest.TestCase):
             qp.plan(
                 "iron-plate", 60, _data(),
                 active_shuffles={"not-a-real-shuffle"},
-            )
+                tech_state=qp.ALL_TECH_UNLOCKED,
+        )
         self.assertIn("unknown shuffle", str(cm.exception))
 
     def test_all_combines_with_assembly_modules(self):
@@ -1739,9 +1783,146 @@ class TestEnableShufflesAll(unittest.TestCase):
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             active_shuffles={"all"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertGreater(out["total_machine_count"], 0)
         self.assertGreater(out["total_power_mw"], 0)
+
+
+# ---------------------------------------------------------------------------
+# Tech gating (V3 item 2)
+# ---------------------------------------------------------------------------
+
+class TestTechGating(unittest.TestCase):
+
+    def test_recycler_locked_fails_fast(self):
+        with self.assertRaises(ValueError) as cm:
+            qp.plan(
+                "iron-plate", 60, _data(),
+                tech_state={"recycling": 0},
+            )
+        self.assertIn("recycler", str(cm.exception).lower())
+
+    def test_foundry_locked_falls_back_to_furnace(self):
+        # iron-plate has casting-iron (foundry) + iron-plate (smelting).
+        # When foundry is locked, the smelting variant should be picked.
+        locked_foundry = dict(qp.ALL_TECH_UNLOCKED)
+        locked_foundry["tungsten-carbide"] = 0
+        out = qp.plan(
+            "iron-plate", 60, _data(),
+            tech_state=locked_foundry,
+        )
+        machines = {st.get("machine") for st in out["stages"]}
+        # No foundry, no casting-iron stage. iron-plate routes through electric-furnace.
+        self.assertNotIn("foundry", machines)
+        self.assertIn("electric-furnace", machines)
+
+    def test_em_plant_locked_falls_back_to_assembler(self):
+        # electronic-circuit has only one recipe (category: electronics).
+        # With EM-plant locked, CATEGORY_FALLBACK routes electronics to assembler.
+        locked_em = dict(qp.ALL_TECH_UNLOCKED)
+        locked_em["electromagnetic-plant"] = 0
+        out = qp.plan(
+            "electronic-circuit", 60, _data(),
+            tech_state=locked_em,
+        )
+        ec_stages = [st for st in out["stages"] if st.get("product") == "electronic-circuit"]
+        self.assertTrue(ec_stages)
+        self.assertEqual(ec_stages[0]["machine"], "assembling-machine-3")
+
+    def test_em_plant_locked_no_inherent_prod(self):
+        # When the EM-plant fallback runs (assembler-3), the +50% inherent
+        # prod is gone — total machines should be higher than the unlocked path.
+        baseline = qp.plan(
+            "electronic-circuit", 60, _data(),
+            assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        locked_em = dict(qp.ALL_TECH_UNLOCKED)
+        locked_em["electromagnetic-plant"] = 0
+        fallback = qp.plan(
+            "electronic-circuit", 60, _data(),
+            assembly_modules=True,
+            tech_state=locked_em,
+        )
+        self.assertGreater(
+            fallback["total_machine_count"], baseline["total_machine_count"],
+        )
+
+    def test_cryo_plant_locked_marks_recipe_unreachable(self):
+        # _machine_for_recipe returns None for `cryogenics` category recipes
+        # when cryogenic-plant is locked (no fallback in CATEGORY_FALLBACK).
+        cryo_recipe = {"category": "cryogenics", "key": "fluoroketone"}
+        locked = frozenset({"cryogenic-plant"})
+        self.assertIsNone(qp._machine_for_recipe(cryo_recipe, 3, locked))
+        # And the same recipe is reachable when cryo is NOT locked.
+        result = qp._machine_for_recipe(cryo_recipe, 3, frozenset())
+        self.assertIsNotNone(result)
+        assert result is not None  # narrow for type checker
+        self.assertEqual(result[0], "cryogenic-plant")
+
+    def test_quality_tier_locked(self):
+        # quality_module_tier=3 needs --tech quality-module-3=1.
+        locked_q3 = dict(qp.ALL_TECH_UNLOCKED)
+        locked_q3["quality-module-3"] = 0
+        with self.assertRaises(ValueError) as cm:
+            qp.plan(
+                "iron-plate", 60, _data(),
+                quality_module_tier=3,
+                tech_state=locked_q3,
+            )
+        self.assertIn("quality-module-3", str(cm.exception))
+
+    def test_unknown_tech_name_errors(self):
+        # _parse_tech_state should sys.exit on unknown tech name with a
+        # sorted list of valid names.
+        with self.assertRaises(SystemExit) as cm:
+            qp._parse_tech_state(["bogus=1"])
+        msg = str(cm.exception)
+        self.assertIn("bogus", msg)
+        self.assertIn("recycling", msg)  # one of the valid names
+
+    def test_all_tech_unlocked_constant_complete(self):
+        # ALL_TECH_UNLOCKED contains every key in TECH_GATES, all set to 1.
+        self.assertEqual(set(qp.ALL_TECH_UNLOCKED.keys()), set(qp.TECH_GATES.keys()))
+        self.assertTrue(all(v == 1 for v in qp.ALL_TECH_UNLOCKED.values()))
+
+    def test_empty_dict_fails_fast(self):
+        # CLI default semantics: no --tech => empty dict => recycler locked.
+        with self.assertRaises(ValueError) as cm:
+            qp.plan(
+                "iron-plate", 60, _data(),
+                tech_state={},
+            )
+        self.assertIn("recycler", str(cm.exception).lower())
+
+    def test_missing_tech_state_required(self):
+        # plan() requires tech_state as a keyword argument.
+        with self.assertRaises(TypeError):
+            qp.plan("iron-plate", 60, _data())  # type: ignore[call-arg]
+
+    def test_partial_tech_lock_still_works(self):
+        # iron-plate only needs recycling (for asteroid loop) + tungsten-carbide
+        # (for casting-iron foundry recipe). Other locks shouldn't matter.
+        baseline = qp.plan(
+            "iron-plate", 60, _data(),
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        narrow = qp.plan(
+            "iron-plate", 60, _data(),
+            tech_state={"recycling": 1, "tungsten-carbide": 1, "quality-module-3": 1},
+        )
+        self.assertAlmostEqual(
+            narrow["total_machine_count"], baseline["total_machine_count"],
+            places=6,
+        )
+
+    def test_parse_tech_state_empty(self):
+        self.assertEqual(qp._parse_tech_state([]), {})
+
+    def test_parse_tech_state_valid(self):
+        out = qp._parse_tech_state(["recycling=1", "tungsten-carbide=1"])
+        self.assertEqual(out, {"recycling": 1, "tungsten-carbide": 1})
 
 
 if __name__ == "__main__":

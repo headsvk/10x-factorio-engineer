@@ -643,6 +643,7 @@ throughput, bus sizing, bottleneck analysis, and all non-quality math.
 
 ```
 python dev/quality_planner.py --item <item-id> --rate <N>
+    --tech NAME=LEVEL                                      # REQUIRED. Repeat for each unlocked tech.
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
     [--module-quality normal|uncommon|rare|epic|legendary] # default: legendary
     [--quality-module-tier 1|2|3]                          # default: 3
@@ -655,6 +656,16 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--enable-shuffles all]                                # activate every applicable shuffle
     [--no-asteroids]                                       # no space platform yet
     [--format json|human]                                  # default: human
+```
+
+**Tech state is required.** Without `--tech` flags the planner fails-fast on
+the recycler check.  Ask the player which tech they have, then list the
+unlocks: `recycling`, `tungsten-carbide` (foundry), `electromagnetic-plant`,
+`cryogenic-plant`, `biochamber`, `quality-module`/`-2`/`-3`.  For the common
+"fully researched" case use:
+```
+--tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 \
+--tech cryogenic-plant=1 --tech biochamber=1 --tech quality-module-3=1
 ```
 
 ### Planet flag
@@ -690,6 +701,16 @@ Without `--planets`, only asteroid-reachable items work (iron, copper, stone, ic
 
 Surface the error verbatim — most are actionable:
 
+- `--tech recycling=0 — no quality work is possible without the recycler`:
+  the user passed no `--tech` flags (CLI default) or explicitly locked
+  `recycling`. Ask whether they've researched recycling and add the right
+  `--tech` flags
+- `cannot produce '<item>' — recipe '<r>' requires a locked machine for
+  category '<cat>'`: a foundry/EM-plant/cryo recipe routes through a locked
+  machine and has no fallback. Add `--tech tungsten-carbide=1` (foundry),
+  `--tech electromagnetic-plant=1`, or `--tech cryogenic-plant=1` as needed
+- `quality_module_tier=N requires --tech quality-module-N=1`: bump the
+  quality-module tech tier
 - `requires '<raw>'... — add --planets <P>`: tell the player which planet to add
 - `recipe '<r>' is self-recycling`: occurs when the item is needed as an
   *intermediate* (these ARE valid as targets — superconductor, holmium-plate,
