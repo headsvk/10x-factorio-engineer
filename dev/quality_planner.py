@@ -388,6 +388,49 @@ MACHINE_INHERENT_PROD: dict[str, float] = {
     "crusher": 0.0,
 }
 
+# Tech gating (V3 item 2).  Names follow Factorio tech IDs where they exist;
+# a few are synthesised aliases (electromagnetic-plant, biochamber) because
+# the actual unlocking tech has a non-obvious name. The mental model is
+# "unlock-as-machine-name" so users discover names from the help text.
+TECH_GATES: dict[str, dict] = {
+    "recycling":              {"machines": ["recycler"]},
+    "tungsten-carbide":       {"machines": ["foundry"]},
+    "electromagnetic-plant":  {"machines": ["electromagnetic-plant"]},
+    "cryogenic-plant":        {"machines": ["cryogenic-plant"]},
+    "biochamber":             {"machines": ["biochamber"]},
+    "quality-module":         {"quality_tier": 1},
+    "quality-module-2":       {"quality_tier": 2},
+    "quality-module-3":       {"quality_tier": 3},
+}
+
+# Convenience: every tech researched.  Used by tests and as a documented
+# starting point for callers who want today's "fully researched" baseline.
+ALL_TECH_UNLOCKED: dict[str, int] = {tech: 1 for tech in TECH_GATES}
+
+# Fallback machine for recipe categories when the primary machine is locked.
+# Source-of-truth: each crafting machine's `crafting_categories` list in the
+# dataset.  `{N}` is substituted with assembler_level at lookup time.
+#
+# Categories without an entry here have NO fallback — the recipe is unreachable
+# under that tech_state and the planner fails-fast (e.g. `metallurgy`,
+# `cryogenics`, `electromagnetics`, `organic` are foundry/cryo/EM/biochamber-only).
+CATEGORY_FALLBACK: dict[str, str] = {
+    # Assembler-3 supports these directly.
+    "electronics":                       "assembling-machine-{N}",
+    "electronics-with-fluid":            "assembling-machine-{N}",
+    "pressing":                          "assembling-machine-{N}",
+    # `*-or-*` variants — primary machine is the premium one, fallback is the
+    # generic machine the category name implies.
+    "electronics-or-assembling":         "assembling-machine-{N}",
+    "metallurgy-or-assembling":          "assembling-machine-{N}",
+    "cryogenics-or-assembling":          "assembling-machine-{N}",
+    "organic-or-assembling":             "assembling-machine-{N}",
+    "organic-or-chemistry":              "chemical-plant",
+    "chemistry-or-cryogenics":           "chemical-plant",
+    "crafting-with-fluid-or-metallurgy": "assembling-machine-{N}",
+}
+
+
 # Recycler retention (standard recycler; quality-only slots).
 RECYCLER_RETENTION = 0.25
 RECYCLER_SLOTS = 4
@@ -408,6 +451,57 @@ def _machine_speed(machine_key: str) -> float:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _tech_locked_machines(tech_state: dict[str, int]) -> frozenset[str]:
+    """Return machine keys that are LOCKED by the given tech_state.
+    A tech absent from the dict is treated as locked (LEVEL=0)."""
+    locked: set[str] = set()
+    for tech, info in TECH_GATES.items():
+        if tech_state.get(tech, 0) >= 1:
+            continue
+        for m in info.get("machines", []):
+            locked.add(m)
+    return frozenset(locked)
+
+
+def _tech_quality_tier_cap(tech_state: dict[str, int]) -> int:
+    """Highest unlocked quality-module tier (0=none) given tech_state."""
+    cap = 0
+    for tech, info in TECH_GATES.items():
+        tier = info.get("quality_tier")
+        if tier is None:
+            continue
+        if tech_state.get(tech, 0) >= 1 and tier > cap:
+            cap = tier
+    return cap
+
+
+def _machine_for_recipe(
+    recipe: dict,
+    assembler_level: int,
+    locked_machines: frozenset[str],
+) -> tuple[str, float] | None:
+    """Like cli.get_machine, but routes around locked machines via
+    CATEGORY_FALLBACK. Returns (machine_key, speed) or None if no viable
+    machine exists for the recipe.
+
+    When ``locked_machines`` is empty the result matches ``cli.get_machine``
+    exactly (assembler_level + electric furnace).
+    """
+    cat = recipe.get("category", "")
+    primary_key, primary_speed = cli.get_machine(cat, assembler_level, "electric")
+    if primary_key not in locked_machines:
+        return (primary_key, float(primary_speed))
+    # Primary machine locked — try the category fallback.
+    fb = CATEGORY_FALLBACK.get(cat)
+    if fb is not None:
+        fb_key = fb.replace("{N}", str(assembler_level))
+        if fb_key not in locked_machines:
+            speed = cli.MACHINE_CRAFTING_SPEED.get(fb_key)
+            return (fb_key, float(speed) if speed is not None else 1.0)
+    # No fallback — recipe is unreachable under this tech_state.
+    return None
+
 
 def build_fluid_set(data: dict) -> frozenset[str]:
     """Return set of item keys whose type == 'fluid'."""
@@ -1729,6 +1823,8 @@ def _pick_recipe_fluid_preferred(
     fluids: frozenset[str],
     planets: frozenset[str],
     planet_props: dict | None = None,
+    locked_machines: frozenset[str] = frozenset(),
+    assembler_level: int = 3,
 ) -> dict | None:
     """Like cli.pick_recipe, but prefer recipes whose FLUID ingredients do not
     introduce planet-exclusive raws.
@@ -1740,6 +1836,10 @@ def _pick_recipe_fluid_preferred(
     When multiple recipes remain viable after planet filtering, tie-break by
     fluid fraction (prefer fluid-heavy inputs for quality transparency), then
     by canonical ``cli.pick_recipe`` order.
+
+    Recipes whose machine is locked (via ``locked_machines``) AND have no
+    category fallback are dropped, so a foundry-locked tech_state correctly
+    routes iron-plate to electric-furnace instead of casting-iron.
     """
     candidates = recipe_idx.get(item_key, [])
     if not candidates:
@@ -1769,6 +1869,13 @@ def _pick_recipe_fluid_preferred(
     # Vulcanus pressure=4000, EM-plant recipes need Fulgora magnetic=99).
     if planet_props is not None:
         viable = [r for r in viable if cli._recipe_valid_for_planet(r, planet_props)]
+    # Filter by tech_state: drop recipes whose machine is locked AND has no
+    # category fallback. When locked_machines is empty this is a no-op.
+    if locked_machines:
+        viable = [
+            r for r in viable
+            if _machine_for_recipe(r, assembler_level, locked_machines) is not None
+        ]
     if not viable:
         viable = candidates  # fall back; caller will raise later if unreachable
 
@@ -1800,6 +1907,8 @@ def walk_recipe_tree(
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
     no_asteroids: bool = False,
+    *,
+    tech_state: dict[str, int],
 ) -> tuple[list[dict], dict[str, float]]:
     """Walk recipe tree; return (stages, raw_demand_rates).
 
@@ -1811,6 +1920,7 @@ def walk_recipe_tree(
     """
     recipe_idx = cli.build_recipe_index(data)
     planets = planets or frozenset()
+    locked_machines = _tech_locked_machines(tech_state)
     # Start with the V1 asteroid-baseline raw set (Nauvis solid raws + asteroid
     # chunks).  Then extend it with only the FLUID raws from each unlocked
     # planet — fluid inputs are quality-transparent and can be sourced from
@@ -1894,7 +2004,10 @@ def walk_recipe_tree(
             raise ValueError(
                 f"ERROR: recipe '{current}' is self-recycling (output recycles to itself) — not supported"
             )
-        recipe = _pick_recipe_fluid_preferred(current, recipe_idx, fluids, planets, planet_props)
+        recipe = _pick_recipe_fluid_preferred(
+            current, recipe_idx, fluids, planets, planet_props,
+            locked_machines=locked_machines, assembler_level=assembler_level,
+        )
         if recipe is None:
             if current in raw_set:
                 continue
@@ -1908,9 +2021,15 @@ def walk_recipe_tree(
         # Module prod (matches what we'll apply in the second pass — must be
         # consistent so demand propagation upstream lines up).
         if assembly_modules:
-            machine_key_p1, _ = cli.get_machine(
-                recipe["category"], assembler_level, "electric",
-            )
+            mr_p1 = _machine_for_recipe(recipe, assembler_level, locked_machines)
+            if mr_p1 is None:
+                raise ValueError(
+                    f"ERROR: cannot produce '{current}' — recipe "
+                    f"'{recipe['key']}' requires a locked machine for category "
+                    f"'{recipe.get('category')}'.  Add the corresponding --tech "
+                    f"flag (one of: {sorted(TECH_GATES.keys())})."
+                )
+            machine_key_p1, _ = mr_p1
             module_prod_p1, _ = _assembly_prod_bonus(
                 machine_key_p1, recipe, slots_map,
                 assembly_modules, assembly_module_quality, prod_module_tier,
@@ -1950,11 +2069,22 @@ def walk_recipe_tree(
     for item in order:
         if item in raw_set and item != item_key:
             continue
-        recipe = _pick_recipe_fluid_preferred(item, recipe_idx, fluids, planets, planet_props)
+        recipe = _pick_recipe_fluid_preferred(
+            item, recipe_idx, fluids, planets, planet_props,
+            locked_machines=locked_machines, assembler_level=assembler_level,
+        )
         if recipe is None:
             raw_demand[item] += demand[item]
             continue
-        machine_key, machine_speed = cli.get_machine(recipe["category"], assembler_level, "electric")
+        mr = _machine_for_recipe(recipe, assembler_level, locked_machines)
+        if mr is None:
+            raise ValueError(
+                f"ERROR: cannot produce '{item}' — recipe '{recipe['key']}' "
+                f"requires a locked machine for category "
+                f"'{recipe.get('category')}'.  Add the corresponding --tech "
+                f"flag (one of: {sorted(TECH_GATES.keys())})."
+            )
+        machine_key, machine_speed = mr
         machine_speed_f = float(machine_speed) * (
             1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
         )
@@ -2193,6 +2323,7 @@ def _plan_self_recycle_target(
     assembler_level: int,
     quality_module_tier: int,
     planets: frozenset[str],
+    tech_state: dict[str, int],
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
@@ -2213,15 +2344,22 @@ def _plan_self_recycle_target(
     recipe_idx = cli.build_recipe_index(data)
     fluids = build_fluid_set(data)
     planet_props = _combined_planet_props(data, planets)
+    locked_machines = _tech_locked_machines(tech_state)
 
     craft_recipe = _pick_recipe_fluid_preferred(
         item_key, recipe_idx, fluids, planets, planet_props,
+        locked_machines=locked_machines, assembler_level=assembler_level,
     )
     if craft_recipe is None:
         raise ValueError(f"ERROR: no craft recipe for '{item_key}'")
-    machine_key, machine_speed = cli.get_machine(
-        craft_recipe["category"], assembler_level, "electric",
-    )
+    mr = _machine_for_recipe(craft_recipe, assembler_level, locked_machines)
+    if mr is None:
+        raise ValueError(
+            f"ERROR: cannot produce '{item_key}' — recipe "
+            f"'{craft_recipe['key']}' requires a locked machine for category "
+            f"'{craft_recipe.get('category')}'.  Add the corresponding --tech flag."
+        )
+    machine_key, machine_speed = mr
     machine_speed_f = float(machine_speed) * (
         1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
     )
@@ -2295,6 +2433,7 @@ def _plan_self_recycle_target(
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
+                    tech_state=tech_state,
                 )
             except ValueError:
                 # Ingredient may itself be planet-gated or unreachable — record
@@ -2427,12 +2566,17 @@ def plan(
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
     no_asteroids: bool = False,
+    tech_state: dict[str, int],
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
     scale stages, assemble full output.
 
     ``planets`` is the set of planets the player has unlocked.  An empty or
     ``None`` value reverts to V1 behaviour (asteroid-only, Nauvis baseline).
+
+    ``tech_state`` is a required keyword argument: ``dict[tech_name → level]``.
+    Empty dict = nothing researched (fail-fast on the recycler check).  Use
+    ``ALL_TECH_UNLOCKED`` for the "fully researched" baseline.
     """
     research_levels = research_levels or {}
     planets_fs: frozenset[str] = frozenset(planets) if planets else frozenset()
@@ -2442,6 +2586,21 @@ def plan(
         raise ValueError(
             f"ERROR: unknown planet(s) {sorted(unknown)} in --planets; "
             f"valid: {list(KNOWN_PLANETS)}"
+        )
+    # Tech-state fail-fast: recycler is required for any quality work.
+    locked_machines = _tech_locked_machines(tech_state)
+    if "recycler" in locked_machines:
+        raise ValueError(
+            "ERROR: --tech recycling=0 — no quality work is possible without "
+            "the recycler.  Add --tech recycling=1 to proceed."
+        )
+    # Quality-module-tier must be unlocked.
+    cap = _tech_quality_tier_cap(tech_state)
+    if quality_module_tier > cap:
+        raise ValueError(
+            f"ERROR: quality_module_tier={quality_module_tier} requires "
+            f"--tech quality-module-{quality_module_tier}=1 (current cap from "
+            f"tech_state: {cap})."
         )
     if item_key in SELF_RECYCLING_BLOCKLIST and item_key not in SELF_RECYCLE_TARGETS:
         raise ValueError(
@@ -2459,6 +2618,7 @@ def plan(
             assembler_level=assembler_level,
             quality_module_tier=quality_module_tier,
             planets=planets_fs,
+            tech_state=tech_state,
             assembly_modules=assembly_modules,
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
@@ -2481,6 +2641,7 @@ def plan(
         prod_module_tier=prod_module_tier,
         machine_quality=machine_quality,
         no_asteroids=no_asteroids,
+        tech_state=tech_state,
     )
 
     # ---- Generic shuffle wiring (V3) ----
@@ -2567,6 +2728,7 @@ def plan(
                 prod_module_tier=prod_module_tier,
                 machine_quality=machine_quality,
                 no_asteroids=no_asteroids,
+                tech_state=tech_state,
             )
             for p in primaries:
                 raw_demand.pop(p, None)
@@ -2597,6 +2759,7 @@ def plan(
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
+                    tech_state=tech_state,
                 )
                 for p in primaries:
                     raw_demand.pop(p, None)
@@ -2622,6 +2785,7 @@ def plan(
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
+                    tech_state=tech_state,
                 )
                 for st in n_stages:
                     st["normal_quality_chain"] = True
@@ -2938,6 +3102,7 @@ def plan(
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
             no_asteroids=no_asteroids,
+            tech_state=tech_state,
         )
         if baseline["total_machine_count"] < total_machines:
             baseline.setdefault("notes", []).append(
@@ -3162,6 +3327,28 @@ def _parse_research(raw_list: list[str]) -> dict[str, int]:
     return out
 
 
+def _parse_tech_state(raw_list: list[str]) -> dict[str, int]:
+    """Parse repeated --tech NAME=LEVEL flags into a dict.
+
+    Empty list returns {} (everything locked — CLI default).  Unknown tech
+    names exit with a sorted list of valid names.
+    """
+    out: dict[str, int] = {}
+    valid = sorted(TECH_GATES.keys())
+    for raw in raw_list:
+        if "=" not in raw:
+            sys.exit(f"Invalid --tech '{raw}'; expected NAME=LEVEL")
+        name, lvl = raw.split("=", 1)
+        name = name.strip()
+        if name not in TECH_GATES:
+            sys.exit(f"Unknown --tech name '{name}'; valid: {valid}")
+        try:
+            out[name] = int(lvl)
+        except ValueError:
+            sys.exit(f"Invalid tech level '{lvl}' in --tech {raw}")
+    return out
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Legendary production planner (V2)")
     p.add_argument("--item", required=True)
@@ -3236,6 +3423,17 @@ def parse_args() -> argparse.Namespace:
             "acid or petgas via planet chains)."
         ),
     )
+    p.add_argument(
+        "--tech", action="append", default=[], metavar="NAME=LEVEL",
+        help=(
+            "Tech research state, repeatable (e.g. --tech recycling=1 "
+            "--tech tungsten-carbide=1).  Without any --tech flag NOTHING is "
+            "researched and most plans fail-fast (no recycler).  Valid names: "
+            + ", ".join(sorted(TECH_GATES.keys()))
+            + ".  To replicate today's fully-researched default, list every "
+            "tech with LEVEL=1."
+        ),
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
 
@@ -3244,6 +3442,7 @@ def main() -> None:
     args = parse_args()
     data = cli.load_data("nauvis")
     research = _parse_research(args.research)
+    tech_state = _parse_tech_state(args.tech)
     planets_list = [p.strip() for p in args.planets.split(",") if p.strip()]
 
     # Build the active_shuffles set: explicit names + (optional) "all" sentinel.
@@ -3271,6 +3470,7 @@ def main() -> None:
             prod_module_tier=args.prod_module_tier,
             machine_quality=args.machine_quality,
             no_asteroids=args.no_asteroids,
+            tech_state=tech_state,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)

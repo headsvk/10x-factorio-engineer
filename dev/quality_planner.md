@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-04-30. Tests: `python -m unittest dev.test_quality_planner -v` — **166 tests, all passing, ~0.15 s.**
+**Last updated:** 2026-05-01. Tests: `python -m unittest dev.test_quality_planner -v` — **179 tests, all passing, ~0.20 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -25,6 +25,7 @@ Currently shipped:
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
+- **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber / quality-module tier. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`.
 
 Future additions in the [Roadmap](#roadmap) section below.
 
@@ -32,36 +33,41 @@ Future additions in the [Roadmap](#roadmap) section below.
 
 ## Quick start
 
+Every invocation needs `--tech` flags listing what's researched. To save typing, the examples below define `TECH_ALL` for the fully-researched baseline:
+
 ```bash
-# Default — Nauvis-only, asteroid-reprocessing path, modules off
-python dev/quality_planner.py --item iron-plate --rate 60
+TECH_ALL='--tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 --tech cryogenic-plant=1 --tech biochamber=1 --tech quality-module-3=1'
+
+# Asteroid-only iron-plate (the simplest plan)
+python dev/quality_planner.py --item iron-plate --rate 60 $TECH_ALL
 
 # Recommended for serious planning (all flags on)
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis --assembly-modules --machine-quality legendary
+    --planets nauvis --assembly-modules --machine-quality legendary $TECH_ALL
 
 # Multi-planet chain
 python dev/quality_planner.py --item artillery-shell --rate 60 \
-    --planets nauvis,vulcanus --assembly-modules
+    --planets nauvis,vulcanus --assembly-modules $TECH_ALL
 
 # Self-recycle target
 python dev/quality_planner.py --item superconductor --rate 60 \
-    --planets nauvis,fulgora
+    --planets nauvis,fulgora $TECH_ALL
 
 # Plastic-heavy chain via cross-item shuffle
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis --assembly-modules --enable-shuffle low-density-structure
+    --planets nauvis --assembly-modules --enable-shuffle low-density-structure $TECH_ALL
 
-# Early game (no space platform)
+# Early-game: no space platform AND no foundry yet
 python dev/quality_planner.py --item iron-plate --rate 60 \
-    --planets nauvis,vulcanus --no-asteroids
+    --planets nauvis,vulcanus --no-asteroids \
+    --tech recycling=1 --tech quality-module-3=1
 ```
 
 ---
 
 ## Regression anchors
 
-Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off):
+Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`):
 
 | target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
 |---|---|---|---|---|---|
@@ -96,6 +102,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--enable-shuffle NAME` | none | Repeatable. Activate cross-item shuffle by output-item key (e.g. `low-density-structure`). 16 candidates discovered from dataset; see [Shuffle enumeration](#shuffle-enumeration--selection) for the full list. |
 | `--enable-shuffles all` | off | Activate every applicable shuffle; greedy selector picks the best primary per legendary leaf. Mutually exclusive with `--enable-shuffle`. |
 | `--no-asteroids` | off | Skip asteroid path; route iron-ore/copper-ore/ice/calcite via planet self-recycle |
+| `--tech NAME=LEVEL` | empty | Repeatable. Tech research state. **Without any `--tech` flag, NOTHING is researched and the plan fails-fast on the recycler check.** Valid names: `recycling`, `tungsten-carbide`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`, `quality-module`, `quality-module-2`, `quality-module-3`. To replicate the fully-researched baseline list every tech with `=1`. |
 | `--format {human,json}` | `human` | Output format |
 
 ---
@@ -220,10 +227,13 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_assembly_prod_bonus` | (machine, recipe, slots, flag, quality, tier) → (prod_fraction, slots_filled). Includes inherent prod for foundry/EM/biochamber |
 | `_stage_power_kw` | Dispatches per role; compound stages split power between machine types |
 | `_hot_spot_suggestions` | Inspects `summary.by_role`, emits actionable notes when one role > 50 % of machines |
-| `_pick_recipe_fluid_preferred` | Recipe selection: prefer recipes with most fluid ingredients (foundry casting > furnace) |
-| `walk_recipe_tree` | Two-pass walker. Builds stage list + raw_demand dict. Accepts `extra_raws`, `byproduct_credits`, `assembly_modules`, `machine_quality`, `no_asteroids` |
+| `_pick_recipe_fluid_preferred` | Recipe selection: prefer recipes with most fluid ingredients (foundry casting > furnace); drops candidates whose machine is locked under `tech_state` |
+| `_tech_locked_machines` | Returns frozenset of machine keys locked by the given `tech_state` |
+| `_tech_quality_tier_cap` | Highest unlocked quality-module tier (0=none) |
+| `_machine_for_recipe` | Wraps `cli.get_machine` with `CATEGORY_FALLBACK` routing — returns None when the primary machine is locked AND the recipe category has no fallback |
+| `walk_recipe_tree` | Two-pass walker. Builds stage list + raw_demand dict. Accepts `extra_raws`, `byproduct_credits`, `assembly_modules`, `machine_quality`, `no_asteroids`, **`tech_state` (required kwarg)** |
 | `_plan_self_recycle_target` | Dedicated path for self-recycle-target items |
-| `plan` | Top-level orchestrator |
+| `plan` | Top-level orchestrator. `tech_state` is a required keyword arg |
 | `format_human` | Terminal-friendly rendering |
 
 ---
@@ -339,6 +349,23 @@ When the target is in `SELF_RECYCLE_TARGETS` (`tungsten-carbide`, `superconducto
 
 These items still fail-fast when used as INTERMEDIATE ingredients in another chain — they must be the target, or supplied externally.
 
+### Tech-state gating
+
+The planner gates which machines/recipes the player has unlocked via `tech_state: dict[str, int]` (required keyword arg to `plan()` and `walk_recipe_tree()`).
+
+- **CLI default**: no `--tech` flags → `tech_state == {}` (everything locked) → `plan()` fails-fast on the recycler check.
+- **Library default**: `tech_state` has no default; callers must pass an explicit dict. `qp.ALL_TECH_UNLOCKED` is the constant for "fully researched" (used by every existing test).
+
+`TECH_GATES` declares what each tech name unlocks: either a list of machines (`recycler`, `foundry`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`) or a `quality_tier` (1/2/3 for `quality-module`/-2/-3).
+
+When a primary machine is locked, `_machine_for_recipe` consults `CATEGORY_FALLBACK` for an alternative:
+- `electronics` / `electronics-with-fluid` / `pressing` → assembler-N (these are categories that assembler-3 natively supports).
+- `*-or-assembling` → assembler-N.
+- `*-or-chemistry` / `chemistry-or-cryogenics` → chemical-plant.
+- Categories without an entry (`metallurgy`, `cryogenics`, `electromagnetics`, `organic`) have no fallback — recipes routing through them fail-fast with an actionable hint naming the missing tech.
+
+Quality-module tier is checked against `_tech_quality_tier_cap(tech_state)`: requesting `quality_module_tier=3` with `quality-module-3` locked fails-fast at `plan()` entry.
+
 ### Hot-spot advisor
 
 After computing `summary.by_role`, `_hot_spot_suggestions` emits a note when any role exceeds 50 % of total machines. Maps role → suggestion:
@@ -423,7 +450,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **142 tests**, 11 classes.
+`dev/test_quality_planner.py` — **179 tests**, 26 classes.
 
 | Class | Coverage |
 |---|---|
@@ -451,6 +478,7 @@ MACHINE_INHERENT_PROD = {
 | `TestNoAsteroids` | `--no-asteroids` routes via `MINED_RAW_NO_ASTEROID_FALLBACK`; fail-fast names the missing planet |
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
+| `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, `quality-module-3` gate, partial-lock baseline parity, `_parse_tech_state` validation, `tech_state` is a required kwarg |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.
@@ -469,6 +497,8 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 - **Walker passes must use the SAME `eff_prod`.** `_assembly_prod_bonus` is called identically in both passes — if they diverge, demand propagation upstream and stage `inputs` rates will not match.
 - **LDS shuffle saturation:** when `research_prod` saturates the +300 % cap, per-cycle return ratio `r → 1.0` and machine count diverges. Clamped to `r=0.999` (~1500 machines for 60/min). Mathematically correct in the limit; practically a tell that the planner should split into multiple parallel loops with smaller per-tier prod configs (deferred — see [Roadmap](#roadmap)).
 - **Argparse % escaping.** Help strings containing `%` must escape as `%%` — argparse format-substitutes them otherwise (`--assembly-modules` and `--machine-quality` flags both have `%%`).
+- **`--tech` default is locked.** A bare CLI invocation now produces an empty `tech_state={}` and fails-fast on the recycler check. Library callers (incl. tests) MUST pass `tech_state` — there is no default. Use `qp.ALL_TECH_UNLOCKED` for the legacy "fully researched" baseline. This was a deliberate breaking change to make the user's research state explicit (V3 item 2).
+- **Shuffle DP solvers ignore tech_state.** `solve_shuffle_loop` / `compute_shuffle_stage` use `cli.get_machine` directly and do not consult `tech_state`. If the user enables a shuffle whose cast machine is locked (e.g. `--enable-shuffle low-density-structure --tech tungsten-carbide=0`), the shuffle still runs as if the foundry exists. The main-chain walker and `_pick_recipe_fluid_preferred` correctly gate locked machines, so this only matters when the user explicitly opts-in to a shuffle that requires a locked machine.
 
 ---
 
@@ -480,16 +510,9 @@ In rough priority order (fully shipped items removed):
 
 Greedy selection + baseline-fallback cost gate are shipped (see §Algorithms).  For users who need provably-optimal selection across cross-feeding shuffles (e.g. LDS produces copper, hypothetical copper-shuffle would produce plastic — but only one can be active per chain), a subset-DP across legendary leaves would search every combination of (asteroid, shuffle-A, shuffle-B, ...) per leaf and return the global minimum machine count.  The greedy approximates this with O(leaves × candidates) lookups; the DP would be O(2^leaves × leaves × candidates), still <50ms for typical chains (3-5 leaves).
 
-### Full research-state tracking (V3 item 2 — ~150 LoC)
+### Full research-state tracking (V3 item 2)
 
-`--no-asteroids` is shipped (the most-requested gating subset). Remaining surface:
-
-- **Quality module tier:** `--quality-module-tier` already exists but doesn't check whether the tech is researched.
-- **Recycler:** locked behind `recycling`. Missing → no quality at all → fail fast.
-- **Foundry / EM-plant / cryogenic-plant:** gated by science-pack tech. Missing → fall back to furnace/assembler/chem-plant routes.
-- **Per-planet landing:** narrower than `--planets` (which today implies the user already landed there).
-
-Proposed input: `--tech NAME=LEVEL` repeated, or `--tech-preset {early,mid,late,all}`. Fail-fast naming the missing tech. Defaults to `late`.
+**Shipped** as `--tech NAME=LEVEL` (see §Tech-state gating).  Covers recycler, foundry, EM-plant, cryogenic-plant, biochamber, quality-module tiers.  Per-planet-landing distinction (narrower than `--planets`) was deferred — for now `--planets X` continues to imply the user has landed on planet X.
 
 ### Gleba spoilage timing (V3 item 4 finish — ~250 LoC)
 
