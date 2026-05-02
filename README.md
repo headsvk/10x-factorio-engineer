@@ -30,7 +30,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (198 tests, stdlib only)
   quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
-  test_quality_planner.py   # unittest suite (179 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (192 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs

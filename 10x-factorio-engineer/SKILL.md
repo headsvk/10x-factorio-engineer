@@ -622,9 +622,14 @@ topics (e.g. "how do I defend my Gleba factory" → `combat-defense.md` + `plane
 For **legendary-tier production planning**, prefer `dev/quality_planner.py`
 over `assets/cli.py`.  The planner implements a backward-induction DP quality
 loop solver across asteroid reprocessing, mined-raw self-recycle (coal,
-stone, tungsten-ore, scrap, holmium-ore, uranium-ore, gleba bio-raws), LDS
-shuffle (cross-item legendary loop), and self-recycle-target items
-(superconductor, holmium-plate, tungsten-carbide, fusion-power-cell, lithium).
+stone, tungsten-ore, scrap, holmium-ore, uranium-ore, gleba bio-raws),
+cross-item shuffle (~195 candidate recipes including modules, military, and
+end-game gear), and self-recycle-target items (superconductor, holmium-plate,
+tungsten-carbide, fusion-power-cell, lithium, biolab, captive-biter-spawner).
+
+For self-recycle-target items the planner runs an **auto-comparator**: both
+Path A (self-recycle the target) and Path B (upcycle ingredients then craft
+once) are computed and the cheaper one wins.  The choice appears in `notes`.
 
 ### When to call it
 
@@ -635,6 +640,9 @@ Invoke `quality_planner.py` when the player asks for:
 - "How many crushers for legendary &lt;chunk&gt; upcycling?"
 - "What's the cost of legendary tungsten-carbide / holmium-plate / superconductor?"
 - "I don't have space platforms yet — how do I quality on Nauvis only?"
+- "Legendary biolab / biochamber / agricultural-tower / capture-robot-rocket?"
+- "Legendary T3 productivity / speed / quality / efficiency modules?"
+- "Legendary tank / spidertron / power-armor-mk2 / nuclear-reactor / roboport?"
 
 Keep using `assets/cli.py` for everything else — raw / uncommon / rare
 throughput, bus sizing, bottleneck analysis, and all non-quality math.

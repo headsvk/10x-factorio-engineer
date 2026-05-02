@@ -724,13 +724,18 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertGreater(st["craft_machines"], 0.0)
         self.assertGreater(st["recycler_machines"], 0.0)
 
-    def test_tungsten_carbide_target(self):
+    def test_tungsten_carbide_auto_compare_picks_path_b(self):
+        # V3 item 4: with auto-compare, the planner evaluates both Path A
+        # (self-recycle-target loop) and Path B (ingredient-upcycle).  For
+        # tungsten-carbide, ingredients (tungsten-ore + coal) have viable
+        # quality paths via mined-raw-self-recycle on Vulcanus/Nauvis, so
+        # Path B wins.  Plan should NOT contain a self-recycle-target stage.
         out = qp.plan("tungsten-carbide", 60, _data(), planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
-        st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
-        self.assertEqual(st["target"], "tungsten-carbide")
-        self.assertGreater(st["yield_per_normal_craft"], 0.0)
-        # Tungsten ore must appear as a normal-quality solid input.
-        self.assertIn("tungsten-ore", out["normal_solid_input"])
+        roles = {s.get("role") for s in out["stages"]}
+        self.assertNotIn("self-recycle-target", roles)
+        notes = " ".join(out.get("notes", []))
+        self.assertIn("auto-compare", notes)
+        self.assertIn("ingredient-upcycle", notes)
 
     def test_superconductor_target(self):
         out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -740,14 +745,16 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertGreater(st["yield_per_normal_craft"], 0.001)
 
     def test_legendary_modules_outperform_normal(self):
+        # superconductor: Path A wins (Path B fails on holmium-plate intermediate
+        # in SELF_RECYCLING_BLOCKLIST), so we can compare Path A yields.
         out_leg = qp.plan(
-            "holmium-plate", 60, _data(),
-            planets=["fulgora"], module_quality="legendary",
+            "superconductor", 60, _data(),
+            planets=["nauvis", "fulgora"], module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         out_nor = qp.plan(
-            "holmium-plate", 60, _data(),
-            planets=["fulgora"], module_quality="normal",
+            "superconductor", 60, _data(),
+            planets=["nauvis", "fulgora"], module_quality="normal",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         leg_st = [s for s in out_leg["stages"] if s.get("role") == "self-recycle-target"][0]
@@ -777,7 +784,9 @@ class TestSelfRecycleTarget(unittest.TestCase):
         )
 
     def test_module_config_per_tier_present(self):
-        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
+        # superconductor: Path A wins, so the self-recycle-target stage is
+        # present and exposes per-tier module config.
+        out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
         self.assertIn("module_config_per_tier", st)
         self.assertIn("normal", st["module_config_per_tier"])
@@ -787,10 +796,11 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertIn("recycle", n)
 
     def test_human_format_renders_self_recycle(self):
-        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
+        # superconductor: Path A wins.
+        out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
         self.assertIn("[self-recycle]", text)
-        self.assertIn("Holmium Plate", text)
+        self.assertIn("Superconductor", text)
 
 
 class TestAssemblyModules(unittest.TestCase):
@@ -1317,8 +1327,10 @@ class TestStageSummary(unittest.TestCase):
 
     def test_self_recycle_target_has_summary(self):
         # The dedicated _plan_self_recycle_target path also emits summary.
+        # Use superconductor: Path A wins (Path B fails on holmium-plate
+        # intermediate via SELF_RECYCLING_BLOCKLIST).
         out = qp.plan(
-            "holmium-plate", 60, _data(),
+            "superconductor", 60, _data(),
             planets=["nauvis", "fulgora"],
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
@@ -1476,7 +1488,10 @@ class TestShuffleEnumeration(unittest.TestCase):
         cands = qp.enumerate_shuffle_candidates(_data())
         # 16 candidates in stock Space Age (multi-solid-recycle-output filter).
         # Anchor — if dataset changes, investigate before updating.
-        self.assertEqual(len(cands), 16)
+        # V3 item 4: relaxed `allow_productivity=True` filter — buildings,
+        # modules, military items, and end-game gear now qualify.  The exact
+        # count tracks the dataset; pin it so unintended changes get caught.
+        self.assertEqual(len(cands), 195)
 
     def test_enumerate_excludes_single_output_recyclers(self):
         cands = qp.enumerate_shuffle_candidates(_data())
@@ -1923,6 +1938,163 @@ class TestTechGating(unittest.TestCase):
     def test_parse_tech_state_valid(self):
         out = qp._parse_tech_state(["recycling=1", "tungsten-carbide=1"])
         self.assertEqual(out, {"recycling": 1, "tungsten-carbide": 1})
+
+
+# ---------------------------------------------------------------------------
+# Gleba quality targets + auto-comparator (V3 item 4)
+# ---------------------------------------------------------------------------
+
+class TestGlebaTargets(unittest.TestCase):
+
+    def test_biolab_in_self_recycle_targets(self):
+        # Sanity: the new entries are in the constant.
+        self.assertIn("biolab", qp.SELF_RECYCLE_TARGETS)
+        self.assertIn("captive-biter-spawner", qp.SELF_RECYCLE_TARGETS)
+
+    def test_biolab_plan_succeeds(self):
+        # biolab requires gleba (biter-egg) + nauvis (refined-concrete, lab,
+        # capture-robot-rocket, U-235).  Path A and Path B are both very expensive
+        # because the U-235/concrete chain is deep — but the plan must succeed.
+        out = qp.plan(
+            "biolab", 1, _data(), planets=["nauvis", "gleba"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertGreater(out["total_machine_count"], 0)
+        notes = " ".join(out.get("notes", []))
+        self.assertIn("auto-compare", notes)
+
+    def test_captive_biter_spawner_path_a_wins(self):
+        # captive-biter-spawner needs fluoroketone-cold which uses lithium-plate
+        # (self-recycling) → Path B fails on the blocklist → Path A wins.
+        out = qp.plan(
+            "captive-biter-spawner", 1, _data(),
+            planets=["nauvis", "gleba", "aquilo"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        roles = {s.get("role") for s in out["stages"]}
+        self.assertIn("self-recycle-target", roles)
+        # Cast machine for captive-biter-spawner is cryogenic-plant.
+        self_stage = next(s for s in out["stages"] if s.get("role") == "self-recycle-target")
+        self.assertEqual(self_stage["machine"], "cryogenic-plant")
+
+    def test_auto_compare_picks_b_for_tungsten_carbide(self):
+        # Path B (mined-raw-self-recycle of tungsten-ore + coal) beats Path A
+        # for tungsten-carbide.  Verifies the cost gate picks the cheaper path.
+        out = qp.plan(
+            "tungsten-carbide", 60, _data(),
+            planets=["nauvis", "vulcanus"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        roles = {s.get("role") for s in out["stages"]}
+        self.assertNotIn("self-recycle-target", roles)
+        self.assertIn("mined-raw-self-recycle", roles)
+
+    def test_auto_compare_path_a_wins_when_b_infeasible(self):
+        # superconductor's Path B walks through holmium-plate (in BLOCKLIST as
+        # an intermediate) → Path B fails → Path A wins.  Verify the note
+        # explains the fallback.
+        out = qp.plan(
+            "superconductor", 60, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        roles = {s.get("role") for s in out["stages"]}
+        self.assertIn("self-recycle-target", roles)
+        notes = " ".join(out.get("notes", []))
+        self.assertIn("auto-compare", notes)
+        self.assertIn("ingredient-upcycle path failed", notes)
+
+    def test_no_auto_compare_for_non_self_recycle_targets(self):
+        # iron-plate, electronic-circuit, processing-unit are not in
+        # SELF_RECYCLE_TARGETS — no auto-compare note should appear.
+        for item in ("iron-plate", "electronic-circuit"):
+            out = qp.plan(item, 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
+            for note in out.get("notes", []):
+                self.assertNotIn("auto-compare", note.lower(), f"unexpected auto-compare note for {item}: {note}")
+
+    def test_shuffle_includes_modules_and_buildings(self):
+        cands = qp.enumerate_shuffle_candidates(_data())
+        items = {c.output_item for c in cands}
+        for it in ("biochamber", "agricultural-tower", "lab", "capture-robot-rocket",
+                   "productivity-module-3", "efficiency-module-3",
+                   "quality-module-3", "speed-module-3"):
+            self.assertIn(it, items, f"shuffle candidate missing: {it}")
+
+    def test_shuffle_includes_military_and_endgame(self):
+        cands = qp.enumerate_shuffle_candidates(_data())
+        items = {c.output_item for c in cands}
+        for it in ("tank", "spidertron", "gun-turret", "laser-turret",
+                   "power-armor-mk2", "nuclear-reactor", "roboport",
+                   "artillery-shell"):
+            self.assertIn(it, items, f"shuffle candidate missing: {it}")
+        # Single-output recyclers must still be excluded.
+        for it in ("firearm-magazine", "stone-wall"):
+            self.assertNotIn(it, items, f"single-output item should be excluded: {it}")
+
+    def test_capture_robot_rocket_as_target(self):
+        # capture-robot-rocket consumes bioflux (20/craft, perishable).  With
+        # the capture-robot-rocket shuffle active, bioflux should be a byproduct
+        # of the shuffle's recycle leg (not a normal-quality external input)
+        # so the legendary chain is self-sufficient in bioflux.
+        out = qp.plan(
+            "capture-robot-rocket", 1, _data(),
+            planets=["nauvis", "gleba"],
+            active_shuffles={"capture-robot-rocket"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertGreater(out["total_machine_count"], 0)
+        roles = [s.get("role") for s in out["stages"]]
+        self.assertIn("cross-item-shuffle", roles)
+        # bioflux is in the shuffle's legendary byproducts, NOT external normal input.
+        byprods = out.get("shuffle_byproduct_legendary", {})
+        self.assertIn("bioflux", byprods)
+        self.assertNotIn("bioflux", out.get("normal_solid_input", {}))
+
+    def test_tank_as_shuffle_target(self):
+        out = qp.plan(
+            "tank", 1, _data(),
+            planets=["nauvis"],
+            active_shuffles={"tank"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertGreater(out["total_machine_count"], 0)
+
+    def test_productivity_module_3_as_target(self):
+        out = qp.plan(
+            "productivity-module-3", 1, _data(),
+            planets=["nauvis", "gleba"],
+            active_shuffles={"productivity-module-3"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertGreater(out["total_machine_count"], 0)
+
+    def test_biochamber_as_shuffle_target(self):
+        out = qp.plan(
+            "biochamber", 1, _data(),
+            planets=["nauvis", "gleba"],
+            active_shuffles={"biochamber"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertGreater(out["total_machine_count"], 0)
+
+    def test_shuffle_disables_prod_for_allow_productivity_false(self):
+        # biochamber's recipe has allow_productivity=False — solve_shuffle_loop
+        # must skip prod-bearing slot configs, picking cast_prod=0 in every tier.
+        cands = qp.enumerate_shuffle_candidates(_data())
+        biocham = next(c for c in cands if c.output_item == "biochamber")
+        # Biochamber's recycle returns its solid ingredients; pick the one
+        # that's also in the cast recipe (use the first solid recycle return).
+        primary = biocham.solid_recycle_returns[0]
+        v, configs = qp.solve_shuffle_loop(
+            biocham, primary, _data(),
+            module_quality="legendary",
+            quality_module_tier=3,
+            prod_module_tier=3,
+        )
+        # Sanity: solver returned a config for every tier; cast_prod=0 always.
+        for t in (0, 1, 2, 3):
+            self.assertEqual(configs[t]["cast_prod"], 0,
+                             f"tier {t} unexpectedly has prod modules: {configs[t]}")
 
 
 if __name__ == "__main__":
