@@ -12,15 +12,16 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-01. Tests: `python -m unittest dev.test_quality_planner -v` — **179 tests, all passing, ~0.20 s.**
+**Last updated:** 2026-05-02. Tests: `python -m unittest dev.test_quality_planner -v` — **192 tests, all passing, ~0.45 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
 - Multi-planet support (`--planets`)
 - Per-stage assembly module optimization (`--assembly-modules`)
 - Machine-quality plumbing (`--machine-quality`)
-- **Generic cross-item shuffle enumeration (`--enable-shuffle NAME` / `--enable-shuffles all`)** — auto-discovers 16 candidate recipes from the dataset (LDS, advanced-circuit, engine-unit, battery, processing-unit, ...).  Replaces the old hardcoded `--enable-lds-shuffle`.
-- Self-recycle targets (superconductor, holmium-plate, tungsten-carbide, fusion-power-cell, lithium)
+- **Generic cross-item shuffle enumeration (`--enable-shuffle NAME` / `--enable-shuffles all`)** — auto-discovers ~195 candidate recipes from the dataset including buildings (`biochamber`, `agricultural-tower`, `lab`, `capture-robot-rocket`), modules (T1/T2/T3 prod/speed/quality/efficiency), military (turrets, tank, spidertron, ammo, armor), end-game power (nuclear/fusion/heat-exchanger), logistics (roboport, robots).
+- Self-recycle targets: tungsten-carbide, superconductor, holmium-plate, fusion-power-cell, lithium, biolab, captive-biter-spawner
+- **Auto-compare cost gate (V3 item 4)** — for any item in `SELF_RECYCLE_TARGETS`, the planner runs both Path A (self-recycle target loop) and Path B (ingredient-upcycle via tree walk) and picks the lower `total_machine_count`. Surfaces the choice in `notes`. Often Path B wins (e.g. tungsten-carbide, holmium-plate), often Path A wins when Path B's chain hits a self-recycling intermediate (superconductor, fusion-power-cell, lithium, captive-biter-spawner).
 - Gleba bio-raws (yumako, jellynut, pentapod-egg) — **no spoilage timing**
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
@@ -61,6 +62,18 @@ python dev/quality_planner.py --item processing-unit --rate 60 \
 python dev/quality_planner.py --item iron-plate --rate 60 \
     --planets nauvis,vulcanus --no-asteroids \
     --tech recycling=1 --tech quality-module-3=1
+
+# Legendary biolab (Gleba/cryo building) — auto-compare picks ingredient-upcycle
+python dev/quality_planner.py --item biolab --rate 1 \
+    --planets nauvis,gleba $TECH_ALL
+
+# Legendary T3 prod modules (all need biter-egg)
+python dev/quality_planner.py --item productivity-module-3 --rate 60 \
+    --planets nauvis,gleba --enable-shuffle productivity-module-3 $TECH_ALL
+
+# Legendary tank
+python dev/quality_planner.py --item tank --rate 1 \
+    --planets nauvis --enable-shuffle tank $TECH_ALL
 ```
 
 ---
@@ -336,16 +349,32 @@ Stock Space Age yields **16 candidates**:
 
 **Cost gate (`--enable-shuffles all` only).**  Under `--enable-shuffles all`, the planner runs once with the greedy's chosen shuffles, then again with no shuffles, and keeps whichever has the lower `total_machine_count`.  When the no-shuffle path wins, the result includes a note explaining the fallback (`"--enable-shuffles all: greedy proposed shuffles totalling X machines, but no-shuffle baseline is Y machines — kept baseline"`).  Under explicit `--enable-shuffle NAME`, the user's choice is honoured unconditionally — the gate is not applied.
 
-### Self-recycle target
+### Self-recycle target & auto-comparator (V3 item 4)
 
-When the target is in `SELF_RECYCLE_TARGETS` (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`, `lithium`):
+When the target is in `SELF_RECYCLE_TARGETS` (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`, `lithium`, `biolab`, `captive-biter-spawner`):
 
+**Path A — `_plan_self_recycle_target`:**
 1. `solve_self_recycle_target_loop` runs:
    - Outer search: enumerate `(craft_prod, craft_quality, recycle_quality)` configs.
    - One craft produces `items_per_craft = output × (1 + prod)` items distributed across tiers by `q_craft`.
    - Inner DP `V_rec[t]`: per-item legendary yield from a single tier-t item entering a recycler-only chain (converges because retention < 1).
    - Total = `items_per_craft × Σ craft_probs[s] × V_rec[s]`.
 2. Ingredients consumed at NORMAL quality (quality rolls happen inside the loop) → `normal_solid_input` / `normal_fluid_input`. Walked through `walk_recipe_tree` as normal-quality production trees.
+
+**Path B — standard tree walk:** `plan()` recursed with internal flag `_force_tree_walk=True` bypasses the SELF_RECYCLE_TARGETS dispatch and runs the normal recipe-tree walker. The target is crafted from legendary-quality ingredients, each ingredient sourced via the standard quality paths (asteroid, mined-recycle, shuffle).
+
+**Auto-comparator** (always-on for SELF_RECYCLE_TARGETS):
+- Runs both paths.
+- If Path B raises a `ValueError` (e.g. an intermediate is in `SELF_RECYCLING_BLOCKLIST`), Path A wins automatically with a note explaining the fallback.
+- Otherwise picks whichever has the lower `total_machine_count` and attaches an explanatory note like `auto-compare: ingredient-upcycle (480.1 machines) beats self-recycle loop (1105.9 machines).`
+
+Observed outcomes (60/min legendary, full tech, fully-researched flags):
+- **tungsten-carbide** → Path B wins (~480 vs ~1106 machines)
+- **holmium-plate** → Path B wins (mined holmium-ore upcycle)
+- **superconductor** → Path A wins (Path B fails on holmium-plate intermediate)
+- **fusion-power-cell** / **lithium** → Path A wins (Path B fails on holmium-plate)
+- **captive-biter-spawner** → Path A wins (Path B fails on lithium-plate via fluoroketone-cold)
+- **biolab** → Path B wins (~16 700 vs ~63 800 machines)
 
 These items still fail-fast when used as INTERMEDIATE ingredients in another chain — they must be the target, or supplied externally.
 
@@ -450,7 +479,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **179 tests**, 26 classes.
+`dev/test_quality_planner.py` — **192 tests**, 27 classes.
 
 | Class | Coverage |
 |---|---|
@@ -479,6 +508,7 @@ MACHINE_INHERENT_PROD = {
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
 | `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, `quality-module-3` gate, partial-lock baseline parity, `_parse_tech_state` validation, `tech_state` is a required kwarg |
+| `TestGlebaTargets` (V3 item 4) | `biolab`/`captive-biter-spawner` in `SELF_RECYCLE_TARGETS`; auto-comparator picks Path B for tungsten-carbide, Path A for superconductor; explanatory notes always present; shuffle enumeration includes buildings + modules + military + endgame; single-output recyclers excluded; `tank`/`biochamber`/`capture-robot-rocket`/`productivity-module-3` plan as shuffle targets; shuffle DP correctly skips prod-bearing slots when recipe has `allow_productivity=False`. |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.
@@ -499,6 +529,8 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 - **Argparse % escaping.** Help strings containing `%` must escape as `%%` — argparse format-substitutes them otherwise (`--assembly-modules` and `--machine-quality` flags both have `%%`).
 - **`--tech` default is locked.** A bare CLI invocation now produces an empty `tech_state={}` and fails-fast on the recycler check. Library callers (incl. tests) MUST pass `tech_state` — there is no default. Use `qp.ALL_TECH_UNLOCKED` for the legacy "fully researched" baseline. This was a deliberate breaking change to make the user's research state explicit (V3 item 2).
 - **Shuffle DP solvers ignore tech_state.** `solve_shuffle_loop` / `compute_shuffle_stage` use `cli.get_machine` directly and do not consult `tech_state`. If the user enables a shuffle whose cast machine is locked (e.g. `--enable-shuffle low-density-structure --tech tungsten-carbide=0`), the shuffle still runs as if the foundry exists. The main-chain walker and `_pick_recipe_fluid_preferred` correctly gate locked machines, so this only matters when the user explicitly opts-in to a shuffle that requires a locked machine.
+- **Auto-comparator changes path-A behaviour for existing self-recycle targets** (V3 item 4). Adding `biolab`/`captive-biter-spawner` was easy; the substantial change was always-on auto-compare for ALL items in `SELF_RECYCLE_TARGETS`. Some pre-V3-item-4 plans now route via Path B (ingredient-upcycle) when it's cheaper — `tungsten-carbide` (480 vs 1106) and `holmium-plate` are the visible cases. Existing tests that assumed `self-recycle-target` stage presence had to be updated to use a Path-A-winning target like `superconductor`. Path A still wins when Path B's chain hits a self-recycling intermediate.
+- **`enumerate_shuffle_candidates` returns 195 items, not 16.** Dropping the `allow_productivity=True` filter (V3 item 4) broadened it dramatically. Greedy shuffle selection still scales fine because most candidates don't overlap with any given chain's leaves.
 
 ---
 
@@ -514,13 +546,19 @@ Greedy selection + baseline-fallback cost gate are shipped (see §Algorithms).  
 
 **Shipped** as `--tech NAME=LEVEL` (see §Tech-state gating).  Covers recycler, foundry, EM-plant, cryogenic-plant, biochamber, quality-module tiers.  Per-planet-landing distinction (narrower than `--planets`) was deferred — for now `--planets X` continues to imply the user has landed on planet X.
 
-### Gleba spoilage timing (V3 item 4 finish — ~250 LoC)
+### Gleba quality targets (V3 item 4 — shipped)
 
-Bio-raw self-recycle math is in tree. Missing pieces:
+Originally framed as "Gleba spoilage timing"; refactored to focus on the more-valuable question: **how do you make legendary buildings/modules?** The shipped solution:
+- `enumerate_shuffle_candidates` no longer filters by `allow_productivity=True` → 195 candidates (was 16). Buildings, modules, military equipment, end-game power, logistics all qualify.
+- `biolab` and `captive-biter-spawner` added to `SELF_RECYCLE_TARGETS`.
+- Auto-comparator (always-on for `SELF_RECYCLE_TARGETS`): runs Path A (self-recycle target loop) and Path B (ingredient-upcycle), picks lower machine count, attaches explanatory note.
 
-- **Spoilage timing.** Self-recycle yields ~0.04 % per cycle → thousands of cycles to reach legendary. Bioflux spoils in 1 hour, nutrients in 5 minutes. Real builds need short loops + spoilage-research investment + accepted legendary loss to spoilage. Planner currently reports machine counts as if there's no spoilage budget — wrong for Gleba.
+Spoilage time-budget modelling was deliberately skipped — when Path B is infeasible because ingredients are too perishable, the DP yield collapses and Path B's machine count goes astronomical, naturally losing the cost gate.
+
+Remaining Gleba work (deferred):
 - **Pentapod-egg as target.** Recipe is `1 egg + 30 nutrients + 60 water → 2 eggs` (doubling self-loop where input = output). `solve_self_recycle_target_loop` assumes external ingredients; doesn't handle ingredient = output yet.
 - **Agricultural quality.** Towers have 0 module slots; harvest is normal-quality only. Constraint already correct but worth surfacing to users.
+- **Single-output self-recycle.** `firearm-magazine` and `stone-wall` recycle to 1 ingredient each; the shuffle DP degenerates. Would need a different solver shape.
 
 ### Alternate objectives (V3 item 6 — scope TBD)
 

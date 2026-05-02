@@ -287,10 +287,15 @@ def enumerate_shuffle_candidates(data: dict) -> list[ShuffleCandidate]:
 
     # Group eligible cast recipes by output item, then pick the fluid-
     # preferred variant per output.
+    #
+    # Note: we DO NOT filter by ``allow_productivity`` here.  Buildings,
+    # modules, and military/end-game items have ``allow_productivity=False``
+    # but are still valid quality-target candidates via the cast+recycle DP
+    # (the cast leg just can't fit prod modules — quality slots only).  The
+    # ``allow_productivity`` flag is forwarded into ``solve_shuffle_loop`` so
+    # the cast-leg config search disables prod-bearing slot splits.
     by_output: dict[str, list[tuple[dict, tuple, tuple]]] = {}
     for r in data.get("recipes", []):
-        if not r.get("allow_productivity"):
-            continue
         if r.get("subgroup") in ("empty-barrel", "fill-barrel"):
             continue
         if r.get("category") in ("recycling", "recycling-or-hand-crafting"):
@@ -363,12 +368,18 @@ SELF_RECYCLING_BLOCKLIST = frozenset([
 
 # V3: items that target-self-recycle.  Same as the blocklist, plus a few that
 # don't have direct asteroid/mined paths: fusion-power-cell, lithium.
+#
+# V3 item 4: Gleba/cryo buildings whose recyclers return the building itself
+# (biolab, captive-biter-spawner) — same shape, runs through
+# `_plan_self_recycle_target`.
 SELF_RECYCLE_TARGETS = frozenset([
     "tungsten-carbide",
     "superconductor",
     "holmium-plate",
     "fusion-power-cell",
     "lithium",
+    "biolab",
+    "captive-biter-spawner",
 ])
 
 # Inherent productivity bonus per machine type (Space Age).  Cryogenic plant
@@ -2567,6 +2578,7 @@ def plan(
     machine_quality: str = "normal",
     no_asteroids: bool = False,
     tech_state: dict[str, int],
+    _force_tree_walk: bool = False,
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
     scale stages, assemble full output.
@@ -2577,6 +2589,10 @@ def plan(
     ``tech_state`` is a required keyword argument: ``dict[tech_name → level]``.
     Empty dict = nothing researched (fail-fast on the recycler check).  Use
     ``ALL_TECH_UNLOCKED`` for the "fully researched" baseline.
+
+    ``_force_tree_walk`` (internal) bypasses the SELF_RECYCLE_TARGETS dispatch
+    so the auto-comparator (V3 item 4) can compute Path B (ingredient-upcycle)
+    for items that would otherwise route through ``_plan_self_recycle_target``.
     """
     research_levels = research_levels or {}
     planets_fs: frozenset[str] = frozenset(planets) if planets else frozenset()
@@ -2610,8 +2626,12 @@ def plan(
     # V3: dedicated self-recycle target path.  When the user asks for legendary
     # of a self-recycling item, we run the recycle DP and consume the recipe's
     # ingredients at NORMAL quality (quality rolls happen during craft+recycle).
-    if item_key in SELF_RECYCLE_TARGETS:
-        return _plan_self_recycle_target(
+    #
+    # V3 item 4: auto-compare Path A (self-recycle target loop) against Path B
+    # (ingredient-upcycle via tree walk).  Pick the cheaper.  When recursing
+    # for Path B, set ``_force_tree_walk=True`` to skip this dispatch.
+    if item_key in SELF_RECYCLE_TARGETS and not _force_tree_walk:
+        path_a = _plan_self_recycle_target(
             item_key, rate, data,
             module_quality=module_quality,
             research_levels=research_levels,
@@ -2623,6 +2643,48 @@ def plan(
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
         )
+        # Path B: re-enter plan() with the SELF_RECYCLE dispatch bypassed.
+        path_b = None
+        path_b_error: str | None = None
+        try:
+            path_b = plan(
+                item_key, rate, data,
+                module_quality=module_quality,
+                research_levels=research_levels,
+                assembler_level=assembler_level,
+                quality_module_tier=quality_module_tier,
+                planets=planets_fs,
+                active_shuffles=active_shuffles,
+                assembly_modules=assembly_modules,
+                prod_module_tier=prod_module_tier,
+                machine_quality=machine_quality,
+                no_asteroids=no_asteroids,
+                tech_state=tech_state,
+                _force_tree_walk=True,
+            )
+        except ValueError as e:
+            path_b_error = str(e)
+
+        a_count = float(path_a.get("total_machine_count", 0.0))
+        if path_b is None:
+            path_a.setdefault("notes", []).append(
+                f"auto-compare: ingredient-upcycle path failed "
+                f"({(path_b_error or '')[:120]}); using self-recycle loop "
+                f"({a_count:.1f} machines)."
+            )
+            return path_a
+        b_count = float(path_b.get("total_machine_count", 0.0))
+        if b_count > 0 and b_count < a_count:
+            path_b.setdefault("notes", []).append(
+                f"auto-compare: ingredient-upcycle ({b_count:.1f} machines) "
+                f"beats self-recycle loop ({a_count:.1f} machines)."
+            )
+            return path_b
+        path_a.setdefault("notes", []).append(
+            f"auto-compare: self-recycle loop ({a_count:.1f} machines) "
+            f"beats ingredient-upcycle ({b_count:.1f} machines)."
+        )
+        return path_a
     if item_key in PLANET_UNLOCKS:
         if not _planet_unlocks_item(item_key, planets_fs) and item_key not in RAW_TO_CHUNK:
             needed = PLANET_UNLOCKS[item_key]
