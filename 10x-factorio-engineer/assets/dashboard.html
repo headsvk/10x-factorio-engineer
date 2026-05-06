@@ -840,7 +840,7 @@ return `
 ${esc(label(name))}${info?.allWip ? ' <span class="wip-badge">WIP</span>' : ''}
 </div>
 <div class="science-meta">
-<span class="rate-text">${actual}/min</span>
+<span class="rate-text">${fmtN(actual)}/min</span>
 <span class="pct-text" style="color:${col}">${p}%</span>
 </div>
 </div>
@@ -1119,7 +1119,7 @@ const powCell = stepPow
 : '—';
 const mods    = recModOvr[s.recipe] ?? modCfgs[s.machine]    ?? [];
 const beacon  = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? defaultBcn ?? null;
-const modHtml = mods.map(modChip).join(' ');
+const modHtml = mods.filter(m => m.count > 0).map(modChip).join(' ');
 const bcnHtml = beacon ? bcnChip(beacon, housingQ) : '';
 const bonusHtml = s.beacon_speed_bonus > 0
 ? `<span style="font-size:9px;color:var(--text-dim)">+${(s.beacon_speed_bonus * 100).toFixed(1)}%</span>`
@@ -1207,7 +1207,7 @@ const noteSection = line.player_notes ? `
 body = `<div class="card-body">${machineSection}${coProductSection}${busInputSection}${rawSection}${minerSection}${noteSection}</div>`;
 }
 const cardClass   = line.wip ? 'wip' : sc;
-const displayRate = line.wip ? (line.target_rate ?? 0) : actual;
+const displayRate = actual;
 const stale = lineStaleTechs(line);
 const cappedHere = line.cli_result?.research_prod_capped === true;
 const chips = [
