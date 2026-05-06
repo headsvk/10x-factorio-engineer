@@ -555,8 +555,27 @@ Originally framed as "Gleba spoilage timing"; refactored to focus on the more-va
 
 Spoilage time-budget modelling was deliberately skipped — when Path B is infeasible because ingredients are too perishable, the DP yield collapses and Path B's machine count goes astronomical, naturally losing the cost gate.
 
+### Pentapod-egg as a self-feed target (V3 item 4 — shipped)
+
+Recipe is `1 pentapod-egg + 30 nutrients + 60 water → 2 pentapod-egg` (Gleba, biochamber, +50% inherent prod, `allow_productivity=true`).  The ingredient is also the output — a "self-feed" / doubling recipe.
+
+`solve_self_recycle_target_loop` doesn't apply: the per-atom value DP `V(q) = max(craft, recycle)` has no positive fixed point whenever `output × p_stay > 1` (always true here).  So a separate solver `solve_self_feed_target_loop` was added with a small **linear flow LP**:
+
+- Per processing tier `q ∈ {0,1,2,3}` (legendary q=4 drains): `x_q` crafts/min and `y_q` recycles/min (≥ 0).
+- Balance at each tier: `A_q · x_q + B_q · y_q = I_q` where `A_q = 1 - output_q · cp_q[q→q]` (negative for super-productive), `B_q = 1 - retention · rp_q[q→q]` (positive), `I_q` accumulates from lower tiers, `I_0 = 0`.
+- Drain at q=4: `Σ_q [x_q · output_q · cp_q[q→4] + y_q · retention · rp_q[q→4]] = rate`.
+- Substitute `y_q = (I_q + |A_q| · x_q) / B_q` to eliminate balance equations → 4-variable LP with 1 equality + non-negativity → **corner-optimal** with exactly one `x_{q*}` positive.  Try all 4 corners, pick min-cost.
+
+Config search is collapsed by exploiting that lower-tier configs are inert when only `x_{q*}` is positive (no atoms at q < q*) and upper-tier configs only need `rq` (no crafts).  Per corner: `25 · 5^(3-q*)` configs.  Total ≤ 4 000 configs in well under a second — no aggressive pruning needed.
+
+Wired in via `SELF_FEED_TARGETS = frozenset(["pentapod-egg"])` and the `_plan_self_feed_target` dispatcher in `plan()`.  **Auto-comparator is intentionally skipped** — Path B (ingredient-upcycle) recurses into the same problem since ingredient = output.
+
+Tests: `TestSelfFeedTarget` in `dev/test_quality_planner.py` (11 cases) covers basic plan shape, planet gating, rate-doubles, ingredient walking, no-auto-compare note, per-tier flows, module config exposure, human-format rendering, and solver edge cases (unknown item, non-self-feed item).
+
+Known limitation: the LP assumes a steady-state pool exists at the chosen `q*` tier (e.g. epic eggs at `q*=3`).  Bootstrapping that pool from a single normal egg requires a finite warm-up period the model does not size.  In practice the warm-up is irrelevant once steady state is reached.
+
 Remaining Gleba work (deferred):
-- **Pentapod-egg as target.** Recipe is `1 egg + 30 nutrients + 60 water → 2 eggs` (doubling self-loop where input = output). `solve_self_recycle_target_loop` assumes external ingredients; doesn't handle ingredient = output yet.
+- **Bacteria-cultivation / fish-breeding.** Same self-feed shape as pentapod-egg (`copper-bacteria-cultivation`, `iron-bacteria-cultivation`, `fish-breeding`).  They plug into the same solver — just add to `SELF_FEED_TARGETS` — but they're lower-priority targets (rarely needed at legendary tier).
 - **Agricultural quality.** Towers have 0 module slots; harvest is normal-quality only. Constraint already correct but worth surfacing to users.
 - **Single-output self-recycle.** `firearm-magazine` and `stone-wall` recycle to 1 ingredient each; the shuffle DP degenerates. Would need a different solver shape.
 

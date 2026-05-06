@@ -803,6 +803,166 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertIn("Superconductor", text)
 
 
+class TestSelfFeedTarget(unittest.TestCase):
+    """V3 item 4 (cont.): self-FEED targets — recipes whose ingredient list
+    contains the output item itself.  Pentapod-egg is the V1 case."""
+
+    def test_pentapod_egg_basic(self):
+        out = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        sts = [s for s in out["stages"] if s.get("role") == "self-feed-target"]
+        self.assertEqual(len(sts), 1)
+        st = sts[0]
+        self.assertEqual(st["target"], "pentapod-egg")
+        self.assertEqual(st["machine"], "biochamber")
+        self.assertGreater(st["craft_machines"], 0.0)
+        self.assertGreater(st["recycler_machines"], 0.0)
+        self.assertGreater(st["crafts_per_min"], 0.0)
+        self.assertGreater(st["recycles_per_min"], 0.0)
+        self.assertEqual(st["rate_per_min"], 60)
+        # q_star is one of the four processing tiers.
+        self.assertIn(st["q_star"], (0, 1, 2, 3))
+
+    def test_pentapod_egg_planet_gating(self):
+        # Without --planets gleba, pentapod-egg should fail-fast (it's in
+        # PLANET_UNLOCKS gated to gleba).
+        with self.assertRaises(ValueError) as ctx:
+            qp.plan(
+                "pentapod-egg", 60, _data(),
+                planets=[], tech_state=qp.ALL_TECH_UNLOCKED,
+            )
+        msg = str(ctx.exception).lower()
+        self.assertIn("gleba", msg)
+
+    def test_pentapod_egg_rate_doubles(self):
+        out_60 = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        out_120 = qp.plan(
+            "pentapod-egg", 120, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        # The self-feed stage scales linearly with rate (LP corner ratio
+        # is constant; only the absolute scale doubles).  Total machines
+        # may not exactly 2x because upstream walker stages can have
+        # rounding, but should be close.
+        self.assertAlmostEqual(
+            out_120["total_machine_count"] / out_60["total_machine_count"],
+            2.0, delta=0.01,
+        )
+
+    def test_pentapod_egg_ingredients_walked(self):
+        out = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        # nutrients ingredient is a non-fluid solid → walked into upstream
+        # stages, leaves should land in normal_solid_input.  water is fluid →
+        # normal_fluid_input.
+        self.assertIn("water", out["normal_fluid_input"])
+        self.assertGreater(out["normal_fluid_input"]["water"], 0.0)
+        # On Gleba the nutrients chain leaves yumako (raw plant) as a normal-
+        # quality solid input.  Either yumako or jellynut depending on the
+        # canonical nutrient recipe; assert at least one solid raw is present.
+        self.assertGreater(len(out["normal_solid_input"]), 0)
+        # The self-ingredient (pentapod-egg itself) should NOT appear in any
+        # input bucket — the loop self-supplies it.
+        self.assertNotIn("pentapod-egg", out["normal_solid_input"])
+        self.assertNotIn("pentapod-egg", out["normal_fluid_input"])
+
+    def test_pentapod_egg_no_auto_compare_note(self):
+        out = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        notes = " ".join(out.get("notes", []))
+        # Self-feed dispatcher does NOT run the Path A vs Path B comparator.
+        self.assertNotIn("ingredient-upcycle", notes)
+        # It DOES surface why the comparator is skipped.
+        self.assertIn("self-feed", notes)
+
+    def test_pentapod_egg_module_config_per_tier(self):
+        out = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        st = [s for s in out["stages"] if s.get("role") == "self-feed-target"][0]
+        cfg = st["module_config_per_tier"]
+        # Four processing tiers: normal, uncommon, rare, epic.
+        for tier_name in ("normal", "uncommon", "rare", "epic"):
+            self.assertIn(tier_name, cfg)
+            self.assertIn("craft", cfg[tier_name])
+            self.assertIn("recycle", cfg[tier_name])
+
+    def test_pentapod_egg_per_tier_flows(self):
+        out = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        st = [s for s in out["stages"] if s.get("role") == "self-feed-target"][0]
+        flows = st["per_tier_flows"]
+        # Sum of per-tier flows == totals (within tolerance).
+        total_crafts = sum(f["crafts_per_min"] for f in flows.values())
+        total_recycles = sum(f["recycles_per_min"] for f in flows.values())
+        self.assertAlmostEqual(total_crafts, st["crafts_per_min"], places=6)
+        self.assertAlmostEqual(total_recycles, st["recycles_per_min"], places=6)
+        # In the LP corner solution, only one tier should host crafts.
+        nonzero_craft_tiers = [
+            name for name, f in flows.items() if f["crafts_per_min"] > 1e-9
+        ]
+        self.assertEqual(len(nonzero_craft_tiers), 1)
+
+    def test_pentapod_egg_human_format_renders(self):
+        out = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        text = qp.format_human(out)
+        self.assertIn("[self-feed]", text)
+        self.assertIn("Pentapod Egg", text)
+
+    def test_pentapod_egg_solver_unknown_item_returns_zero(self):
+        # Solver sanity: unknown item has no recipe → returns (0, {}).
+        v, cfg = qp.solve_self_feed_target_loop(
+            "not-a-real-item", _data(),
+            machine_slots=4,
+            machine_speed_eff=2.0,
+            inherent_prod=0.5,
+            research_prod=0.0,
+            module_quality="legendary",
+        )
+        self.assertEqual(v, 0.0)
+        self.assertEqual(cfg, {})
+
+    def test_pentapod_egg_solver_non_self_feed_returns_zero(self):
+        # iron-plate is NOT a self-feed recipe (ingredient ≠ output) → solver
+        # returns (0, {}) because self_in == 0.
+        v, cfg = qp.solve_self_feed_target_loop(
+            "iron-plate", _data(),
+            machine_slots=4,
+            machine_speed_eff=2.0,
+            inherent_prod=0.0,
+            research_prod=0.0,
+            module_quality="legendary",
+        )
+        self.assertEqual(v, 0.0)
+        self.assertEqual(cfg, {})
+
+    def test_pentapod_egg_total_power_populated(self):
+        out = qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        # biochamber is burner-fuelled → 0 kW for self-feed stage; recycler
+        # contributes the only electric power.  Either way total_power_mw
+        # should be present and >= 0.
+        self.assertIn("total_power_mw", out)
+        self.assertGreaterEqual(out["total_power_mw"], 0.0)
+
+
 class TestAssemblyModules(unittest.TestCase):
     """V3 item 5: --assembly-modules fills assembly stage slots with prod modules."""
 

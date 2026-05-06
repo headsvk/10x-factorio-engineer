@@ -382,6 +382,20 @@ SELF_RECYCLE_TARGETS = frozenset([
     "captive-biter-spawner",
 ])
 
+# V3 item 4 (continuation): self-FEED targets — recipes whose ingredient list
+# contains the output item itself (the "doubling" recipe shape).  These need
+# a different solver from SELF_RECYCLE_TARGETS because the recipe is super-
+# productive (output × p_stay > 1 at every tier), so the per-atom value DP
+# has no positive fixed point.  Modeled as a linear-flow LP instead — see
+# `solve_self_feed_target_loop`.
+#
+# Currently only pentapod-egg is wired up.  Bacteria-cultivation recipes
+# (copper-bacteria-cultivation, iron-bacteria-cultivation) and fish-breeding
+# share the same shape and could be added later by joining this set.
+SELF_FEED_TARGETS = frozenset([
+    "pentapod-egg",
+])
+
 # Inherent productivity bonus per machine type (Space Age).  Cryogenic plant
 # has no inherent prod (just 8 slots).  Chem plant / assembler likewise zero.
 MACHINE_INHERENT_PROD: dict[str, float] = {
@@ -1684,7 +1698,7 @@ def _stage_power_kw(stage: dict, power_w: dict[str, int]) -> float:
             _w(cast_machine) * cast_machines
             + _w("recycler") * float(stage.get("recycler_machines", 0))
         ) / 1000.0
-    if role == "self-recycle-target":
+    if role == "self-recycle-target" or role == "self-feed-target":
         return (
             _w(stage.get("machine", "")) * float(stage.get("craft_machines", 0))
             + _w("recycler") * float(stage.get("recycler_machines", 0))
@@ -2323,6 +2337,231 @@ def solve_self_recycle_target_loop(
     return max(best_total, 0.0), configs
 
 
+# ---------------------------------------------------------------------------
+# Self-feed target planner (V3 item 4 cont.) — pentapod-egg etc.
+# ---------------------------------------------------------------------------
+
+def solve_self_feed_target_loop(
+    item_key: str,
+    data: dict,
+    machine_slots: int,
+    machine_speed_eff: float,
+    inherent_prod: float,
+    research_prod: float,
+    module_quality: str,
+    machine_quality: str = "normal",
+    prod_module_tier: int = 3,
+    quality_module_tier: int = 3,
+) -> tuple[float, dict]:
+    """LP-based steady-state solver for self-feed target items.
+
+    A "self-feed" recipe has the target item in BOTH its ingredient and result
+    lists — e.g. pentapod-egg: ``1 egg + 30 nutrients + 60 water → 2 eggs``.
+    The recipe is super-productive at every quality tier (output × p_stay > 1
+    for any reasonable module config), so :func:`solve_self_recycle_target_loop`
+    does not apply: its per-atom value DP has no positive fixed point.
+
+    Model — steady-state linear flows over processing tiers
+    ``q ∈ {0,1,2,3}`` (normal, uncommon, rare, epic).  Legendary (q=4)
+    drains immediately:
+
+      * ``x_q`` crafts/min, ``y_q`` recycles/min  (decision variables)
+      * Per-craft outputs at q': ``output_q · cp_q[q→q']``
+      * Per-recycle outputs at q': ``retention · rp_q[q→q']``
+      * Balance at each tier:
+            ``A_q · x_q + B_q · y_q = I_q``
+        where ``A_q = 1 - output_q · cp_q[q→q]`` (negative — super-productive),
+              ``B_q = 1 - retention · rp_q[q→q]`` (positive),
+              ``I_q = inflow from lower tiers (=0 at q=0; cascade upward)``.
+      * Drain at q=4: ``Σ_q [x_q · output_q · cp_q[q→4] + y_q · retention · rp_q[q→4]] = rate``
+
+    After substituting ``y_q = (I_q + |A_q| · x_q) / B_q`` (valid when A_q < 0),
+    we have a 4-variable LP with one equality constraint and non-negativity:
+
+        min Σ_q (x_q · kc_q + y_q · kr_q)
+        s.t. Σ_q drain coefficients · x_q = rate,  x_q ≥ 0
+
+    By LP corner-optimality the minimum lies at a vertex where exactly one
+    ``x_{q*}`` is positive.  We try ``q* ∈ {0,1,2,3}`` and pick the cheapest.
+
+    Outer search exploits a property of the LP corner solutions: when only
+    ``x_{q*} > 0``, tiers ``q < q*`` carry zero flow (their configs are
+    inert) and tiers ``q > q*`` only run recyclers (only their ``rq`` matters).
+    So per corner ``q*`` we enumerate ``25 · 5^(3-q*)`` configs; total ≤ 4 000
+    configs across all 4 corners.  Solves in well under a second.
+
+    Returns ``(legendary_per_minute_yield, plan)`` where ``yield`` is per
+    "unit machine cost" (drain / cost; useful for diagnostics) and ``plan``
+    contains x/y per tier, machine counts per tier, module configs per tier,
+    and the chosen drain rate.  Caller scales by ``rate`` outside.
+    """
+    craft_recipe = cli.pick_recipe(item_key, cli.build_recipe_index(data))
+    if craft_recipe is None:
+        return 0.0, {}
+    rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
+    retention = (
+        _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
+    )
+    if retention <= 0 or retention >= 1.0:
+        return 0.0, {}
+    self_in = _recipe_ing_amount(craft_recipe, item_key)
+    self_out_amt = _recipe_result_amount(craft_recipe, item_key)
+    if self_in <= 0 or self_out_amt <= 0:
+        return 0.0, {}
+
+    recipe_allow_prod = craft_recipe.get("allow_productivity", True)
+    qm_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    rec_speed_eff = RECYCLER_SPEED * qm_mult
+    craft_time = float(craft_recipe.get("energy_required", 1.0))
+    rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
+    # Machine cost coefficients: machines per craft/min (resp. recycle/min).
+    kc = craft_time / (machine_speed_eff * 60.0)
+    kr = rec_time / (rec_speed_eff * 60.0)
+
+    # Module config grid: full slots only (empty slots are dominated).
+    if recipe_allow_prod:
+        craft_configs = [(cp, machine_slots - cp) for cp in range(machine_slots + 1)]
+    else:
+        craft_configs = [(0, machine_slots)]
+    rec_configs = list(range(RECYCLER_SLOTS + 1))
+
+    # Helper: per-tier (output, cp_dist, rp_dist) cache by (cp, cq, rq).
+    def per_tier_kit(q: int, cp: int, cq: int, rq: int) -> tuple[float, list[float], list[float]]:
+        prod = (
+            inherent_prod + research_prod
+            + _prod_bonus(cp, prod_module_tier, module_quality)
+        )
+        if prod > 3.0:
+            prod = 3.0
+        out_q = self_out_amt * (1.0 + prod)
+        qc_craft = _quality_chance(cq, quality_module_tier, module_quality)
+        qc_rec = _quality_chance(rq, quality_module_tier, module_quality)
+        return out_q, _tier_skip_probs(qc_craft, q), _tier_skip_probs(qc_rec, q)
+
+    best_ratio = float("inf")  # cost-per-legendary; lower is better
+    best: dict | None = None
+
+    # In each LP corner only x_{q*} > 0; tiers q < q* have zero flow (their
+    # configs are irrelevant), and tiers q > q* run only y_q (recycler) so
+    # only their rq matters.  This collapses the search drastically.
+    for q_star in (0, 1, 2, 3):
+        # Enumerate configs at q_star (full craft+recycle config), and rq
+        # only at q > q_star (no crafts there).  Use placeholder zeros for
+        # q < q_star — those tiers are inert.
+        # Build per-tier choices as lists of (cp, cq, rq) tuples.
+        choices_per_tier: list[list[tuple[int, int, int]]] = []
+        for q in (0, 1, 2, 3):
+            if q < q_star:
+                choices_per_tier.append([(0, 0, 0)])  # inert; values unused
+            elif q == q_star:
+                choices_per_tier.append([
+                    (cp, cq, rq)
+                    for (cp, cq) in craft_configs
+                    for rq in rec_configs
+                ])
+            else:
+                choices_per_tier.append([(0, 0, rq) for rq in rec_configs])
+
+        # Cartesian product across the 4 tiers.
+        for c0 in choices_per_tier[0]:
+          for c1 in choices_per_tier[1]:
+            for c2 in choices_per_tier[2]:
+              for c3 in choices_per_tier[3]:
+                tier_cfg = (c0, c1, c2, c3)
+                cps = tuple(c[0] for c in tier_cfg)
+                cqs = tuple(c[1] for c in tier_cfg)
+                rqs = tuple(c[2] for c in tier_cfg)
+
+                output: list[float] = []
+                cp_dist: list[list[float]] = []
+                rp_dist: list[list[float]] = []
+                for q in (0, 1, 2, 3):
+                    out_q, cpq, rpq = per_tier_kit(q, cps[q], cqs[q], rqs[q])
+                    output.append(out_q)
+                    cp_dist.append(cpq)
+                    rp_dist.append(rpq)
+
+                # A_q at q_star must be < 0 (super-productive).  At q != q_star
+                # we don't craft so A_q is irrelevant; skip the check.
+                A_qstar = 1.0 - output[q_star] * cp_dist[q_star][0]
+                if A_qstar >= -1e-12:
+                    continue
+                # B_q must be > 0 at every tier where y_q may be positive
+                # (q_star and above).
+                bad_B = False
+                for q in range(q_star, 4):
+                    if 1.0 - retention * rp_dist[q][0] <= 1e-12:
+                        bad_B = True
+                        break
+                if bad_B:
+                    continue
+
+                # Solve the LP corner: x_{q_star} = 1, others = 0.
+                x_unit = [0.0, 0.0, 0.0, 0.0]
+                x_unit[q_star] = 1.0
+                y_unit = [0.0, 0.0, 0.0, 0.0]
+                I = [0.0, 0.0, 0.0, 0.0]
+                feasible = True
+                for q in (0, 1, 2, 3):
+                    A_q = 1.0 - output[q] * cp_dist[q][0]
+                    B_q = 1.0 - retention * rp_dist[q][0]
+                    # Balance: A_q · x_q + B_q · y_q = I_q
+                    # => y_q = (I_q - A_q · x_q) / B_q
+                    y_unit[q] = (I[q] - A_q * x_unit[q]) / B_q
+                    if y_unit[q] < -1e-9:
+                        feasible = False
+                        break
+                    if y_unit[q] < 0:
+                        y_unit[q] = 0.0
+                    # Cascade outputs to higher processing tiers q+1..3.
+                    for s in range(q + 1, 4):
+                        c_o = output[q] * cp_dist[q][s - q]
+                        c_r = retention * rp_dist[q][s - q]
+                        I[s] += x_unit[q] * c_o + y_unit[q] * c_r
+                if not feasible:
+                    continue
+                # Drain at legendary (q=4).
+                drain_per_unit = 0.0
+                for q in (0, 1, 2, 3):
+                    drain_per_unit += (
+                        x_unit[q] * output[q] * cp_dist[q][4 - q]
+                        + y_unit[q] * retention * rp_dist[q][4 - q]
+                    )
+                if drain_per_unit <= 1e-12:
+                    continue
+                cost_per_unit = sum(
+                    x_unit[q] * kc + y_unit[q] * kr for q in (0, 1, 2, 3)
+                )
+                ratio = cost_per_unit / drain_per_unit
+                if ratio < best_ratio:
+                    best_ratio = ratio
+                    best = {
+                        "cps": cps,
+                        "cqs": cqs,
+                        "rqs": rqs,
+                        "output": list(output),
+                        "cp_dist": [list(d) for d in cp_dist],
+                        "rp_dist": [list(d) for d in rp_dist],
+                        "q_star": q_star,
+                        "x_unit": list(x_unit),
+                        "y_unit": list(y_unit),
+                        "drain_per_unit": drain_per_unit,
+                        "cost_per_unit": cost_per_unit,
+                        "kc": kc,
+                        "kr": kr,
+                        "retention": retention,
+                        "self_in": self_in,
+                        "self_out_amt": self_out_amt,
+                        "craft_recipe_key": craft_recipe.get("key", item_key),
+                    }
+
+    if best is None:
+        return 0.0, {}
+    # "Yield" = drain/cost — used only as a positive sanity scalar.
+    yield_per_machine = 1.0 / best_ratio
+    return yield_per_machine, best
+
+
 
 def _plan_self_recycle_target(
     item_key: str,
@@ -2558,6 +2797,237 @@ def _plan_self_recycle_target(
     }
 
 
+def _plan_self_feed_target(
+    item_key: str,
+    rate: float,
+    data: dict,
+    *,
+    module_quality: str,
+    research_levels: dict[str, int],
+    assembler_level: int,
+    quality_module_tier: int,
+    planets: frozenset[str],
+    tech_state: dict[str, int],
+    assembly_modules: bool = False,
+    prod_module_tier: int = 3,
+    machine_quality: str = "normal",
+) -> dict:
+    """Plan a chain whose target is a self-FEED recipe (ingredient = output).
+
+    Mirrors :func:`_plan_self_recycle_target` but skips the self-ingredient
+    when walking upstream demands (the self-feed loop supplies its own input)
+    and dispatches to :func:`solve_self_feed_target_loop` for the LP-based
+    flow solve.
+
+    The auto-comparator (Path A vs Path B) does NOT apply here: Path B would
+    recurse into the same problem since ingredient = output, so it is
+    structurally unhelpful.
+    """
+    recipe_idx = cli.build_recipe_index(data)
+    fluids = build_fluid_set(data)
+    planet_props = _combined_planet_props(data, planets)
+    locked_machines = _tech_locked_machines(tech_state)
+    craft_recipe = _pick_recipe_fluid_preferred(
+        item_key, recipe_idx, fluids, planets, planet_props,
+        locked_machines=locked_machines, assembler_level=assembler_level,
+    )
+    if craft_recipe is None:
+        raise ValueError(f"ERROR: no craft recipe for '{item_key}'")
+    mr = _machine_for_recipe(craft_recipe, assembler_level, locked_machines)
+    if mr is None:
+        raise ValueError(
+            f"ERROR: cannot produce '{item_key}' — recipe "
+            f"'{craft_recipe['key']}' requires a locked machine for category "
+            f"'{craft_recipe.get('category')}'.  Add the corresponding --tech flag."
+        )
+    machine_key, machine_speed = mr
+    machine_speed_eff = float(machine_speed) * (
+        1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    )
+    module_slots_map = cli.build_machine_module_slots(data)
+    machine_slots = int(module_slots_map.get(machine_key, 0))
+    inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+    research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels)
+
+    _yield, plan_data = solve_self_feed_target_loop(
+        item_key, data,
+        machine_slots=machine_slots,
+        machine_speed_eff=machine_speed_eff,
+        inherent_prod=inherent_prod,
+        research_prod=research_prod,
+        module_quality=module_quality,
+        machine_quality=machine_quality,
+        prod_module_tier=prod_module_tier,
+        quality_module_tier=quality_module_tier,
+    )
+    if not plan_data:
+        raise ValueError(
+            f"ERROR: self-feed loop for '{item_key}' has no feasible config — "
+            f"machine={machine_key}, slots={machine_slots}.  Check that the "
+            f"recipe is super-productive (output × p_stay > 1) at all tiers."
+        )
+
+    # Scale unit LP solution to target rate.
+    drain_per_unit = float(plan_data["drain_per_unit"])
+    scale = rate / drain_per_unit
+    x = [float(v) * scale for v in plan_data["x_unit"]]
+    y = [float(v) * scale for v in plan_data["y_unit"]]
+    kc = float(plan_data["kc"])
+    kr = float(plan_data["kr"])
+    craft_machines_per_tier = [x[q] * kc for q in (0, 1, 2, 3)]
+    recycler_machines_per_tier = [y[q] * kr for q in (0, 1, 2, 3)]
+    craft_machines_total = sum(craft_machines_per_tier)
+    recycler_machines_total = sum(recycler_machines_per_tier)
+    crafts_per_min_total = sum(x)
+    recycles_per_min_total = sum(y)
+
+    cps = plan_data["cps"]
+    cqs = plan_data["cqs"]
+    rqs = plan_data["rqs"]
+
+    # Walk non-self ingredients at NORMAL quality.  Each ingredient amount is
+    # consumed per craft; total demand = amount × crafts_per_min_total.
+    normal_stages: list[dict] = []
+    normal_solid_input: dict[str, float] = {}
+    normal_fluid_input: dict[str, float] = {}
+    for ing in craft_recipe.get("ingredients", []):
+        iname = ing["name"]
+        if iname == item_key:
+            continue  # self-ingredient — supplied by the loop itself
+        amt = float(ing.get("amount", 0))
+        ing_rate = amt * crafts_per_min_total
+        if iname in fluids:
+            normal_fluid_input[iname] = normal_fluid_input.get(iname, 0.0) + ing_rate
+            continue
+        try:
+            sub_stages, sub_raws = walk_recipe_tree(
+                iname, ing_rate, data, research_levels, assembler_level,
+                fluids, planet_props, planets,
+                assembly_modules=assembly_modules,
+                assembly_module_quality=module_quality,
+                prod_module_tier=prod_module_tier,
+                machine_quality=machine_quality,
+                tech_state=tech_state,
+            )
+        except ValueError:
+            normal_solid_input[iname] = normal_solid_input.get(iname, 0.0) + ing_rate
+            continue
+        for st in sub_stages:
+            st["normal_quality_chain"] = True
+        normal_stages.extend(sub_stages)
+        for raw, ramt in sub_raws.items():
+            if raw in fluids:
+                normal_fluid_input[raw] = normal_fluid_input.get(raw, 0.0) + ramt
+            else:
+                normal_solid_input[raw] = normal_solid_input.get(raw, 0.0) + ramt
+
+    self_stage = {
+        "role": "self-feed-target",
+        "target": item_key,
+        "recipe": str(plan_data["craft_recipe_key"]),
+        "machine": machine_key,
+        "machine_count": craft_machines_total + recycler_machines_total,
+        "craft_machines": craft_machines_total,
+        "recycler_machines": recycler_machines_total,
+        "crafts_per_min": crafts_per_min_total,
+        "recycles_per_min": recycles_per_min_total,
+        "rate_per_min": rate,
+        "q_star": int(plan_data["q_star"]),
+        "per_tier_flows": {
+            QUALITY_TIERS[q]: {
+                "crafts_per_min": x[q],
+                "recycles_per_min": y[q],
+                "craft_machines": craft_machines_per_tier[q],
+                "recycler_machines": recycler_machines_per_tier[q],
+            }
+            for q in (0, 1, 2, 3)
+        },
+        "module_config_per_tier": {
+            QUALITY_TIERS[q]: {
+                "craft": (
+                    f"{cps[q]}p+{cqs[q]}q "
+                    f"(t{quality_module_tier} {module_quality})"
+                ),
+                "recycle": (
+                    f"{rqs[q]}q "
+                    f"(t{quality_module_tier} {module_quality})"
+                ),
+            }
+            for q in (0, 1, 2, 3)
+        },
+    }
+
+    total_machines = (
+        self_stage["machine_count"]
+        + sum(s["machine_count"] for s in normal_stages)
+    )
+
+    notes: list[str] = [
+        f"self-feed target '{item_key}' uses {machine_key} (slots={machine_slots}, "
+        f"inherent prod={inherent_prod:.2f}); ingredient = output -> loop self-"
+        f"sustains, only non-self ingredients are sourced externally",
+        f"LP corner picked: q*={plan_data['q_star']} (single tier hosts crafts; "
+        f"others run recyclers only); auto-comparator skipped (Path B reduces "
+        f"to the same problem)",
+    ]
+
+    machine_power_w = cli.build_machine_power_w(data)
+    all_stages = [self_stage] + normal_stages
+    for st in all_stages:
+        st["power_kw"] = _stage_power_kw(st, machine_power_w)
+    total_power_mw = sum(s["power_kw"] for s in all_stages) / 1000.0
+
+    by_role: dict[str, dict[str, float]] = {}
+    for st in all_stages:
+        role = st.get("role", "unknown")
+        bucket = by_role.setdefault(
+            role, {"machines": 0.0, "power_kw": 0.0, "stage_count": 0},
+        )
+        bucket["machines"] += float(st.get("machine_count", 0.0))
+        bucket["power_kw"] += float(st.get("power_kw", 0.0))
+        bucket["stage_count"] += 1
+    for bucket in by_role.values():
+        bucket["machines_pct"] = (
+            bucket["machines"] / total_machines * 100.0 if total_machines > 0 else 0.0
+        )
+        bucket["power_pct"] = (
+            bucket["power_kw"] / (total_power_mw * 1000.0) * 100.0
+            if total_power_mw > 0 else 0.0
+        )
+
+    notes.extend(_hot_spot_suggestions(
+        by_role,
+        active_shuffles=None,
+        assembly_modules=assembly_modules,
+        has_plastic=False,
+        machine_quality=machine_quality,
+        module_quality=module_quality,
+        quality_module_tier=quality_module_tier,
+        planets=planets,
+    ))
+
+    return {
+        "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
+        "asteroid_input": {},
+        "mined_input": {},
+        "fluid_input": {},
+        "normal_solid_input": normal_solid_input,
+        "normal_fluid_input": normal_fluid_input,
+        "shuffle_byproduct_legendary": {},
+        "shuffle_byproduct_credited": {},
+        "shuffle_byproduct_overflow": {},
+        "stages": [self_stage] + list(reversed(normal_stages)),
+        "total_machine_count": total_machines,
+        "total_power_mw": total_power_mw,
+        "summary": {"by_role": by_role},
+        "module_quality": module_quality,
+        "assembler_level": assembler_level,
+        "research_levels": dict(research_levels),
+        "planets": sorted(planets),
+        "notes": notes,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Planner
 # ---------------------------------------------------------------------------
@@ -2621,6 +3091,30 @@ def plan(
     if item_key in SELF_RECYCLING_BLOCKLIST and item_key not in SELF_RECYCLE_TARGETS:
         raise ValueError(
             f"ERROR: recipe '{item_key}' is self-recycling (output recycles to itself) — not supported"
+        )
+
+    # V3 item 4 (cont.): self-FEED targets (pentapod-egg etc.) — recipes whose
+    # ingredient list contains the output.  LP-based steady-state solver, no
+    # auto-comparator (Path B reduces to the same problem).
+    if item_key in SELF_FEED_TARGETS:
+        # Planet-unlock fail-fast for clearer error before we try recipe pick.
+        if item_key in PLANET_UNLOCKS and not _planet_unlocks_item(item_key, planets_fs):
+            needed = PLANET_UNLOCKS[item_key]
+            raise ValueError(
+                f"ERROR: item '{item_key}' requires one of planet(s) {list(needed)} "
+                f"— add --planets {','.join(needed)}"
+            )
+        return _plan_self_feed_target(
+            item_key, rate, data,
+            module_quality=module_quality,
+            research_levels=research_levels,
+            assembler_level=assembler_level,
+            quality_module_tier=quality_module_tier,
+            planets=planets_fs,
+            tech_state=tech_state,
+            assembly_modules=assembly_modules,
+            prod_module_tier=prod_module_tier,
+            machine_quality=machine_quality,
         )
 
     # V3: dedicated self-recycle target path.  When the user asks for legendary
@@ -3260,6 +3754,25 @@ def format_human(out: dict) -> str:
                 f"{st['recycler_machines']:.2f} recyclers, "
                 f"yield {st['yield_pct']:.4f}% per craft)"
             )
+        elif role == "self-feed-target":
+            L.append(
+                f"  [self-feed]    {_humanize(st['target'])}: "
+                f"{st['crafts_per_min']:.2f} crafts/min + "
+                f"{st['recycles_per_min']:.2f} recycles/min -> "
+                f"{st['rate_per_min']:.2f}/min legendary "
+                f"({st['craft_machines']:.2f} × {_humanize(st['machine'])} + "
+                f"{st['recycler_machines']:.2f} recyclers, "
+                f"q*={st['q_star']})"
+            )
+            for tier_name, flow in st.get("per_tier_flows", {}).items():
+                if flow["crafts_per_min"] > 1e-6 or flow["recycles_per_min"] > 1e-6:
+                    L.append(
+                        f"      tier {tier_name}: "
+                        f"{flow['crafts_per_min']:.2f} crafts "
+                        f"({flow['craft_machines']:.2f} m) + "
+                        f"{flow['recycles_per_min']:.2f} recycles "
+                        f"({flow['recycler_machines']:.2f} m)"
+                    )
         elif role == "cross-item-shuffle":
             byp = ", ".join(
                 f"{_humanize(k)}={v:.1f}/min"
