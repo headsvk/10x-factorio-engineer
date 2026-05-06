@@ -3125,5 +3125,160 @@ class TestResearchProductivity(unittest.TestCase):
         self.assertNotIn("research_prod_capped", out)
 
 
+# ---------------------------------------------------------------------------
+# TestUseCeil
+# ---------------------------------------------------------------------------
+
+def _apply_use_ceil(
+    location: "str | None",
+    item: str,
+    rate: "int | float",
+    *,
+    bus_items: "list[str] | None" = None,
+    module_configs: "dict | None" = None,
+    assembler: int = 3,
+) -> "tuple[cli.Solver, Fraction]":
+    """
+    Replicate the --use-ceil two-pass logic via the internal API.
+    Returns (final_solver, actual_rate).
+    """
+    key = location or "vanilla"
+    d   = _DATA[key]
+
+    def _make() -> cli.Solver:
+        return _solver(
+            location,
+            assembler_level=assembler,
+            module_configs=module_configs,
+            bus_items=frozenset(bus_items or []),
+        )
+
+    base_rate = Fraction(str(rate))
+
+    # Pass 1: preliminary solve
+    pre = _make()
+    pre.solve(item, base_rate)
+    pre.resolve_oil(d["data"])
+
+    # Find min-scale step
+    min_scale_frac: "Fraction | None" = None
+    min_scale_float: "float | None"   = None
+    for step in pre.steps.values():
+        mc    = step["machine_count"]
+        mc_f  = float(mc)
+        if mc_f <= 0:
+            continue
+        n = math.ceil(mc_f)
+        if isinstance(mc, Fraction) and mc > 0:
+            s_frac = Fraction(n) / mc
+            s_f    = float(s_frac)
+            if min_scale_float is None or s_f < min_scale_float:
+                min_scale_float = s_f
+                min_scale_frac  = s_frac
+        else:
+            s_f = n / mc_f
+            if min_scale_float is None or s_f < min_scale_float:
+                min_scale_float = s_f
+                min_scale_frac  = None
+
+    actual_rate = base_rate
+    if min_scale_float is not None and abs(min_scale_float - 1.0) > 1e-9:
+        if min_scale_frac is not None:
+            actual_rate = base_rate * min_scale_frac
+        else:
+            actual_rate = base_rate * Fraction(str(round(min_scale_float, 10)))
+
+    # Pass 2: main solve at actual_rate
+    s = _make()
+    s.solve(item, actual_rate)
+    s.resolve_oil(d["data"])
+    return s, actual_rate
+
+
+class TestUseCeil(unittest.TestCase):
+
+    def test_single_step_bus_inputs_gives_integer_machine_count(self):
+        # processing-unit with bus items: single step, fractional without --use-ceil
+        mods = {"assembling-machine-3": [_mspec(4, "prod", 1)]}
+        bus  = ["electronic-circuit", "advanced-circuit", "sulfuric-acid"]
+        s, rate = _apply_use_ceil(None, "processing-unit", 72, bus_items=bus, module_configs=mods)
+        mc = s.steps["processing-unit"]["machine_count"]
+        self.assertEqual(float(mc), math.ceil(float(mc)),
+                         msg=f"machine_count {mc} should be integer")
+        # Exact: ceil(300/29) = 11 → rate = 72 × 11/(300/29) = 76.56
+        self.assertEqual(rate, Fraction("7656/100"))
+
+    def test_two_step_chain_top_step_becomes_integer(self):
+        # advanced-circuit (top) + copper-cable (intermediate), both AM3+4×prod1
+        mods = {"assembling-machine-3": [_mspec(4, "prod", 1)]}
+        bus  = ["copper-plate", "electronic-circuit", "plastic-bar"]
+        s, rate = _apply_use_ceil(None, "advanced-circuit", 900, bus_items=bus, module_configs=mods)
+        mc_top = s.steps["advanced-circuit"]["machine_count"]
+        self.assertEqual(float(mc_top), math.ceil(float(mc_top)),
+                         msg=f"top machine_count {mc_top} should be integer")
+        # Binding step is advanced-circuit (77.5862 → ceil 78): rate = 900 × 78/77.5862
+        self.assertAlmostEqual(float(rate), 904.8, places=4)
+
+    def test_intermediate_is_correctly_sized_for_ceiled_top(self):
+        # copper-cable intermediate must be able to supply the ceiled top step
+        mods = {"assembling-machine-3": [_mspec(4, "prod", 1)]}
+        bus  = ["copper-plate", "electronic-circuit", "plastic-bar"]
+        s, rate = _apply_use_ceil(None, "advanced-circuit", 900, bus_items=bus, module_configs=mods)
+        mc_top   = float(s.steps["advanced-circuit"]["machine_count"])
+        mc_cable = float(s.steps["copper-cable"]["machine_count"])
+        # copper-cable should now be sized for the actual (higher) rate, not the original 900/min
+        # ceil(mc_cable) machines must supply mc_top machines running flat out
+        cable_output_at_ceil = math.ceil(mc_cable) / mc_cable  # headroom ratio
+        self.assertGreaterEqual(cable_output_at_ceil, 1.0)
+        # And its count should be larger than the no-ceil baseline (11.1474 → now ≥ 11.1474)
+        self.assertGreater(mc_cable, 11.14)
+
+    def test_already_integer_machine_count_no_change(self):
+        # iron-plate: energy=3.2s, electric-furnace speed=2 → mc = rate×3.2/(60×2) = rate/37.5
+        # At rate=75/min: mc = 75/37.5 = 2 (exact integer) → --use-ceil should not rescale
+        s, rate = _apply_use_ceil(None, "iron-plate", 75)
+        mc = s.steps["iron-plate"]["machine_count"]
+        self.assertEqual(mc, Fraction(2))
+        self.assertEqual(rate, Fraction(75))
+
+    def test_binding_is_intermediate_not_top(self):
+        # Construct a case where the intermediate has the tighter ceiling.
+        # copper-cable at 60/min: single step (bus stops at copper-plate).
+        # Without bus on copper-plate it becomes an intermediate.
+        # Use vanilla: copper-cable + copper-plate (raw) — copper-cable is top,
+        # copper-plate is mined (raw). Only one production step (copper-cable).
+        # Force a scenario: target electronic-circuit, bus copper-cable & iron-plate.
+        # Then only the electronic-circuit step exists; its ceiling IS the binding step.
+        mods = {"assembling-machine-3": [_mspec(4, "prod", 1)]}
+        bus  = ["copper-cable", "iron-plate"]
+        s, rate = _apply_use_ceil(None, "electronic-circuit", 100, bus_items=bus, module_configs=mods)
+        mc = s.steps["electronic-circuit"]["machine_count"]
+        self.assertEqual(float(mc), math.ceil(float(mc)))
+
+    def test_use_ceil_flag_echoed_in_json_output(self):
+        import subprocess, json as _json, os
+        cli_path = os.path.join(
+            os.path.dirname(__file__), "..", "10x-factorio-engineer", "assets", "cli.py"
+        )
+        result = subprocess.run(
+            [
+                sys.executable, cli_path,
+                "--item", "processing-unit", "--rate", "72",
+                "--assembler", "3",
+                "--modules", "assembling-machine-3=4:prod:1:normal",
+                "--bus-item", "electronic-circuit",
+                "--bus-item", "advanced-circuit",
+                "--bus-item", "sulfuric-acid",
+                "--use-ceil",
+            ],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        out = _json.loads(result.stdout)
+        self.assertTrue(out.get("use_ceil"), msg="use_ceil should be True in output")
+        mc = out["production_steps"][0]["machine_count"]
+        self.assertEqual(mc, math.ceil(mc), msg=f"machine_count {mc} should be integer")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

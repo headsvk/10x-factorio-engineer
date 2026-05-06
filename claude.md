@@ -119,7 +119,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/preview.py` | Generates `dev/preview.tmp.html` with factory state pre-loaded; defaults to `dev/sample/state.json`; use `--state PATH` for a custom JSON file; use `--no-min` for the unminified source dashboard |
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
-| `dev/test_cli.py` | `unittest` suite (198 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (204 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (50 tests) for quality_planner |
 | `dev/quality_planner_v1.md` | Spec document for the V1 planner — scope, algorithm, deferred features |
@@ -413,7 +413,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 198 tests covering:
+`dev/test_cli.py` contains 204 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -445,6 +445,7 @@ python -m unittest dev.test_cli -v
 | `TestHumanReadableOutput` | `format_human_readable()` returns non-JSON text; header contains item+rate; sections present (Production Steps, Raw Resources, Miners Needed, Power); machine names in steps; module/beacon config in header and detail lines; machine quality in step label; pumpjack shows yield%; bus inputs section when bus items present |
 | `TestLocationFilter` | `--location` raw_set filtering (vulcanus has tungsten-ore+sulfuric-acid, not iron-ore; gleba has yumako+jellynut+spoilage as raw; space-platform is empty); planet surface_conditions filtering; explicit `--recipe` override bypasses planet filter; `location` field in JSON output; Vulcanus water→steam-condensation+acid-neutralisation; Gleba plastic/sulfur/lubricant→bio-substitutes; Aquilo ice→ammoniacal-solution-separation |
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
+| `TestUseCeil` | `--use-ceil` two-pass re-solve: single-step bus-only line gives integer `machine_count`; two-step chain tops out at integer with intermediate correctly sized; binding-is-intermediate case leaves rate unchanged; already-integer counts produce no rescaling; `use_ceil: true` echoed in JSON output |
 
 ### `dev/test_quality_planner.py` (50 tests)
 

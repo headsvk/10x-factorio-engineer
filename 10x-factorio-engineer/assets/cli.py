@@ -18,6 +18,7 @@ Usage:
                   [--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY]  # repeatable
                   [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
                   [--bus-item ITEM-ID]                          # repeatable
+                  [--use-ceil]
                   [--format json|human]
 
 Outputs clean JSON to stdout (default), or human-readable text with --format human:
@@ -1706,6 +1707,8 @@ def format_output(
         out["recipe_module_overrides"] = args.recipe_module_overrides
     if getattr(args, "recipe_beacon_overrides", None):
         out["recipe_beacon_overrides"] = args.recipe_beacon_overrides
+    if getattr(args, "use_ceil", False):
+        out["use_ceil"] = True
 
     # Accumulate total power (MW)
     total_step_pwr      = sum(s["power_kw"] + s["beacon_power_kw"] for s in steps_list)
@@ -1968,6 +1971,16 @@ Examples:
             "Mutually exclusive with --rate and --machines. Requires exactly one --item."
         ),
     )
+    p.add_argument(
+        "--use-ceil", action="store_true", dest="use_ceil",
+        help=(
+            "Re-solve at the rate the tightest-rounding step's ceiled machine count "
+            "produces. Finds the step where ceil(mc)/mc is smallest (binding step), "
+            "scales the target rate by that ratio, then re-solves so all steps are "
+            "sized for integer machines. Single --item only. Not compatible with "
+            "--step-machines. Oil-product top targets are not supported."
+        ),
+    )
     p.add_argument("--assembler", default=3, type=int, choices=[1, 2, 3],
                    help="Assembling machine level (default: 3).")
     p.add_argument("--furnace",  default="electric",
@@ -2087,6 +2100,10 @@ Examples:
         p.error("Exactly one of --rate, --machines, or --step-machines must be provided.")
     if has_step_machines and len(args.items) != 1:
         p.error("--step-machines requires exactly one --item.")
+    if args.use_ceil and has_step_machines:
+        p.error("--use-ceil cannot be combined with --step-machines.")
+    if args.use_ceil and len(args.items) > 1:
+        p.error("--use-ceil requires exactly one --item.")
     n = len(args.items)
     if has_rate and len(args.rates) != n:
         p.error(
@@ -2249,6 +2266,61 @@ def main() -> None:
     else:
         for i, item in enumerate(args.items):
             targets.append((item, Fraction(str(args.rates[i]))))
+
+    if args.use_ceil and targets:
+        # Pass 1: preliminary solve to find fractional machine counts
+        pre = Solver(
+            solver.recipe_idx, solver.raw_set,
+            solver.assembler_level, solver.furnace_type,
+            module_configs=solver.module_configs or None,
+            beacon_configs=solver.beacon_configs or None,
+            default_beacon_config=solver.default_beacon_config,
+            machine_module_slots=solver.machine_module_slots or None,
+            machine_quality=solver.machine_quality,
+            beacon_quality=solver.beacon_quality,
+            recipe_overrides=solver.recipe_overrides or None,
+            recipe_machine_overrides=solver.recipe_machine_overrides or None,
+            recipe_module_overrides=solver.recipe_module_overrides or None,
+            recipe_beacon_overrides=solver.recipe_beacon_overrides or None,
+            bus_items=solver.bus_items or None,
+            planet_props=solver.planet_props or None,
+            location=solver.location,
+            research_levels=solver.research_levels or None,
+        )
+        pre.solve(targets[0][0], targets[0][1])
+        pre.resolve_oil(data)
+
+        # Find binding step: the one with the smallest ceil(mc)/mc ratio.
+        # Oil steps live in the linear system (not pre.steps), so they are
+        # naturally skipped here.
+        # Use exact Fraction arithmetic when machine_count is a Fraction (no
+        # beacons); fall back to float when beacons make it irrational.
+        min_scale_frac: Fraction | None = None   # exact path
+        min_scale_float: float | None   = None   # float path (beacons)
+        for step in pre.steps.values():
+            mc = step["machine_count"]
+            mc_f = float(mc)
+            if mc_f <= 0:
+                continue
+            n = math.ceil(mc_f)
+            if isinstance(mc, Fraction) and mc > 0:
+                s_frac = Fraction(n) / mc
+                s_f = float(s_frac)
+                if min_scale_float is None or s_f < min_scale_float:
+                    min_scale_float = s_f
+                    min_scale_frac  = s_frac
+            else:
+                s_f = n / mc_f
+                if min_scale_float is None or s_f < min_scale_float:
+                    min_scale_float = s_f
+                    min_scale_frac  = None  # can't do exact
+
+        if min_scale_float is not None and abs(min_scale_float - 1.0) > 1e-9:
+            if min_scale_frac is not None:
+                actual_rate = targets[0][1] * min_scale_frac
+            else:
+                actual_rate = targets[0][1] * Fraction(str(round(min_scale_float, 10)))
+            targets[0] = (targets[0][0], actual_rate)
 
     for item, rate in targets:
         solver.solve(item, rate)
