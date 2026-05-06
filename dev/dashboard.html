@@ -1268,6 +1268,44 @@ function renderLineCard(line, idx) {
         </table>
       </div>` : '';
 
+    // Aggregate machine, module and beacon totals across all steps
+    const _machTotals = {};      // machine_key → total ceil count
+    const _modTotals  = {};      // "type-tier-quality" → {m, total}
+    const _bcnTotals  = {};      // machine_key → {bcn, machineTotal}
+    for (const s of steps) {
+      const mc = s.machine_count_ceil ?? 0;
+      _machTotals[s.machine] = (_machTotals[s.machine] ?? 0) + mc;
+      const sMods = (recModOvr[s.recipe] ?? modCfgs[s.machine] ?? []).filter(m => m.count > 0);
+      for (const m of sMods) {
+        const k = `${m.type}-${m.tier}-${m.quality ?? 'normal'}`;
+        if (!_modTotals[k]) _modTotals[k] = { m, total: 0 };
+        _modTotals[k].total += mc * m.count;
+      }
+      const bcn = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? defaultBcn ?? null;
+      if (bcn) {
+        if (!_bcnTotals[s.machine]) _bcnTotals[s.machine] = { bcn, machineTotal: 0 };
+        _bcnTotals[s.machine].machineTotal += mc;
+      }
+    }
+    const _totChips = [
+      ...Object.entries(_machTotals).map(([m, n]) =>
+        `<span class="chip"><span style="font-weight:600;color:var(--text)">${n}×</span> <span style="color:var(--text-dim)">${esc(machineLabel(m))}</span></span>`),
+      ...Object.values(_modTotals).map(({m, total}) => {
+        const name = {prod:'Productivity',speed:'Speed',efficiency:'Efficiency'}[m.type] ?? m.type;
+        const qStr = m.quality !== 'normal' ? ` (${m.quality})` : '';
+        return `<span class="chip"><span style="font-weight:600;color:var(--text)">${total}×</span> <span style="color:var(--text-dim)">${name}-${m.tier}${qStr}</span></span>`;
+      }),
+      ...(Object.keys(_bcnTotals).length ? [(() => {
+        const totalBcn = Object.values(_bcnTotals).reduce((s, {bcn, machineTotal}) => s + bcn.count * machineTotal, 0);
+        return `<span class="chip"><span style="font-weight:600;color:var(--text)">${totalBcn}×</span> <span style="color:var(--text-dim)">Beacon</span></span>`;
+      })()] : []),
+    ].join('');
+    const totalsSection = _totChips ? `
+      <div class="card-section">
+        <div class="section-label">Totals</div>
+        <div class="chips">${_totChips}</div>
+      </div>` : '';
+
     const busInputs = line.cli_result?.bus_inputs ?? {};
     const busInputSection = Object.keys(busInputs).length ? `
       <div class="card-section">
@@ -1322,7 +1360,7 @@ function renderLineCard(line, idx) {
     const noteSection = line.player_notes ? `
       <div class="player-notes">${esc(line.player_notes)}</div>` : '';
 
-    body = `<div class="card-body">${machineSection}${coProductSection}${busInputSection}${rawSection}${minerSection}${noteSection}</div>`;
+    body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${busInputSection}${rawSection}${minerSection}${noteSection}</div>`;
   }
 
   const cardClass   = line.wip ? 'wip' : sc;
