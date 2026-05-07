@@ -65,6 +65,13 @@
           "label": "Automation Science",
           "target_rate": 60,
           "effective_rate": 60,
+          "cli_args": {
+            "item": "automation-science-pack",
+            "rate": 60.0,
+            "bus_items": [
+              "iron-gear-wheel"
+            ]
+          },
           "cli_result": {
             "item": "automation-science-pack",
             "rate_per_min": 60.0,
@@ -136,6 +143,15 @@
           "label": "Logistic Science",
           "target_rate": 60,
           "effective_rate": 60,
+          "cli_args": {
+            "item": "logistic-science-pack",
+            "rate": 60.0,
+            "bus_items": [
+              "electronic-circuit",
+              "iron-gear-wheel",
+              "iron-plate"
+            ]
+          },
           "cli_result": {
             "item": "logistic-science-pack",
             "rate_per_min": 60.0,
@@ -219,6 +235,17 @@
           "label": "Chemical Science",
           "target_rate": 45,
           "effective_rate": 45,
+          "cli_args": {
+            "item": "chemical-science-pack",
+            "rate": 45.0,
+            "bus_items": [
+              "copper-plate",
+              "iron-plate",
+              "plastic-bar",
+              "steel-plate",
+              "sulfur"
+            ]
+          },
           "cli_result": {
             "item": "chemical-science-pack",
             "rate_per_min": 45.0,
@@ -376,6 +403,10 @@
           "target_rate": 60,
           "effective_rate": 60,
           "player_notes": "Feeds bus + science lines",
+          "cli_args": {
+            "item": "electronic-circuit",
+            "rate": 60.0
+          },
           "cli_result": {
             "item": "electronic-circuit",
             "rate_per_min": 60.0,
@@ -487,6 +518,23 @@
           "target_rate": 15,
           "effective_rate": 15,
           "player_notes": "Petgas from bus; 2× Prod-3 on assemblers",
+          "cli_args": {
+            "item": "processing-unit",
+            "rate": 15.0,
+            "modules": {
+              "assembling-machine-3": [
+                {
+                  "count": 2,
+                  "type": "prod",
+                  "tier": 3,
+                  "quality": "normal"
+                }
+              ]
+            },
+            "bus_items": [
+              "petroleum-gas"
+            ]
+          },
           "cli_result": {
             "item": "processing-unit",
             "rate_per_min": 15.0,
@@ -750,6 +798,10 @@
           "label": "Steel Smelting",
           "target_rate": 120,
           "effective_rate": 120,
+          "cli_args": {
+            "item": "steel-plate",
+            "rate": 120.0
+          },
           "cli_result": {
             "item": "steel-plate",
             "rate_per_min": 120.0,
@@ -843,6 +895,16 @@
           "target_rate": 30,
           "effective_rate": 30,
           "player_notes": "Foundry chain — lava → molten-copper/molten-iron → cast plates+gears → science packs",
+          "cli_args": {
+            "item": "automation-science-pack",
+            "rate": 30.0,
+            "recipe": {
+              "copper-plate": "casting-copper",
+              "iron-gear-wheel": "casting-iron-gear-wheel",
+              "molten-copper": "molten-copper-from-lava",
+              "molten-iron": "molten-iron-from-lava"
+            }
+          },
           "cli_result": {
             "item": "automation-science-pack",
             "rate_per_min": 30.0,
@@ -982,6 +1044,13 @@
           "target_rate": 30,
           "effective_rate": 30,
           "player_notes": "Foundry chain — lava → molten-copper/molten-iron. Tungsten-ore mined locally. Sulfuric acid piped in for carbon and tungsten-carbide.",
+          "cli_args": {
+            "item": "metallurgic-science-pack",
+            "rate": 30.0,
+            "bus_items": [
+              "sulfuric-acid"
+            ]
+          },
           "cli_result": {
             "item": "metallurgic-science-pack",
             "rate_per_min": 30.0,
@@ -1183,6 +1252,14 @@
           "target_rate": 30,
           "effective_rate": 30,
           "player_notes": "All-biochamber chain — pentapod-egg self-seeding loop, yumako+jellynut from farming towers. Zero electric power draw.",
+          "cli_args": {
+            "item": "agricultural-science-pack",
+            "rate": 30.0,
+            "bus_items": [
+              "jellynut",
+              "yumako"
+            ]
+          },
           "cli_result": {
             "item": "agricultural-science-pack",
             "rate_per_min": 30.0,

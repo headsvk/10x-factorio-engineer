@@ -294,6 +294,15 @@ working context and update it after every player message.
           "item": "electronic-circuit",
           "label": "Green Circuit Block 1",  // optional; shown as card title
           "target_rate": 60.0,
+
+          // Inputs that produced this line's cli_result. Persist these so the line can be
+          // re-planned / upgraded without re-asking the player how it was sized. See §3.2.
+          "cli_args": {
+            "item": "electronic-circuit",   // mandatory; same as line.item
+            "rate": 60                      // sizing: exactly one of rate | machines | step_machines
+            // optional per-line overrides documented in §3.2
+          },
+
           "cli_result": { /* full JSON from cli.py, run with --location <this location's id> */ },
           "actual_machines": {
             // machine-key → count of placed machines as told by the player
@@ -383,6 +392,65 @@ module prod, clamped to +300 % total for crafting recipes only).
 Use this table to decide which lines need re-running after a `research_levels`
 update: if a line's `production_steps` include any recipe in the tech's list,
 that line is stale and must be re-planned.
+
+### 3.2 Per-line `cli_args` — what to persist
+
+Whenever you run `cli.py` for a line, capture the **inputs** of that run in
+`line.cli_args`. The shared top-level state already supplies the global flags
+(`--assembler`, `--furnace`, `--machine-quality`, `--beacon-quality`,
+`--research`, `--modules`, `--beacon`, `--recipe`); `cli_args` only stores the
+**line-level layer** on top of that — sizing plus any per-line override.
+
+**Mandatory:**
+- `item` — the target (must equal `line.item`; for multi-target solves, equals the primary item the line tracks).
+- Exactly **one** sizing key:
+  - `rate: <items/min>` — produced this rate.
+  - `machines: <int>` — sized to N machines of the top-level recipe (`--machines`).
+  - `step_machines: { "<recipe>": <int>, ... }` — constrained an intermediate step (`--step-machines`).
+  - `targets: [{ "item": "<id>", "rate": <items/min> }, ...]` — multi-target solve. Each entry becomes a parallel `--item ITEM --rate RATE` pair on the CLI.
+
+**Optional (only include when the line overrides the shared default):**
+
+| Field | Meaning | Becomes CLI flag |
+|-------|---------|------------------|
+| `assembler` | per-line assembler tier | `--assembler N` |
+| `furnace` | per-line furnace type | `--furnace TYPE` |
+| `machine_quality` | per-line machine quality | `--machine-quality Q` |
+| `beacon_quality` | per-line beacon-housing quality | `--beacon-quality Q` |
+| `modules` | per-line modules per machine, same shape as top-level `module_configs` | one `--modules MACHINE=...` per entry |
+| `beacon` | per-line beacons per machine, same shape as top-level `beacon_configs` | one `--beacon MACHINE=...` per entry |
+| `recipe` | per-line recipe overrides `{item: recipe}` | one `--recipe ITEM=RECIPE` per entry |
+| `recipe_machine` | `{recipe: machine}` redirect | one `--recipe-machine RECIPE=MACHINE` per entry |
+| `recipe_modules` | `{recipe: [ModuleSpec]}` per-recipe modules | one `--recipe-modules RECIPE=...` per entry |
+| `recipe_beacon` | `{recipe: BeaconSpec}` per-recipe beacons | one `--recipe-beacon RECIPE=...` per entry |
+| `bus_items` | list of item IDs drawn from this location's bus | one `--bus-item ITEM` per entry |
+| `research` | research-level overrides for this line only | one `--research NAME=LEVEL` per entry |
+| `use_ceil` | constrain to integer machine counts | `--use-ceil` |
+
+**Rules:**
+1. The `--location` flag is always derived from the parent location's `id`. Don't store it in `cli_args`.
+2. When the player asks to "upgrade this line" (change modules, assembler tier, etc.), **read `cli_args` first** — the sizing key (`rate` / `machines` / `step_machines`) tells you how the line was originally sized, so you preserve that constraint and only modify the parts the player asked to change.
+3. After every CLI run, refresh `cli_args` to reflect the actual command issued.
+
+**Example — the uranium line:**
+```jsonc
+{
+  "item": "uranium-fuel-cell",
+  "label": "Uranium (8 centrifuges)",
+  "cli_args": {
+    "item": "uranium-fuel-cell",
+    "step_machines": { "uranium-processing": 8 },
+    "modules": {
+      "assembling-machine-3": [{ "count": 4, "type": "prod", "tier": 1, "quality": "normal" }],
+      "centrifuge":           [{ "count": 2, "type": "prod", "tier": 1, "quality": "normal" }]
+    },
+    "assembler": 3
+  }
+}
+```
+This says: "size by holding `uranium-processing` at 8 centrifuges, override
+assembler to AM3, give AM3 4× prod-1 and centrifuge 2× prod-1." Re-running
+with these args reproduces the line exactly.
 
 ---
 

@@ -665,6 +665,22 @@ if (kw == null || kw === 0) return null;
 if (kw < 1000) return `${+kw.toFixed(1)} kW`;
 return `${+(kw / 1000).toFixed(2)} MW`;
 }
+function summarizeCliArgs(args) {
+if (!args || typeof args !== 'object') return null;
+const parts = [];
+if (args.rate != null) parts.push(`${args.rate}/min`);
+else if (args.machines != null) parts.push(`${args.machines} machines`);
+else if (args.step_machines && typeof args.step_machines === 'object') {
+const s = Object.entries(args.step_machines)
+.map(([r, n]) => `${n}× ${label(r)}`).join(', ');
+if (s) parts.push(s);
+} else if (Array.isArray(args.targets) && args.targets.length) {
+parts.push(args.targets.map(t => `${label(t.item)} ${t.rate}/min`).join(' + '));
+}
+if (args.assembler != null) parts.push(`AM${args.assembler}`);
+if (args.machine_quality && args.machine_quality !== 'normal') parts.push(args.machine_quality);
+return parts.length ? parts.join(' · ') : null;
+}
 function modChip(m) {
 const abbr = {prod: 'P', speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
 const tCls = {prod: 'type-prod', speed: 'type-speed', efficiency: 'type-eff'}[m.type] ?? '';
@@ -1241,7 +1257,13 @@ const coProductSection = `
 </div>`;
 const noteSection = line.player_notes ? `
 <div class="player-notes">${esc(line.player_notes)}</div>` : '';
-body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${busInputSection}${rawSection}${minerSection}${noteSection}</div>`;
+const cliArgsSummary = summarizeCliArgs(line.cli_args);
+const cliArgsSection = cliArgsSummary ? `
+<div class="card-section">
+<div class="section-label">Sized by</div>
+<div class="chips"><span class="chip" style="font-family:var(--mono,monospace);color:var(--text-dim)">${esc(cliArgsSummary)}</span></div>
+</div>` : '';
+body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${busInputSection}${rawSection}${minerSection}${cliArgsSection}${noteSection}</div>`;
 }
 const cardClass   = line.wip ? 'wip' : sc;
 const displayRate = actual;

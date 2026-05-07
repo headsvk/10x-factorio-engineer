@@ -468,6 +468,7 @@ def make_state_line_research_stale() -> dict:
             "label": "Iron Ore Mining",
             "target_rate": 120,
             "effective_rate": 120,
+            "cli_args": {"item": "iron-ore", "rate": 120},
             "cli_result": cli_result,
         }],
     )]
@@ -511,6 +512,7 @@ def make_state_line_research_capped() -> dict:
             "label": "Steel Plate",
             "target_rate": 30,
             "effective_rate": 30,
+            "cli_args": {"item": "steel-plate", "rate": 30},
             "cli_result": cli_result,
         }],
     )]
@@ -540,8 +542,14 @@ SECTION_SCENARIOS = [
 # ── Group 3: line card variant state factories ────────────────────────────────
 
 def _line_card_state(save_name, loc_id, loc_label, item, line_label,
-                     rate, cli_result, dataset="space-age") -> dict:
+                     rate, cli_result, dataset="space-age",
+                     cli_args=None) -> dict:
     state = _base_state(save_name, dataset=dataset)
+    if cli_args is None:
+        cli_args = {"item": item, "rate": rate}
+        bus = cli_result.get("bus_inputs") or {}
+        if bus:
+            cli_args["bus_items"] = sorted(bus.keys())
     state["locations"] = [_loc(
         loc_id, loc_label,
         lines=[{
@@ -549,6 +557,7 @@ def _line_card_state(save_name, loc_id, loc_label, item, line_label,
             "label": line_label,
             "target_rate": rate,
             "effective_rate": rate,
+            "cli_args": cli_args,
             "cli_result": cli_result,
         }],
     )]
