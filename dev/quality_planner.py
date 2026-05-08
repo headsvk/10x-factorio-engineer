@@ -52,6 +52,7 @@ import math
 import os
 import sys
 from collections import defaultdict, namedtuple
+from dataclasses import dataclass, field
 
 # Import from cli.py (sibling directory)
 _CLI_DIR = os.path.join(
@@ -1934,6 +1935,11 @@ def walk_recipe_tree(
     no_asteroids: bool = False,
     *,
     tech_state: dict[str, int],
+    _cache: "_DispatchCache | None" = None,
+    _in_flight: frozenset[str] = frozenset(),
+    _force_tree_walk_for: frozenset[str] = frozenset(),
+    _dispatch_env: dict | None = None,
+    _dispatch_out: set | None = None,
 ) -> tuple[list[dict], dict[str, float]]:
     """Walk recipe tree; return (stages, raw_demand_rates).
 
@@ -1942,6 +1948,25 @@ def walk_recipe_tree(
 
     raw_demand_rates maps raw_item_key -> demand per minute (solid raws only;
     fluid raws are tracked but don't flow through quality loops).
+
+    Dispatch kwargs (post-2026-05-08 audit):
+      ``_cache`` — per-``plan()`` memo for self-recycle dispatch + solver kernels.
+      ``_in_flight`` — items currently being dispatched higher up the call stack;
+        propagated to break cycles in ``choose_path_self_recycle``.
+      ``_force_tree_walk_for`` — items in this set are NOT short-circuited at the
+        ``SELF_RECYCLING_BLOCKLIST`` gate even if they'd normally route through
+        the dispatcher.  Used by Path B inside ``choose_path_self_recycle`` so it
+        can attempt an ingredient-upcycle of a single self-recycle target without
+        the dispatcher catching its own item.
+      ``_dispatch_env`` — optional dict carrying the kwargs ``choose_path_self_recycle``
+        needs (e.g. ``active_shuffles``); only consulted when the walker fires
+        an intermediate dispatch.  Top-level callers pre-populate this so the
+        walker can reach the dispatcher without re-deriving config from kwargs.
+      ``_dispatch_out`` — optional set the walker populates with the keys it
+        directly dispatched (this call only — recursive walker calls down the
+        chain don't write here).  Plan() reads this after the walker returns
+        to aggregate sub-plan ``normal_solid_input`` / ``normal_fluid_input``
+        without double-counting transitively-aggregated entries.
     """
     recipe_idx = cli.build_recipe_index(data)
     planets = planets or frozenset()
@@ -2007,6 +2032,11 @@ def walk_recipe_tree(
             demand[k] -= float(v)
     order: list[str] = [item_key]
     seen: set[str] = set()
+    # Items hit during Pass 1 that should dispatch to choose_path_self_recycle
+    # AFTER demand accumulation finishes (deferred so the dispatcher gets the
+    # fully-accumulated demand rather than whatever was visible at first
+    # encounter).
+    pending_dispatch: set[str] = set()
 
     # BFS-like accumulation
     pending = [item_key]
@@ -2026,6 +2056,20 @@ def walk_recipe_tree(
                     f"{list(needed)} — {hint}"
                 )
         if current in SELF_RECYCLING_BLOCKLIST and current != item_key:
+            # Intermediate self-recycle dispatch (post-2026-05-08 audit).
+            # If the item is a SELF_RECYCLE_TARGETS member AND a dispatch
+            # cache is available AND the caller hasn't asked us to bypass
+            # this gate (Path B re-entry), defer dispatch to the end of
+            # Pass 1 so the dispatcher gets fully-accumulated demand.
+            if (
+                current in SELF_RECYCLE_TARGETS
+                and current not in _force_tree_walk_for
+                and _cache is not None
+                and _dispatch_env is not None
+            ):
+                pending_dispatch.add(current)
+                seen.add(current)
+                continue   # do NOT walk this item's ingredients — sub-plan owns them
             raise ValueError(
                 f"ERROR: recipe '{current}' is self-recycling (output recycles to itself) — not supported"
             )
@@ -2084,6 +2128,42 @@ def walk_recipe_tree(
                     pending.append(iname)
                     order.append(iname)
 
+    # Resolve any deferred self-recycle-target intermediate dispatches.
+    # Must happen AFTER the BFS so each intermediate's accumulated demand is
+    # final.  Each dispatch produces a self-contained sub-plan that we cache
+    # for Pass 2 and for the top-level plan() to aggregate ``normal_solid_input``
+    # / ``normal_fluid_input`` from.
+    #
+    # We deliberately do NOT forward the sub-plan's normal-quality raws into
+    # the parent walker's ``demand`` — those raws need to be sourced at NORMAL
+    # quality by the user, not routed through the parent's asteroid /
+    # mined-recycle (legendary) paths.  plan() reads them out of
+    # ``_cache.intermediates`` after the walker returns.
+    if pending_dispatch and _cache is not None and _dispatch_env is not None:
+        for inter in pending_dispatch:
+            inter_demand = max(0.0, demand[inter])
+            if inter_demand <= 0:
+                continue
+            sub = choose_path_self_recycle(
+                inter, inter_demand, data,
+                module_quality=_dispatch_env["module_quality"],
+                research_levels=_dispatch_env["research_levels"],
+                assembler_level=_dispatch_env["assembler_level"],
+                quality_module_tier=_dispatch_env["quality_module_tier"],
+                planets=planets or frozenset(),
+                tech_state=tech_state,
+                assembly_modules=assembly_modules,
+                prod_module_tier=prod_module_tier,
+                machine_quality=machine_quality,
+                active_shuffles=_dispatch_env.get("active_shuffles"),
+                no_asteroids=no_asteroids,
+                _cache=_cache,
+                _in_flight=_in_flight | {inter},
+            )
+            _cache.intermediates[inter] = sub
+            if _dispatch_out is not None:
+                _dispatch_out.add(inter)
+
     # Build stages from order; also collect all raws seen as demand keys
     stages: list[dict] = []
     raw_demand: dict[str, float] = defaultdict(float)
@@ -2091,8 +2171,29 @@ def walk_recipe_tree(
         if iname in raw_set and iname != item_key:
             if amt > 0:
                 raw_demand[iname] += amt
+    # Track items already emitted in Pass 2 so duplicates in ``order`` (which
+    # can arise from multiple ingredient encounters in BFS) don't re-emit.
+    pass2_emitted: set[str] = set()
     for item in order:
         if item in raw_set and item != item_key:
+            continue
+        if item in pass2_emitted:
+            continue
+        pass2_emitted.add(item)
+        # Intermediate self-recycle dispatch: emit the cached sub-plan's
+        # stages verbatim and skip normal recipe-based stage construction
+        # for this item.  Pass 1 has already pulled the sub-plan's normal-
+        # quality raws into our raw_demand bucket via ``demand``.
+        if (
+            _cache is not None
+            and item in _cache.intermediates
+            and item != item_key
+        ):
+            sub = _cache.intermediates[item]
+            for st in sub.get("stages", []):
+                # shallow copy avoids alias issues if the sub-plan is
+                # re-emitted by a sibling chain in the same plan() call.
+                stages.append(dict(st))
             continue
         recipe = _pick_recipe_fluid_preferred(
             item, recipe_idx, fluids, planets, planet_props,
@@ -2562,6 +2663,148 @@ def solve_self_feed_target_loop(
     return yield_per_machine, best
 
 
+# ---------------------------------------------------------------------------
+# Dispatch DP for SELF_RECYCLE_TARGETS — top-level + intermediate (V3+ audit)
+# ---------------------------------------------------------------------------
+#
+# Top-level plan() and intermediate ingredient walks both face the same
+# decision when an item is in SELF_RECYCLE_TARGETS:
+#
+#   Path A: ``_plan_self_recycle_target`` runs the recycler-only DP and
+#           consumes the item's ingredients at NORMAL quality.
+#   Path B: walk the recipe tree with each ingredient upcycled to legendary
+#           via the standard quality paths (asteroid, mined-recycle, shuffle).
+#
+# Pre-refactor the comparison happened only at the top level (auto-comparator
+# in plan()) and the walker fail-fasted at intermediate level.  Now both go
+# through the same dispatcher (``choose_path_self_recycle``) backed by a
+# per-``plan()`` ``_DispatchCache``.
+#
+# The cache has three layers:
+#   * Solver — keys solve_self_recycle_target_loop results by environment;
+#     rate-independent (kernel returns yield-per-craft).
+#   * Decision — caches "A"/"B" winner per item per environment; rate-
+#     independent because both paths scale linearly with rate, so the choice
+#     doesn't depend on rate.  Stage construction re-runs at the actual rate.
+#   * Intermediate — sub-plan dicts keyed by item key, populated during
+#     Pass 1 of walk_recipe_tree, consumed during Pass 2.
+
+@dataclass
+class _DispatchCache:
+    """Per-``plan()`` invocation cache for self-recycle dispatch + solver memo.
+
+    Allocated by ``plan()`` and threaded through every ``walk_recipe_tree``
+    call (including shuffle re-walks and ``_plan_self_recycle_target``'s
+    ingredient walks).  Not module-level — different calls have different
+    parameters (planets, tech, module quality) which all affect cost.
+    """
+    plans: dict[tuple, str] = field(default_factory=dict)
+    solver: dict[tuple, tuple[float, dict]] = field(default_factory=dict)
+    intermediates: dict[str, dict] = field(default_factory=dict)
+    # Test instrumentation: counts only on a CACHE MISS (real kernel work).
+    plan_kernel_calls: int = 0
+    solver_kernel_calls: int = 0
+
+
+def solve_self_recycle_target_loop_memoized(
+    item_key: str,
+    data: dict,
+    machine_key: str,
+    machine_slots: int,
+    machine_allow_prod: bool,
+    inherent_prod: float,
+    research_prod: float,
+    module_quality: str,
+    prod_module_tier: int = 3,
+    quality_module_tier: int = 3,
+    *,
+    _cache: _DispatchCache | None = None,
+) -> tuple[float, dict]:
+    """Cached wrapper around :func:`solve_self_recycle_target_loop`.
+
+    Result is rate-independent (yield-per-craft + per-tier configs), so the
+    cache key omits rate.  Floats are rounded to 6 decimals to avoid spurious
+    cache misses from FP noise; the rounding precision matches game-relevant
+    granularity (>1e-6).
+    """
+    if _cache is None:
+        return solve_self_recycle_target_loop(
+            item_key, data,
+            machine_key=machine_key,
+            machine_slots=machine_slots,
+            machine_allow_prod=machine_allow_prod,
+            inherent_prod=inherent_prod,
+            research_prod=research_prod,
+            module_quality=module_quality,
+            prod_module_tier=prod_module_tier,
+            quality_module_tier=quality_module_tier,
+        )
+    key = (
+        item_key,
+        machine_key,
+        int(machine_slots),
+        bool(machine_allow_prod),
+        round(float(inherent_prod), 6),
+        round(float(research_prod), 6),
+        module_quality,
+        int(prod_module_tier),
+        int(quality_module_tier),
+    )
+    hit = _cache.solver.get(key)
+    if hit is not None:
+        return hit
+    _cache.solver_kernel_calls += 1
+    result = solve_self_recycle_target_loop(
+        item_key, data,
+        machine_key=machine_key,
+        machine_slots=machine_slots,
+        machine_allow_prod=machine_allow_prod,
+        inherent_prod=inherent_prod,
+        research_prod=research_prod,
+        module_quality=module_quality,
+        prod_module_tier=prod_module_tier,
+        quality_module_tier=quality_module_tier,
+    )
+    _cache.solver[key] = result
+    return result
+
+
+def _env_signature(
+    *,
+    module_quality: str,
+    research_levels: dict[str, int],
+    assembler_level: int,
+    quality_module_tier: int,
+    planets: frozenset[str],
+    tech_state: dict[str, int],
+    assembly_modules: bool,
+    prod_module_tier: int,
+    machine_quality: str,
+    no_asteroids: bool,
+    active_shuffles: frozenset[str] | None = None,
+) -> tuple:
+    """Tuple of all kwargs that affect the Path A vs Path B winner.
+
+    Used as the secondary part of the decision-cache key.  Frozen via tuple +
+    frozenset so it's hashable.
+    """
+    rl = tuple(sorted((str(k), int(v)) for k, v in (research_levels or {}).items()))
+    ts = tuple(sorted((str(k), int(v)) for k, v in (tech_state or {}).items()))
+    sh = tuple(sorted(active_shuffles or ()))
+    return (
+        module_quality,
+        rl,
+        int(assembler_level),
+        int(quality_module_tier),
+        tuple(sorted(planets)),
+        ts,
+        bool(assembly_modules),
+        int(prod_module_tier),
+        machine_quality,
+        bool(no_asteroids),
+        sh,
+    )
+
 
 def _plan_self_recycle_target(
     item_key: str,
@@ -2577,6 +2820,10 @@ def _plan_self_recycle_target(
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
+    active_shuffles: frozenset[str] | None = None,
+    no_asteroids: bool = False,
+    _cache: "_DispatchCache | None" = None,
+    _in_flight: frozenset[str] = frozenset(),
 ) -> dict:
     """Plan a chain whose target self-recycles (e.g. superconductor).
 
@@ -2619,7 +2866,7 @@ def _plan_self_recycle_target(
     inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
     research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels)
 
-    v, configs = solve_self_recycle_target_loop(
+    v, configs = solve_self_recycle_target_loop_memoized(
         item_key, data,
         machine_key=machine_key,
         machine_slots=machine_slots,
@@ -2629,6 +2876,7 @@ def _plan_self_recycle_target(
         module_quality=module_quality,
         prod_module_tier=3,
         quality_module_tier=quality_module_tier,
+        _cache=_cache,
     )
     if v <= 0:
         raise ValueError(
@@ -2683,7 +2931,17 @@ def _plan_self_recycle_target(
                     assembly_module_quality=module_quality,
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
+                    no_asteroids=no_asteroids,
                     tech_state=tech_state,
+                    _cache=_cache,
+                    _in_flight=_in_flight,
+                    _dispatch_env={
+                        "module_quality": module_quality,
+                        "research_levels": research_levels,
+                        "assembler_level": assembler_level,
+                        "quality_module_tier": quality_module_tier,
+                        "active_shuffles": active_shuffles,
+                    },
                 )
             except ValueError:
                 # Ingredient may itself be planet-gated or unreachable — record
@@ -2795,6 +3053,189 @@ def _plan_self_recycle_target(
         "planets": sorted(planets),
         "notes": notes,
     }
+
+
+def choose_path_self_recycle(
+    item_key: str,
+    rate: float,
+    data: dict,
+    *,
+    module_quality: str,
+    research_levels: dict[str, int],
+    assembler_level: int,
+    quality_module_tier: int,
+    planets: frozenset[str],
+    tech_state: dict[str, int],
+    assembly_modules: bool = False,
+    prod_module_tier: int = 3,
+    machine_quality: str = "normal",
+    active_shuffles: frozenset[str] | None = None,
+    no_asteroids: bool = False,
+    _cache: _DispatchCache,
+    _in_flight: frozenset[str] = frozenset(),
+) -> dict:
+    """Dispatch Path A (self-recycle target loop) vs Path B (ingredient-upcycle).
+
+    Single mechanism for both top-level (``plan()`` for SELF_RECYCLE_TARGETS
+    items) and intermediate (``walk_recipe_tree`` Pass 1 for blocklist items).
+    Memoizes the A/B decision per ``(item, env_signature)`` so deep chains
+    don't re-solve the same comparison.
+
+    Cycle guard: if ``item_key in _in_flight`` (i.e. a higher dispatcher is
+    currently resolving this same item), force Path A.  Path A is the only
+    branch that doesn't recurse through this dispatcher, so it's always safe
+    as the cycle-fallback.
+
+    Returns a sub-plan dict in the same shape as ``_plan_self_recycle_target``
+    or ``plan()`` (whichever path won).  Callers compose sub-plan ``stages``
+    into the parent's stage list.
+    """
+    env = _env_signature(
+        module_quality=module_quality,
+        research_levels=research_levels,
+        assembler_level=assembler_level,
+        quality_module_tier=quality_module_tier,
+        planets=planets,
+        tech_state=tech_state,
+        assembly_modules=assembly_modules,
+        prod_module_tier=prod_module_tier,
+        machine_quality=machine_quality,
+        no_asteroids=no_asteroids,
+        active_shuffles=active_shuffles,
+    )
+    decision_key = (item_key, env)
+
+    def _run_path_a() -> dict | None:
+        try:
+            return _plan_self_recycle_target(
+                item_key, rate, data,
+                module_quality=module_quality,
+                research_levels=research_levels,
+                assembler_level=assembler_level,
+                quality_module_tier=quality_module_tier,
+                planets=planets,
+                tech_state=tech_state,
+                assembly_modules=assembly_modules,
+                prod_module_tier=prod_module_tier,
+                machine_quality=machine_quality,
+                active_shuffles=active_shuffles,
+                no_asteroids=no_asteroids,
+                _cache=_cache,
+                _in_flight=_in_flight | {item_key},
+            )
+        except ValueError:
+            return None
+
+    def _run_path_b() -> tuple[dict | None, str | None]:
+        try:
+            return plan(
+                item_key, rate, data,
+                module_quality=module_quality,
+                research_levels=research_levels,
+                assembler_level=assembler_level,
+                quality_module_tier=quality_module_tier,
+                planets=planets,
+                active_shuffles=active_shuffles,
+                assembly_modules=assembly_modules,
+                prod_module_tier=prod_module_tier,
+                machine_quality=machine_quality,
+                no_asteroids=no_asteroids,
+                tech_state=tech_state,
+                _force_tree_walk=True,
+                _cache=_cache,
+                _in_flight=_in_flight | {item_key},
+                _force_tree_walk_for=frozenset({item_key}),
+            ), None
+        except ValueError as exc:
+            return None, str(exc)
+
+    # --- Cycle guard ---
+    if item_key in _in_flight:
+        path_a = _run_path_a()
+        if path_a is None:
+            raise ValueError(
+                f"ERROR: cycle detected for '{item_key}' through {sorted(_in_flight)} "
+                f"and forced Path A also failed"
+            )
+        path_a.setdefault("notes", []).append(
+            f"forced self-recycle (cycle detected through {sorted(_in_flight)})"
+        )
+        return path_a
+
+    # --- Decision cache ---
+    cached = _cache.plans.get(decision_key)
+    if cached == "A":
+        path_a = _run_path_a()
+        if path_a is None:
+            # Cached "A" but suddenly fails — fall through and recompute.
+            cached = None
+        else:
+            path_a.setdefault("notes", []).append(
+                f"auto-compare (cached): self-recycle loop "
+                f"({path_a['total_machine_count']:.1f} machines)."
+            )
+            return path_a
+    if cached == "B":
+        path_b, err = _run_path_b()
+        if path_b is None:
+            cached = None
+        else:
+            path_b.setdefault("notes", []).append(
+                f"auto-compare (cached): ingredient-upcycle "
+                f"({path_b['total_machine_count']:.1f} machines)."
+            )
+            return path_b
+
+    # --- Cache miss: run both, compare, cache decision ---
+    _cache.plan_kernel_calls += 1
+    path_a = _run_path_a()
+    path_b, path_b_error = _run_path_b()
+
+    if path_a is None and path_b is None:
+        raise ValueError(
+            f"ERROR: both Path A and Path B failed for '{item_key}'; "
+            f"Path B error: {path_b_error or '?'}"
+        )
+
+    a_count = float(path_a["total_machine_count"]) if path_a is not None else float("inf")
+    b_count = (
+        float(path_b["total_machine_count"]) if path_b is not None else float("inf")
+    )
+
+    # Pick the cheaper path.  Tie -> Path A (self-recycle is structurally
+    # simpler / more diagnostic).
+    if path_b is None:
+        # Path B failed entirely.
+        assert path_a is not None
+        _cache.plans[decision_key] = "A"
+        path_a.setdefault("notes", []).append(
+            f"auto-compare: ingredient-upcycle path failed "
+            f"({(path_b_error or '')[:120]}); using self-recycle loop "
+            f"({a_count:.1f} machines)."
+        )
+        return path_a
+    if path_a is None:
+        _cache.plans[decision_key] = "B"
+        path_b.setdefault("notes", []).append(
+            f"auto-compare: self-recycle loop failed; using ingredient-upcycle "
+            f"({b_count:.1f} machines)."
+        )
+        return path_b
+
+    if b_count > 0 and b_count < a_count:
+        _cache.plans[decision_key] = "B"
+        path_b.setdefault("notes", []).append(
+            f"auto-compare: ingredient-upcycle ({b_count:.1f} machines) "
+            f"beats self-recycle loop ({a_count:.1f} machines)."
+        )
+        return path_b
+
+    _cache.plans[decision_key] = "A"
+    path_a.setdefault("notes", []).append(
+        f"auto-compare: self-recycle loop ({a_count:.1f} machines) "
+        f"beats ingredient-upcycle ({b_count:.1f} machines)."
+    )
+    return path_a
 
 
 def _plan_self_feed_target(
@@ -3049,6 +3490,9 @@ def plan(
     no_asteroids: bool = False,
     tech_state: dict[str, int],
     _force_tree_walk: bool = False,
+    _cache: _DispatchCache | None = None,
+    _in_flight: frozenset[str] = frozenset(),
+    _force_tree_walk_for: frozenset[str] = frozenset(),
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
     scale stages, assemble full output.
@@ -3093,6 +3537,13 @@ def plan(
             f"ERROR: recipe '{item_key}' is self-recycling (output recycles to itself) — not supported"
         )
 
+    # Allocate the dispatch cache once per top-level plan() call and thread
+    # it through every walker site below so intermediate self-recycle
+    # dispatches memoize across the full chain.  Recursive plan() entries
+    # (Path B re-entry) reuse the caller's cache.
+    if _cache is None:
+        _cache = _DispatchCache()
+
     # V3 item 4 (cont.): self-FEED targets (pentapod-egg etc.) — recipes whose
     # ingredient list contains the output.  LP-based steady-state solver, no
     # auto-comparator (Path B reduces to the same problem).
@@ -3117,15 +3568,13 @@ def plan(
             machine_quality=machine_quality,
         )
 
-    # V3: dedicated self-recycle target path.  When the user asks for legendary
-    # of a self-recycling item, we run the recycle DP and consume the recipe's
-    # ingredients at NORMAL quality (quality rolls happen during craft+recycle).
-    #
-    # V3 item 4: auto-compare Path A (self-recycle target loop) against Path B
-    # (ingredient-upcycle via tree walk).  Pick the cheaper.  When recursing
-    # for Path B, set ``_force_tree_walk=True`` to skip this dispatch.
+    # V3: dedicated self-recycle target path.  Post-2026-05-08-audit, this
+    # is the ONLY top-level entry into ``choose_path_self_recycle`` — the
+    # same dispatcher is also called from ``walk_recipe_tree`` Pass 1 for
+    # intermediate items.  Both auto-compare Path A vs Path B and share the
+    # ``_DispatchCache`` allocated above.
     if item_key in SELF_RECYCLE_TARGETS and not _force_tree_walk:
-        path_a = _plan_self_recycle_target(
+        return choose_path_self_recycle(
             item_key, rate, data,
             module_quality=module_quality,
             research_levels=research_levels,
@@ -3136,49 +3585,11 @@ def plan(
             assembly_modules=assembly_modules,
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
+            active_shuffles=frozenset(active_shuffles) if active_shuffles else None,
+            no_asteroids=no_asteroids,
+            _cache=_cache,
+            _in_flight=_in_flight,
         )
-        # Path B: re-enter plan() with the SELF_RECYCLE dispatch bypassed.
-        path_b = None
-        path_b_error: str | None = None
-        try:
-            path_b = plan(
-                item_key, rate, data,
-                module_quality=module_quality,
-                research_levels=research_levels,
-                assembler_level=assembler_level,
-                quality_module_tier=quality_module_tier,
-                planets=planets_fs,
-                active_shuffles=active_shuffles,
-                assembly_modules=assembly_modules,
-                prod_module_tier=prod_module_tier,
-                machine_quality=machine_quality,
-                no_asteroids=no_asteroids,
-                tech_state=tech_state,
-                _force_tree_walk=True,
-            )
-        except ValueError as e:
-            path_b_error = str(e)
-
-        a_count = float(path_a.get("total_machine_count", 0.0))
-        if path_b is None:
-            path_a.setdefault("notes", []).append(
-                f"auto-compare: ingredient-upcycle path failed "
-                f"({(path_b_error or '')[:120]}); using self-recycle loop "
-                f"({a_count:.1f} machines)."
-            )
-            return path_a
-        b_count = float(path_b.get("total_machine_count", 0.0))
-        if b_count > 0 and b_count < a_count:
-            path_b.setdefault("notes", []).append(
-                f"auto-compare: ingredient-upcycle ({b_count:.1f} machines) "
-                f"beats self-recycle loop ({a_count:.1f} machines)."
-            )
-            return path_b
-        path_a.setdefault("notes", []).append(
-            f"auto-compare: self-recycle loop ({a_count:.1f} machines) "
-            f"beats ingredient-upcycle ({b_count:.1f} machines)."
-        )
-        return path_a
     if item_key in PLANET_UNLOCKS:
         if not _planet_unlocks_item(item_key, planets_fs) and item_key not in RAW_TO_CHUNK:
             needed = PLANET_UNLOCKS[item_key]
@@ -3190,6 +3601,21 @@ def plan(
     fluids = build_fluid_set(data)
     planet_props = _combined_planet_props(data, planets_fs)
     qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    # Dispatch env: bundles the kwargs walk_recipe_tree's intermediate-dispatch
+    # path needs to call choose_path_self_recycle.  Threaded into every walker
+    # call below so any blocklist intermediate can dispatch consistently.
+    dispatch_env = {
+        "module_quality": module_quality,
+        "research_levels": research_levels,
+        "assembler_level": assembler_level,
+        "quality_module_tier": quality_module_tier,
+        "active_shuffles": frozenset(active_shuffles) if active_shuffles else None,
+    }
+    # Track intermediates dispatched directly by this plan() level's walker
+    # call(s) so we can aggregate their normal-quality inputs without
+    # double-counting entries that recursive Path B plan() calls already
+    # aggregated into their own normal_solid_input.
+    direct_dispatches: set[str] = set()
     stages, raw_demand = walk_recipe_tree(
         item_key, rate, data, research_levels, assembler_level, fluids, planet_props, planets_fs,
         assembly_modules=assembly_modules,
@@ -3198,6 +3624,11 @@ def plan(
         machine_quality=machine_quality,
         no_asteroids=no_asteroids,
         tech_state=tech_state,
+        _cache=_cache,
+        _in_flight=_in_flight,
+        _force_tree_walk_for=_force_tree_walk_for,
+        _dispatch_env=dispatch_env,
+        _dispatch_out=direct_dispatches,
     )
 
     # ---- Generic shuffle wiring (V3) ----
@@ -3275,6 +3706,7 @@ def plan(
                     aggregated_byproducts[byprod] += float(byrate)
 
             # Re-walk main chain treating each primary as supplied externally.
+            direct_dispatches = set()  # reset: only the final walker call counts
             stages, raw_demand = walk_recipe_tree(
                 item_key, rate, data, research_levels, assembler_level,
                 fluids, planet_props, planets_fs,
@@ -3285,6 +3717,11 @@ def plan(
                 machine_quality=machine_quality,
                 no_asteroids=no_asteroids,
                 tech_state=tech_state,
+                _cache=_cache,
+                _in_flight=_in_flight,
+                _force_tree_walk_for=_force_tree_walk_for,
+                _dispatch_env=dispatch_env,
+                _dispatch_out=direct_dispatches,
             )
             for p in primaries:
                 raw_demand.pop(p, None)
@@ -3305,6 +3742,7 @@ def plan(
 
             if any(v > 0 for v in capped_credits.values()):
                 # Re-walk with credits subtracted from initial demand.
+                direct_dispatches = set()
                 stages, raw_demand = walk_recipe_tree(
                     item_key, rate, data, research_levels, assembler_level,
                     fluids, planet_props, planets_fs,
@@ -3316,6 +3754,11 @@ def plan(
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
                     tech_state=tech_state,
+                    _cache=_cache,
+                    _in_flight=_in_flight,
+                    _force_tree_walk_for=_force_tree_walk_for,
+                    _dispatch_env=dispatch_env,
+                    _dispatch_out=direct_dispatches,
                 )
                 for p in primaries:
                     raw_demand.pop(p, None)
@@ -3342,6 +3785,10 @@ def plan(
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
                     tech_state=tech_state,
+                    _cache=_cache,
+                    _in_flight=_in_flight,
+                    _force_tree_walk_for=_force_tree_walk_for,
+                    _dispatch_env=dispatch_env,
                 )
                 for st in n_stages:
                     st["normal_quality_chain"] = True
@@ -3545,6 +3992,21 @@ def plan(
                     for t in (0, 1, 2, 3)
                 },
             })
+
+    # Aggregate normal-quality inputs from any self-recycle-target intermediate
+    # sub-plans this plan() level's walker DIRECTLY dispatched.  Recursive Path B
+    # plan() calls have already aggregated their own inner intermediates into
+    # their normal_solid_input — so we ONLY iterate ``direct_dispatches``
+    # (populated by walker via ``_dispatch_out``) to avoid double-counting.
+    if _cache is not None:
+        for inter in direct_dispatches:
+            sub = _cache.intermediates.get(inter)
+            if sub is None:
+                continue
+            for r, amt in sub.get("normal_solid_input", {}).items():
+                normal_solid_input[r] = normal_solid_input.get(r, 0.0) + float(amt)
+            for r, amt in sub.get("normal_fluid_input", {}).items():
+                normal_fluid_input[r] = normal_fluid_input.get(r, 0.0) + float(amt)
 
     # Total machine count
     total_machines = (

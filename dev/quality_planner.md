@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-02. Tests: `python -m unittest dev.test_quality_planner -v` — **192 tests, all passing, ~0.45 s.**
+**Last updated:** 2026-05-08. Tests: `python -m unittest dev.test_quality_planner -v` — **220 tests, all passing, ~0.78 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -21,7 +21,8 @@ Currently shipped:
 - Machine-quality plumbing (`--machine-quality`)
 - **Generic cross-item shuffle enumeration (`--enable-shuffle NAME` / `--enable-shuffles all`)** — auto-discovers ~195 candidate recipes from the dataset including buildings (`biochamber`, `agricultural-tower`, `lab`, `capture-robot-rocket`), modules (T1/T2/T3 prod/speed/quality/efficiency), military (turrets, tank, spidertron, ammo, armor), end-game power (nuclear/fusion/heat-exchanger), logistics (roboport, robots).
 - Self-recycle targets: tungsten-carbide, superconductor, holmium-plate, fusion-power-cell, lithium, biolab, captive-biter-spawner
-- **Auto-compare cost gate (V3 item 4)** — for any item in `SELF_RECYCLE_TARGETS`, the planner runs both Path A (self-recycle target loop) and Path B (ingredient-upcycle via tree walk) and picks the lower `total_machine_count`. Surfaces the choice in `notes`. Often Path B wins (e.g. tungsten-carbide, holmium-plate), often Path A wins when Path B's chain hits a self-recycling intermediate (superconductor, fusion-power-cell, lithium, captive-biter-spawner).
+- **Auto-compare cost gate (V3 item 4)** — for any item in `SELF_RECYCLE_TARGETS`, the planner runs both Path A (self-recycle target loop) and Path B (ingredient-upcycle via tree walk) and picks the lower `total_machine_count`. Surfaces the choice in `notes`. Often Path B wins (e.g. tungsten-carbide, holmium-plate, superconductor with intermediate dispatch), often Path A wins when Path B's chain hits a self-recycling intermediate that the dispatcher can't unblock.
+- **Self-recycling intermediate dispatch (post-2026-05-08 audit)** — items in `SELF_RECYCLING_BLOCKLIST` (tungsten-carbide, superconductor, holmium-plate) hit as INTERMEDIATES in another chain now dispatch to `choose_path_self_recycle` instead of fail-fasting. Unblocks 14 previously-failing endgame targets (`foundry`, `electromagnetic-plant`, `fusion-reactor`, `mech-armor`, `quality-module-3`, every endgame science pack, etc.). The dispatcher is the **same mechanism** the top-level auto-comparator uses — one DP serves both. A per-`plan()` `_DispatchCache` memoizes solver kernel calls and Path A/B decisions so deep chains don't re-solve the same comparison.
 - Gleba bio-raws (yumako, jellynut, pentapod-egg) — **no spoilage timing**
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
@@ -237,6 +238,10 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `compute_lds_shuffle_stage` | Sizes a LDS shuffle stage from `legendary_plastic_per_min`; returns `foundry_machines`, `recycler_machines`, `byproduct_legendary`, `fluid_demand` |
 | `solve_mined_raw_self_recycle_loop` | 25 % retention, 4 slots, quality-only (no prod) |
 | `solve_self_recycle_target_loop` | Recycler-only DP: items at tier t enter recycler chain, tier up or vanish via 25 % retention |
+| `solve_self_recycle_target_loop_memoized` | Cache-aware wrapper around the above; keys by rate-independent params for cross-call reuse |
+| `_DispatchCache` | Per-`plan()` memo: `plans` (decision cache), `solver` (kernel cache), `intermediates` (sub-plans for Pass 2) + kernel-call counters for tests |
+| `_env_signature` | Frozen tuple of cost-affecting kwargs; used as the secondary key in `_cache.plans` |
+| `choose_path_self_recycle` | Dispatcher: picks min(Path A, Path B) for SELF_RECYCLE_TARGETS items at any depth. Cycle-guards via `_in_flight`. Subsumes the top-level auto-comparator AND walker intermediate dispatch |
 | `_assembly_prod_bonus` | (machine, recipe, slots, flag, quality, tier) → (prod_fraction, slots_filled). Includes inherent prod for foundry/EM/biochamber |
 | `_stage_power_kw` | Dispatches per role; compound stages split power between machine types |
 | `_hot_spot_suggestions` | Inspects `summary.by_role`, emits actionable notes when one role > 50 % of machines |
@@ -244,9 +249,9 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_tech_locked_machines` | Returns frozenset of machine keys locked by the given `tech_state` |
 | `_tech_quality_tier_cap` | Highest unlocked quality-module tier (0=none) |
 | `_machine_for_recipe` | Wraps `cli.get_machine` with `CATEGORY_FALLBACK` routing — returns None when the primary machine is locked AND the recipe category has no fallback |
-| `walk_recipe_tree` | Two-pass walker. Builds stage list + raw_demand dict. Accepts `extra_raws`, `byproduct_credits`, `assembly_modules`, `machine_quality`, `no_asteroids`, **`tech_state` (required kwarg)** |
-| `_plan_self_recycle_target` | Dedicated path for self-recycle-target items |
-| `plan` | Top-level orchestrator. `tech_state` is a required keyword arg |
+| `walk_recipe_tree` | Two-pass walker. Builds stage list + raw_demand dict. Accepts `extra_raws`, `byproduct_credits`, `assembly_modules`, `machine_quality`, `no_asteroids`, **`tech_state` (required kwarg)**, plus dispatch-plumbing kwargs `_cache` / `_in_flight` / `_force_tree_walk_for` / `_dispatch_env` / `_dispatch_out` |
+| `_plan_self_recycle_target` | Path A implementation. Now threads `_cache` + `_in_flight` so its inner ingredient walks can dispatch deeper blocklist intermediates |
+| `plan` | Top-level orchestrator. `tech_state` is a required keyword arg. Internal kwargs: `_force_tree_walk` (top-level Path B re-entry), `_cache` / `_in_flight` / `_force_tree_walk_for` (recursive Path B re-entries from `choose_path_self_recycle`) |
 | `format_human` | Terminal-friendly rendering |
 
 ---
@@ -349,34 +354,47 @@ Stock Space Age yields **16 candidates**:
 
 **Cost gate (`--enable-shuffles all` only).**  Under `--enable-shuffles all`, the planner runs once with the greedy's chosen shuffles, then again with no shuffles, and keeps whichever has the lower `total_machine_count`.  When the no-shuffle path wins, the result includes a note explaining the fallback (`"--enable-shuffles all: greedy proposed shuffles totalling X machines, but no-shuffle baseline is Y machines — kept baseline"`).  Under explicit `--enable-shuffle NAME`, the user's choice is honoured unconditionally — the gate is not applied.
 
-### Self-recycle target & auto-comparator (V3 item 4)
+### Self-recycle target dispatch (V3 item 4 + 2026-05-08 audit)
 
-When the target is in `SELF_RECYCLE_TARGETS` (`tungsten-carbide`, `superconductor`, `holmium-plate`, `fusion-power-cell`, `lithium`, `biolab`, `captive-biter-spawner`):
+The dispatcher `choose_path_self_recycle` is invoked at **two sites**:
+
+1. **Top-level**: `plan()` calls it whenever `item_key in SELF_RECYCLE_TARGETS`.
+2. **Intermediate**: `walk_recipe_tree` Pass 1 calls it when a transitive ingredient hits `SELF_RECYCLING_BLOCKLIST`. Resolution is deferred until the BFS finishes accumulating demand, then the dispatcher runs at the fully-accumulated rate. Pass 2 reads the cached sub-plan and emits its stages verbatim. Replaces the old fail-fast at this site (which blocked 14 endgame targets).
+
+Both call sites share a per-`plan()` `_DispatchCache` with three layers:
+
+| Layer | Key | Stores |
+|---|---|---|
+| Solver | `(item, machine, slots, allow_prod, round(inherent,6), round(research_prod,6), module_quality, prod_tier, quality_tier)` | `(V_total, configs)` from `solve_self_recycle_target_loop` (rate-independent) |
+| Decision | `(item, env_signature)` where `env_signature` covers all kwargs that affect cost | `"A"` or `"B"` — re-execute chosen branch at the actual rate |
+| Sub-plan | `item` | Sub-plan dict consumed by Pass 2 |
+
+The decision cache is rate-independent: both paths scale linearly with rate, so the choice doesn't depend on rate. Stage construction is re-run at the actual rate to size machine counts correctly.
 
 **Path A — `_plan_self_recycle_target`:**
-1. `solve_self_recycle_target_loop` runs:
+1. `solve_self_recycle_target_loop_memoized` runs (memoized):
    - Outer search: enumerate `(craft_prod, craft_quality, recycle_quality)` configs.
    - One craft produces `items_per_craft = output × (1 + prod)` items distributed across tiers by `q_craft`.
    - Inner DP `V_rec[t]`: per-item legendary yield from a single tier-t item entering a recycler-only chain (converges because retention < 1).
    - Total = `items_per_craft × Σ craft_probs[s] × V_rec[s]`.
 2. Ingredients consumed at NORMAL quality (quality rolls happen inside the loop) → `normal_solid_input` / `normal_fluid_input`. Walked through `walk_recipe_tree` as normal-quality production trees.
 
-**Path B — standard tree walk:** `plan()` recursed with internal flag `_force_tree_walk=True` bypasses the SELF_RECYCLE_TARGETS dispatch and runs the normal recipe-tree walker. The target is crafted from legendary-quality ingredients, each ingredient sourced via the standard quality paths (asteroid, mined-recycle, shuffle).
+**Path B — standard tree walk:** `plan()` recursed with internal flag `_force_tree_walk=True` AND `_force_tree_walk_for={item_key}` bypasses the SELF_RECYCLE_TARGETS dispatch for the item itself, but the walker can still dispatch OTHER blocklist intermediates encountered in the chain. The target is crafted from legendary-quality ingredients, each ingredient sourced via the standard quality paths (asteroid, mined-recycle, shuffle, OR — recursively — another self-recycle dispatch).
+
+**Cycle detection** via `_in_flight: frozenset[str]` propagated through kwargs. If `choose_path_self_recycle` is entered with `item in _in_flight`, force Path A — the only branch that doesn't recurse through this dispatcher.
 
 **Auto-comparator** (always-on for SELF_RECYCLE_TARGETS):
-- Runs both paths.
-- If Path B raises a `ValueError` (e.g. an intermediate is in `SELF_RECYCLING_BLOCKLIST`), Path A wins automatically with a note explaining the fallback.
+- Runs both paths on cache miss.
+- If Path B raises a `ValueError`, Path A wins automatically with a note explaining the fallback.
 - Otherwise picks whichever has the lower `total_machine_count` and attaches an explanatory note like `auto-compare: ingredient-upcycle (480.1 machines) beats self-recycle loop (1105.9 machines).`
 
 Observed outcomes (60/min legendary, full tech, fully-researched flags):
 - **tungsten-carbide** → Path B wins (~480 vs ~1106 machines)
 - **holmium-plate** → Path B wins (mined holmium-ore upcycle)
-- **superconductor** → Path A wins (Path B fails on holmium-plate intermediate)
-- **fusion-power-cell** / **lithium** → Path A wins (Path B fails on holmium-plate)
-- **captive-biter-spawner** → Path A wins (Path B fails on lithium-plate via fluoroketone-cold)
-- **biolab** → Path B wins (~16 700 vs ~63 800 machines)
+- **superconductor** → Path B wins (post-audit; intermediate dispatch unblocks holmium-plate)
+- **fusion-power-cell** / **lithium** / **captive-biter-spawner** / **biolab** → cost-dependent; auto-comparator picks per chain.
 
-These items still fail-fast when used as INTERMEDIATE ingredients in another chain — they must be the target, or supplied externally.
+Items in `SELF_RECYCLING_BLOCKLIST` used as INTERMEDIATES (not as the target) now route through the same dispatcher rather than fail-fasting.
 
 ### Tech-state gating
 
@@ -479,7 +497,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **192 tests**, 27 classes.
+`dev/test_quality_planner.py` — **220 tests**, 29 classes.
 
 | Class | Coverage |
 |---|---|
@@ -508,7 +526,9 @@ MACHINE_INHERENT_PROD = {
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
 | `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, `quality-module-3` gate, partial-lock baseline parity, `_parse_tech_state` validation, `tech_state` is a required kwarg |
-| `TestGlebaTargets` (V3 item 4) | `biolab`/`captive-biter-spawner` in `SELF_RECYCLE_TARGETS`; auto-comparator picks Path B for tungsten-carbide, Path A for superconductor; explanatory notes always present; shuffle enumeration includes buildings + modules + military + endgame; single-output recyclers excluded; `tank`/`biochamber`/`capture-robot-rocket`/`productivity-module-3` plan as shuffle targets; shuffle DP correctly skips prod-bearing slots when recipe has `allow_productivity=False`. |
+| `TestGlebaTargets` (V3 item 4) | `biolab`/`captive-biter-spawner` in `SELF_RECYCLE_TARGETS`; auto-comparator picks Path B for tungsten-carbide, plans succeed for captive-biter-spawner (post-audit Path B may now win); explanatory notes always present; shuffle enumeration includes buildings + modules + military + endgame; single-output recyclers excluded; `tank`/`biochamber`/`capture-robot-rocket`/`productivity-module-3` plan as shuffle targets; shuffle DP correctly skips prod-bearing slots when recipe has `allow_productivity=False`. |
+| `TestSelfRecycleIntermediate` (post-2026-05-08 audit) | 14 previously-failing endgame targets now plan: `electromagnetic-plant`, `foundry`, `mech-armor`, `fusion-reactor`, `quality-module-3`, `metallurgic-/electromagnetic-/cryogenic-science-pack`. Verifies normal-quality inputs propagate (`holmium-solution` in `normal_fluid_input`). Verifies `summary.by_role` includes `self-recycle-target`. Verifies linear scaling under rate doubling. Verifies Pass 2 deduplicates intermediates so duplicate `order` entries don't re-emit. |
+| `TestDispatchMemoization` (post-2026-05-08 audit) | Solver kernel called once per unique `(item, env)` key; Path A/B decision cached and re-used; per-`plan()` cache isolation (no cross-call leak); cycle detection via pre-populated `_in_flight` forces Path A with explanatory note; solver cache keyed by env (epic-quality variant gets a fresh kernel call). |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.
@@ -531,6 +551,13 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 - **Shuffle DP solvers ignore tech_state.** `solve_shuffle_loop` / `compute_shuffle_stage` use `cli.get_machine` directly and do not consult `tech_state`. If the user enables a shuffle whose cast machine is locked (e.g. `--enable-shuffle low-density-structure --tech tungsten-carbide=0`), the shuffle still runs as if the foundry exists. The main-chain walker and `_pick_recipe_fluid_preferred` correctly gate locked machines, so this only matters when the user explicitly opts-in to a shuffle that requires a locked machine.
 - **Auto-comparator changes path-A behaviour for existing self-recycle targets** (V3 item 4). Adding `biolab`/`captive-biter-spawner` was easy; the substantial change was always-on auto-compare for ALL items in `SELF_RECYCLE_TARGETS`. Some pre-V3-item-4 plans now route via Path B (ingredient-upcycle) when it's cheaper — `tungsten-carbide` (480 vs 1106) and `holmium-plate` are the visible cases. Existing tests that assumed `self-recycle-target` stage presence had to be updated to use a Path-A-winning target like `superconductor`. Path A still wins when Path B's chain hits a self-recycling intermediate.
 - **`enumerate_shuffle_candidates` returns 195 items, not 16.** Dropping the `allow_productivity=True` filter (V3 item 4) broadened it dramatically. Greedy shuffle selection still scales fine because most candidates don't overlap with any given chain's leaves.
+- **`_DispatchCache` is per-`plan()` invocation** (not module-level). Different calls have different planet sets / tech / module quality / etc., all of which change costs. Recursive Path B re-entries SHARE the cache (memoization across the chain) — but the cache is fresh on every top-level `plan()` call.
+- **Pass 1 defers dispatch to end-of-BFS.** When the walker hits a blocklist intermediate it adds it to `pending_dispatch` and resumes BFS rather than dispatching immediately. Dispatch resolution runs once at the end with fully-accumulated demand. This avoids stale-rate sub-plans when an intermediate is consumed by multiple parents discovered at different BFS depths.
+- **Path A is the cycle-fallback.** When `choose_path_self_recycle` is entered with `item in _in_flight`, it forces Path A and tags the result with `forced self-recycle (cycle detected through ...)`. Path A is the only branch that doesn't recurse through the dispatcher, so it always terminates.
+- **Walker Pass 2 dedupes `order` entries.** A `pass2_emitted: set[str]` guards against re-emitting the same item if it appears multiple times in `order` (which can happen via interaction between BFS, dispatch, and `seen` in pathological chains). Without this guard, mech-armor and similar wide chains emit duplicate `self-recycle-target` stages.
+- **Aggregating intermediate sub-plans uses `_dispatch_out`, not a cache diff.** Walker writes the keys it directly dispatched into a kwarg-passed set. Plan() reads only those, NOT all of `_cache.intermediates` — a recursive Path B plan() has already aggregated its own inner intermediates' `normal_solid_input` into its own, so the outer level reading the full cache would double-count.
+- **`_force_tree_walk` (top-level) and `_force_tree_walk_for` (walker) are different.** `_force_tree_walk=True` on `plan()` skips the SELF_RECYCLE_TARGETS dispatch at top level (used by Path B re-entry). `_force_tree_walk_for=frozenset({item})` on `walk_recipe_tree` makes the walker treat `item` as a normal recipe even though it's in the blocklist (used by Path B inside `choose_path_self_recycle` so it can attempt the ingredient-upcycle of its own item without the dispatcher catching it).
+- **Decision cache is rate-independent.** Both Path A and Path B scale linearly with rate, so the choice doesn't depend on rate. The cache stores `"A"`/`"B"` keyed by `(item, env_signature)`. On hit, only the chosen branch re-runs at the actual rate. This is the main memoization win for deep chains where the same item appears at different rates.
 
 ---
 
@@ -538,9 +565,23 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 
 In rough priority order (fully shipped items removed):
 
-### Cross-feeding shuffle optimization (V3 item 1.x — ~150 LoC)
+### Co-product credits (HIGH priority — ~50 LoC incidental, +~150 LoC driven)
 
-Greedy selection + baseline-fallback cost gate are shipped (see §Algorithms).  For users who need provably-optimal selection across cross-feeding shuffles (e.g. LDS produces copper, hypothetical copper-shuffle would produce plastic — but only one can be active per chain), a subset-DP across legendary leaves would search every combination of (asteroid, shuffle-A, shuffle-B, ...) per leaf and return the global minimum machine count.  The greedy approximates this with O(leaves × candidates) lookups; the DP would be O(2^leaves × leaves × candidates), still <50ms for typical chains (3-5 leaves).
+The byproduct-credit machinery exists (`byproduct_credits` kwarg on `walk_recipe_tree`) but is wired only into shuffle activations.  Standard tree-walk recipes don't credit their non-primary outputs, which loses meaningful optimizations:
+
+- **Lava casting** (`molten-iron-from-lava`, `molten-copper-from-lava`) produces 10/15 stone per cast as a co-product.  Any chain on Vulcanus that uses iron or copper plate is throwing away free legendary stone.  Today `stone-wall @ 60/min` plans 2244 machines (mined-recycle-bound on stone) even with `--planets nauvis,vulcanus`; with lava-casting credit and a stone driver the cost should drop ~30–40×.
+- **Gleba bacteria** (`copper-bacteria`, `iron-bacteria`) and `*-processing` recipes (`yumako-processing`, `jellynut-processing`) produce spoilage and seeds as co-products — same pattern.
+
+Two sub-cases, sequenced:
+
+| Sub-case | Description | Approach |
+|---|---|---|
+| **Incidental credit** | Chain naturally activates a recipe with a useful co-product; credit it against existing demand, surplus → `byproduct_overflow` + note | ~50 LoC walker change.  Reuses `byproduct_credits` plumbing.  Add a per-walk pass to enumerate all multi-solid-output recipes activated and accumulate their non-primary outputs as credits |
+| **Driven credit** | Chain has demand for the co-product but no driver for the primary; activate the recipe *for* the co-product with the primary as overflow | New candidate class — recipes where stone (or another otherwise-unreachable raw) appears as a co-product.  Cost-gate against the mined-recycle baseline.  Subsumes the previously-deferred "single-output shuffle" idea more cleanly |
+
+Recommended ship order: incidental first (small, safe, broad — every Vulcanus iron/copper chain benefits for free).  Driven case after validation, primarily targeting stone-bound items (`stone-wall`, `gate`, `concrete`, `landfill`, `agricultural-tower`, `captive-biter-spawner`) where the savings vs mined-recycle are largest.
+
+Tests: `TestCoProductIncidental` — verify `iron-plate @ vulcanus` activates lava casting and credits stone byproduct correctly; verify overflow shape when no stone is demanded.  `TestCoProductDriven` (after sub-case B) — `stone-wall @ vulcanus` plans via lava-casting driver; cost-gate falls back to mined-recycle when driver is more expensive (e.g. iron-only planet without lava).
 
 ### Full research-state tracking (V3 item 2)
 
@@ -577,7 +618,6 @@ Known limitation: the LP assumes a steady-state pool exists at the chosen `q*` t
 Remaining Gleba work (deferred):
 - **Bacteria-cultivation / fish-breeding.** Same self-feed shape as pentapod-egg (`copper-bacteria-cultivation`, `iron-bacteria-cultivation`, `fish-breeding`).  They plug into the same solver — just add to `SELF_FEED_TARGETS` — but they're lower-priority targets (rarely needed at legendary tier).
 - **Agricultural quality.** Towers have 0 module slots; harvest is normal-quality only. Constraint already correct but worth surfacing to users.
-- **Single-output self-recycle.** `firearm-magazine` and `stone-wall` recycle to 1 ingredient each; the shuffle DP degenerates. Would need a different solver shape.
 
 ### Alternate objectives (V3 item 6 — scope TBD)
 
@@ -588,6 +628,16 @@ Switch the implicit "minimize asteroid input" objective to user-selected:
 - UPS-sensitive
 
 Each is a different objective on the same DP — would require a `--objective` flag and per-objective module-config search. Efficiency modules are currently not modelled; adding them affects per-stage power computation in `_stage_power_kw`.
+
+---
+
+## Considered and deferred
+
+Decisions surfaced by the 2026-05-08 audit that we've consciously chosen not to act on, so future contributors don't re-litigate them:
+
+- **`_pick_recipe_fluid_preferred` → cost-based DP.**  Recipe selection is currently a heuristic ("most fluid ingredients wins") rather than a cost-minimizing search.  Memoizing the heuristic result is trivial and worth doing if profiling shows hot spots; converting to a cost-based DP is a substantially larger refactor and not justified by current outputs (the heuristic produces the right answer in every case observed so far).  Revisit if a future recipe routing turns out to be wrong, or if the [Self-recycling intermediate dispatch](#self-recycling-intermediate-dispatch-high-priority--150-loc) DP makes the cost primitive cheap to share.
+- **`_plan_self_feed_target` LP → DP unification.**  The pentapod-egg LP corner search is already optimal per call and does not share structure with the quality DPs — folding it into the dispatch DP would complicate the latter without payoff.  Leave as-is.
+- **Raw sourcing branch (asteroid vs mined-recycle vs `--no-asteroids`).**  This is flag-driven, not a cost choice.  No DP needed.
 
 ---
 

@@ -738,32 +738,58 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertIn("ingredient-upcycle", notes)
 
     def test_superconductor_target(self):
+        # Post-2026-05-08-audit: intermediate dispatch unblocks Path B for
+        # superconductor (holmium-plate intermediate now resolves via the
+        # dispatcher rather than fail-fasting).  Path B may win on cost.  We
+        # therefore verify two things:
+        #   1. The plan succeeds with positive total_machine_count.
+        #   2. Path A (forced via direct ``_plan_self_recycle_target``) still
+        #      produces an EM-plant superconductor self-stage with positive
+        #      yield — the underlying solver still works.
         out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
-        st = [s for s in out["stages"] if s.get("role") == "self-recycle-target"][0]
+        self.assertGreater(out["total_machine_count"], 0.0)
+        # Path A directly: bypasses auto-compare to verify the EM-plant solver.
+        cache = qp._DispatchCache()
+        path_a = qp._plan_self_recycle_target(
+            "superconductor", 60, _data(),
+            module_quality="legendary",
+            research_levels={},
+            assembler_level=3,
+            quality_module_tier=3,
+            planets=frozenset(["nauvis", "fulgora"]),
+            tech_state=qp.ALL_TECH_UNLOCKED,
+            _cache=cache,
+        )
+        st = next(s for s in path_a["stages"]
+                  if s.get("role") == "self-recycle-target" and s.get("target") == "superconductor")
         self.assertEqual(st["machine"], "electromagnetic-plant")
         # EM plant has 5 slots + 50% inherent prod → high yield, low crafts/min
         self.assertGreater(st["yield_per_normal_craft"], 0.001)
 
     def test_legendary_modules_outperform_normal(self):
-        # superconductor: Path A wins (Path B fails on holmium-plate intermediate
-        # in SELF_RECYCLING_BLOCKLIST), so we can compare Path A yields.
-        out_leg = qp.plan(
-            "superconductor", 60, _data(),
-            planets=["nauvis", "fulgora"], module_quality="legendary",
-            tech_state=qp.ALL_TECH_UNLOCKED,
+        # Solver-level property: legendary modules give >2× yield-per-craft vs
+        # normal modules.  Tested directly against ``solve_self_recycle_target_loop``
+        # so the assertion isn't coupled to whether plan() picks Path A or B.
+        # Use superconductor parameters (EM plant, 5 slots, +50% inherent prod).
+        v_leg, _ = qp.solve_self_recycle_target_loop(
+            "superconductor", _data(),
+            machine_key="electromagnetic-plant",
+            machine_slots=5,
+            machine_allow_prod=True,
+            inherent_prod=0.5,
+            research_prod=0.0,
+            module_quality="legendary",
         )
-        out_nor = qp.plan(
-            "superconductor", 60, _data(),
-            planets=["nauvis", "fulgora"], module_quality="normal",
-            tech_state=qp.ALL_TECH_UNLOCKED,
+        v_nor, _ = qp.solve_self_recycle_target_loop(
+            "superconductor", _data(),
+            machine_key="electromagnetic-plant",
+            machine_slots=5,
+            machine_allow_prod=True,
+            inherent_prod=0.5,
+            research_prod=0.0,
+            module_quality="normal",
         )
-        leg_st = [s for s in out_leg["stages"] if s.get("role") == "self-recycle-target"][0]
-        nor_st = [s for s in out_nor["stages"] if s.get("role") == "self-recycle-target"][0]
-        # Legendary modules give >2× the per-craft yield of normal modules.
-        self.assertGreater(
-            leg_st["yield_per_normal_craft"],
-            nor_st["yield_per_normal_craft"] * 2.0,
-        )
+        self.assertGreater(v_leg, v_nor * 2.0)
 
     def test_solver_unknown_item_returns_zero(self):
         v, cfg = qp.solve_self_recycle_target_loop(
@@ -796,11 +822,14 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertIn("recycle", n)
 
     def test_human_format_renders_self_recycle(self):
-        # superconductor: Path A wins.
-        out = qp.plan("superconductor", 60, _data(), planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
+        # Use holmium-plate target on fulgora-only — Path B requires
+        # ingredients (holmium-solution / stone) reachable on Fulgora at
+        # legendary scale, which has higher cost than Path A's direct
+        # self-recycle of mined holmium-ore, so Path A wins reliably here.
+        out = qp.plan("holmium-plate", 60, _data(), planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
         self.assertIn("[self-recycle]", text)
-        self.assertIn("Superconductor", text)
+        self.assertIn("Holmium Plate", text)
 
 
 class TestSelfFeedTarget(unittest.TestCase):
@@ -2123,18 +2152,39 @@ class TestGlebaTargets(unittest.TestCase):
         notes = " ".join(out.get("notes", []))
         self.assertIn("auto-compare", notes)
 
-    def test_captive_biter_spawner_path_a_wins(self):
-        # captive-biter-spawner needs fluoroketone-cold which uses lithium-plate
-        # (self-recycling) → Path B fails on the blocklist → Path A wins.
+    def test_captive_biter_spawner_plans_successfully(self):
+        # Post-2026-05-08-audit: intermediate dispatch unblocks Path B for
+        # captive-biter-spawner (lithium-plate intermediate via fluoroketone-cold
+        # now resolves via the dispatcher rather than fail-fasting).  Whichever
+        # path the auto-comparator picks, the plan must succeed and an
+        # auto-compare note must appear.  Path A (direct, forced via
+        # ``_plan_self_recycle_target``) must still target cryogenic-plant —
+        # captive-biter-spawner's cast machine is unchanged.
         out = qp.plan(
             "captive-biter-spawner", 1, _data(),
             planets=["nauvis", "gleba", "aquilo"],
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
-        roles = {s.get("role") for s in out["stages"]}
-        self.assertIn("self-recycle-target", roles)
-        # Cast machine for captive-biter-spawner is cryogenic-plant.
-        self_stage = next(s for s in out["stages"] if s.get("role") == "self-recycle-target")
+        self.assertGreater(out["total_machine_count"], 0.0)
+        notes = " ".join(out.get("notes", []))
+        self.assertIn("auto-compare", notes)
+        # Direct Path A confirms the cryogenic-plant solver works.
+        cache = qp._DispatchCache()
+        path_a = qp._plan_self_recycle_target(
+            "captive-biter-spawner", 1, _data(),
+            module_quality="legendary",
+            research_levels={},
+            assembler_level=3,
+            quality_module_tier=3,
+            planets=frozenset(["nauvis", "gleba", "aquilo"]),
+            tech_state=qp.ALL_TECH_UNLOCKED,
+            _cache=cache,
+        )
+        self_stage = next(
+            s for s in path_a["stages"]
+            if s.get("role") == "self-recycle-target"
+            and s.get("target") == "captive-biter-spawner"
+        )
         self.assertEqual(self_stage["machine"], "cryogenic-plant")
 
     def test_auto_compare_picks_b_for_tungsten_carbide(self):
@@ -2150,19 +2200,32 @@ class TestGlebaTargets(unittest.TestCase):
         self.assertIn("mined-raw-self-recycle", roles)
 
     def test_auto_compare_path_a_wins_when_b_infeasible(self):
-        # superconductor's Path B walks through holmium-plate (in BLOCKLIST as
-        # an intermediate) → Path B fails → Path A wins.  Verify the note
-        # explains the fallback.
-        out = qp.plan(
+        # Path B fails when ingredients require an unlocked planet the user
+        # doesn't have.  superconductor's chain on Nauvis-only (no Fulgora)
+        # walks holmium-plate which dispatches and itself fails because Fulgora
+        # isn't unlocked → Path B raises → Path A wins (which also fails for
+        # the same reason, so the whole plan fails — that's correct behaviour).
+        # Use a setup where Path A SUCCEEDS but Path B FAILS: cycle-detection
+        # via pre-populated _in_flight forces Path A directly.
+        cache = qp._DispatchCache()
+        # Pre-populate _in_flight to simulate a recursive dispatch encountering
+        # the same item — choose_path_self_recycle must fall back to Path A.
+        out = qp.choose_path_self_recycle(
             "superconductor", 60, _data(),
-            planets=["nauvis", "fulgora"],
+            module_quality="legendary",
+            research_levels={},
+            assembler_level=3,
+            quality_module_tier=3,
+            planets=frozenset(["nauvis", "fulgora"]),
             tech_state=qp.ALL_TECH_UNLOCKED,
+            _cache=cache,
+            _in_flight=frozenset(["superconductor"]),
         )
         roles = {s.get("role") for s in out["stages"]}
         self.assertIn("self-recycle-target", roles)
         notes = " ".join(out.get("notes", []))
-        self.assertIn("auto-compare", notes)
-        self.assertIn("ingredient-upcycle path failed", notes)
+        self.assertIn("forced self-recycle", notes)
+        self.assertIn("cycle detected", notes)
 
     def test_no_auto_compare_for_non_self_recycle_targets(self):
         # iron-plate, electronic-circuit, processing-unit are not in
@@ -2255,6 +2318,267 @@ class TestGlebaTargets(unittest.TestCase):
         for t in (0, 1, 2, 3):
             self.assertEqual(configs[t]["cast_prod"], 0,
                              f"tier {t} unexpectedly has prod modules: {configs[t]}")
+
+
+class TestSelfRecycleIntermediate(unittest.TestCase):
+    """Post-2026-05-08-audit: SELF_RECYCLING_BLOCKLIST items hit as
+    intermediates in a chain now dispatch to ``choose_path_self_recycle``
+    instead of fail-fasting.  This unblocks 14 high-value endgame targets
+    whose chains transitively use tungsten-carbide / superconductor /
+    holmium-plate."""
+
+    def _full_tech(self):
+        return qp.ALL_TECH_UNLOCKED
+
+    def test_electromagnetic_plant_plans(self):
+        # Was: ValueError("recipe 'holmium-plate' is self-recycling ...").
+        # Now: succeeds; the plan must contain a holmium-plate self-recycle-target
+        # sub-stage.
+        out = qp.plan(
+            "electromagnetic-plant", 1, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+        sub = [s for s in out["stages"] if s.get("role") == "self-recycle-target"]
+        self.assertTrue(any(s.get("target") == "holmium-plate" for s in sub),
+                        f"expected holmium-plate intermediate; got {[s.get('target') for s in sub]}")
+
+    def test_foundry_plans_via_tungsten_carbide_intermediate(self):
+        out = qp.plan(
+            "foundry", 1, _data(),
+            planets=["nauvis", "vulcanus"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+        sub = [s for s in out["stages"] if s.get("role") == "self-recycle-target"]
+        # tungsten-carbide may resolve via Path A (self-recycle) or Path B
+        # (ingredient-upcycle of tungsten-ore + coal); either way the chain
+        # must produce tungsten-carbide somehow — assert via mined-recycle
+        # (tungsten-ore) as a strong proxy for the chain succeeding.
+        roles = {s.get("role") for s in out["stages"]}
+        self.assertTrue(
+            any(s.get("target") == "tungsten-carbide" for s in sub)
+            or "mined-raw-self-recycle" in roles,
+            "no tungsten-carbide intermediate emitted and no mined-raw-self-recycle stage either",
+        )
+
+    def test_quality_module_3_plans_via_superconductor_intermediate(self):
+        out = qp.plan(
+            "quality-module-3", 60, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+        sub = [s for s in out["stages"] if s.get("role") == "self-recycle-target"]
+        self.assertTrue(any(s.get("target") == "superconductor" for s in sub))
+
+    def test_mech_armor_plans(self):
+        # Mech-armor uses both supercapacitor (-> holmium-plate, superconductor)
+        # and quantum-processor (-> superconductor, tungsten-carbide).
+        out = qp.plan(
+            "mech-armor", 1, _data(),
+            planets=["nauvis", "fulgora", "vulcanus"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+
+    def test_fusion_reactor_plans_via_holmium_plate_intermediate(self):
+        out = qp.plan(
+            "fusion-reactor", 1, _data(),
+            planets=["nauvis", "fulgora", "aquilo", "gleba", "vulcanus"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+
+    def test_metallurgic_science_pack_plans(self):
+        out = qp.plan(
+            "metallurgic-science-pack", 60, _data(),
+            planets=["nauvis", "vulcanus"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+
+    def test_electromagnetic_science_pack_plans(self):
+        out = qp.plan(
+            "electromagnetic-science-pack", 60, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+
+    def test_cryogenic_science_pack_plans(self):
+        out = qp.plan(
+            "cryogenic-science-pack", 60, _data(),
+            planets=["nauvis", "fulgora", "aquilo"],
+            tech_state=self._full_tech(),
+        )
+        self.assertGreater(out["total_machine_count"], 0.0)
+
+    def test_intermediate_normal_inputs_propagate(self):
+        # Path A for holmium-plate (intermediate of electromagnetic-plant)
+        # consumes holmium-solution + stone at NORMAL quality.  These must
+        # bubble up into the parent plan's normal_solid_input /
+        # normal_fluid_input so the user knows they need to supply them.
+        out = qp.plan(
+            "electromagnetic-plant", 1, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=self._full_tech(),
+        )
+        # holmium-solution is a fluid raw the holmium-plate self-recycle path
+        # consumes at normal quality.
+        self.assertIn("holmium-solution", out.get("normal_fluid_input", {}))
+        self.assertGreater(out["normal_fluid_input"]["holmium-solution"], 0.0)
+
+    def test_summary_by_role_includes_self_recycle_target(self):
+        out = qp.plan(
+            "electromagnetic-plant", 1, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=self._full_tech(),
+        )
+        roles = out["summary"]["by_role"]
+        self.assertIn("self-recycle-target", roles)
+        self.assertGreater(roles["self-recycle-target"]["machines"], 0.0)
+
+    def test_rate_doubles_machines_double(self):
+        # Linear scaling smoke test for intermediate dispatch.
+        out_60 = qp.plan(
+            "quality-module-3", 60, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=self._full_tech(),
+        )
+        out_120 = qp.plan(
+            "quality-module-3", 120, _data(),
+            planets=["nauvis", "fulgora"],
+            tech_state=self._full_tech(),
+        )
+        ratio = out_120["total_machine_count"] / out_60["total_machine_count"]
+        self.assertAlmostEqual(ratio, 2.0, delta=0.02)
+
+    def test_intermediate_no_duplicate_stage_emission(self):
+        # A previous pre-fix walker bug caused Pass 2 to emit the same cached
+        # sub-plan twice when the same item appeared twice in `order` (which
+        # could occur via interaction between BFS and dispatch).  Each
+        # intermediate must appear exactly once in the output stages.
+        out = qp.plan(
+            "mech-armor", 1, _data(),
+            planets=["nauvis", "fulgora", "vulcanus"],
+            tech_state=self._full_tech(),
+        )
+        sub = [s for s in out["stages"] if s.get("role") == "self-recycle-target"]
+        targets = [s.get("target") for s in sub]
+        # Each intermediate target must appear at most once at the same rate
+        # (different consumers at different rates would be a separate stage,
+        # but the bug was identical-rate copies).
+        counts = {}
+        for s in sub:
+            key = (s.get("target"), round(s.get("rate_per_min", 0.0), 3))
+            counts[key] = counts.get(key, 0) + 1
+        for key, n in counts.items():
+            self.assertEqual(
+                n, 1,
+                f"duplicate self-recycle-target stage for {key}: {n} copies"
+            )
+
+
+class TestDispatchMemoization(unittest.TestCase):
+    """Post-2026-05-08-audit: ``_DispatchCache`` memoizes solver kernel calls
+    and the Path A/B decision per ``(item, env)`` so deep chains don't
+    re-solve the same comparison.  Cycle detection forces Path A as a safe
+    fallback when a higher-up dispatcher is currently resolving the same
+    item."""
+
+    def _env(self, planets=("nauvis", "fulgora")):
+        return {
+            "module_quality": "legendary",
+            "research_levels": {},
+            "assembler_level": 3,
+            "quality_module_tier": 3,
+            "planets": frozenset(planets),
+            "tech_state": qp.ALL_TECH_UNLOCKED,
+            "assembly_modules": False,
+            "prod_module_tier": 3,
+            "machine_quality": "normal",
+            "active_shuffles": None,
+            "no_asteroids": False,
+        }
+
+    def test_solver_called_once_per_unique_key(self):
+        # Two dispatcher calls for the same item with the same environment
+        # must hit the solver kernel (and the plan kernel) exactly once.
+        cache = qp._DispatchCache()
+        env = self._env()
+        # First call — cache miss.
+        qp.choose_path_self_recycle("holmium-plate", 60, _data(), _cache=cache, **env)
+        first_solver = cache.solver_kernel_calls
+        first_plan = cache.plan_kernel_calls
+        self.assertGreaterEqual(first_solver, 1)
+        self.assertGreaterEqual(first_plan, 1)
+        # Second call — cache hit on the decision; solver kernel should not
+        # be re-entered for the same key.
+        qp.choose_path_self_recycle("holmium-plate", 60, _data(), _cache=cache, **env)
+        # plan_kernel_calls increments ONLY on miss — the second call hits.
+        self.assertEqual(cache.plan_kernel_calls, first_plan)
+
+    def test_cache_isolates_per_plan_call(self):
+        # Two top-level plan() invocations must produce identical results
+        # (cache is per-call; no cross-call state leak).
+        out1 = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        out2 = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertAlmostEqual(
+            out1["total_machine_count"],
+            out2["total_machine_count"],
+            delta=1e-6,
+        )
+
+    def test_cycle_detection_forces_path_a(self):
+        # Pre-populate _in_flight to simulate a recursive dispatch encountering
+        # the same item again — the dispatcher must fall back to Path A and
+        # tag the result with a "cycle detected" note.
+        cache = qp._DispatchCache()
+        env = self._env(planets=("nauvis", "fulgora"))
+        out = qp.choose_path_self_recycle(
+            "superconductor", 60, _data(),
+            _cache=cache,
+            _in_flight=frozenset({"superconductor"}),
+            **env,
+        )
+        roles = {s.get("role") for s in out["stages"]}
+        self.assertIn("self-recycle-target", roles)
+        notes = " ".join(out.get("notes", []))
+        self.assertIn("cycle detected", notes)
+        self.assertIn("forced self-recycle", notes)
+
+    def test_decision_cache_records_winner(self):
+        # After running the dispatcher once for a given item+env, the decision
+        # cache must contain a single entry "A" or "B" for that key.
+        cache = qp._DispatchCache()
+        env = self._env(planets=("nauvis", "fulgora"))
+        qp.choose_path_self_recycle("holmium-plate", 60, _data(), _cache=cache, **env)
+        # One entry, value "A" or "B".
+        self.assertEqual(len(cache.plans), 1)
+        winner = next(iter(cache.plans.values()))
+        self.assertIn(winner, ("A", "B"))
+
+    def test_solver_cache_keyed_by_env(self):
+        # Different module-quality means a DIFFERENT solver-cache key — both
+        # variants get a fresh kernel call.
+        cache = qp._DispatchCache()
+        env = self._env()
+        qp.choose_path_self_recycle("holmium-plate", 60, _data(), _cache=cache, **env)
+        first_solver = cache.solver_kernel_calls
+        env2 = dict(env)
+        env2["module_quality"] = "epic"
+        qp.choose_path_self_recycle("holmium-plate", 60, _data(), _cache=cache, **env2)
+        # Solver kernel must have been invoked at least once more for the
+        # epic-quality variant.
+        self.assertGreater(cache.solver_kernel_calls, first_solver)
 
 
 if __name__ == "__main__":
