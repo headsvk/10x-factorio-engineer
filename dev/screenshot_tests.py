@@ -348,6 +348,107 @@ def make_state_bus_balance() -> dict:
     return state
 
 
+def make_state_logistics() -> dict:
+    """Logistics tab: primary supply + oversized intermediate + zero-supply tagged + bot draw."""
+    state = _base_state("Logistics Demo")
+    # Flying-robot-frame line with step_machines oversizing battery.
+    # Binding step is flying-robot-frame at 8 machines (rate=30/min).
+    # Battery declared at 6 machines vs 2.6667 at binding scale → surplus 3.33 × 22.5/m = 75/min.
+    # EEU and engine-unit declared at 4 (matches binding) → 0 surplus.
+    flying_line = {
+        "item": "flying-robot-frame",
+        "label": "Flying Robot Frame Block",
+        "target_rate": 30,
+        "effective_rate": 30,
+        "reserve_items": [
+            "flying-robot-frame", "battery",
+            "electric-engine-unit", "engine-unit",
+        ],
+        "cli_args": {
+            "item": "flying-robot-frame",
+            "step_machines": {
+                "flying-robot-frame": 8,
+                "battery": 6,
+                "electric-engine-unit": 4,
+                "engine-unit": 4,
+            },
+            "bus_items": [
+                "sulfuric-acid", "lubricant", "electronic-circuit",
+                "iron-plate", "steel-plate", "copper-plate",
+            ],
+            "logistics_items": ["iron-gear-wheel"],
+        },
+        "cli_result": {
+            "item": "flying-robot-frame",
+            "rate_per_min": 30.0,
+            "production_steps": [
+                {
+                    "recipe": "flying-robot-frame",
+                    "machine": "assembling-machine-3",
+                    "machine_count": 8.0, "machine_count_ceil": 8,
+                    "outputs": {"flying-robot-frame": 30.0},
+                    "inputs": {"electronic-circuit": 90.0, "battery": 60.0,
+                               "electric-engine-unit": 30.0, "steel-plate": 30.0},
+                    "machine_quality": "normal", "beacon_speed_bonus": 0.0,
+                    "power_kw": 3000.0, "power_kw_ceil": 3000.0, "beacon_power_kw": 0.0,
+                },
+                {
+                    "recipe": "battery",
+                    "machine": "cryogenic-plant",
+                    "machine_count": 2.6667, "machine_count_ceil": 3,
+                    "outputs": {"battery": 60.0},
+                    "inputs": {"sulfuric-acid": 1200.0, "iron-plate": 60.0, "copper-plate": 60.0},
+                    "machine_quality": "normal", "beacon_speed_bonus": 0.0,
+                    "power_kw": 4000.0, "power_kw_ceil": 4500.0, "beacon_power_kw": 0.0,
+                },
+                {
+                    "recipe": "electric-engine-unit",
+                    "machine": "assembling-machine-3",
+                    "machine_count": 4.0, "machine_count_ceil": 4,
+                    "outputs": {"electric-engine-unit": 30.0},
+                    "inputs": {"lubricant": 450.0, "electronic-circuit": 60.0, "engine-unit": 30.0},
+                    "machine_quality": "normal", "beacon_speed_bonus": 0.0,
+                    "power_kw": 1500.0, "power_kw_ceil": 1500.0, "beacon_power_kw": 0.0,
+                },
+                {
+                    "recipe": "engine-unit",
+                    "machine": "assembling-machine-3",
+                    "machine_count": 4.0, "machine_count_ceil": 4,
+                    "outputs": {"engine-unit": 30.0},
+                    "inputs": {"pipe": 60.0, "steel-plate": 30.0, "iron-gear-wheel": 30.0},
+                    "machine_quality": "normal", "beacon_speed_bonus": 0.0,
+                    "power_kw": 1500.0, "power_kw_ceil": 1500.0, "beacon_power_kw": 0.0,
+                },
+            ],
+            "raw_resources": {},
+            "co_products": {},
+            "miners_needed": {},
+            "total_power_mw": 10.15,
+            "total_power_mw_ceil": 10.875,
+            "bus_inputs": {
+                "sulfuric-acid": 1200.0, "lubricant": 450.0,
+                "electronic-circuit": 150.0, "iron-plate": 120.0,
+                "steel-plate": 60.0, "copper-plate": 60.0,
+                "iron-gear-wheel": 30.0,
+            },
+        },
+    }
+    state["locations"] = [_loc(
+        "nauvis", "Nauvis",
+        lines=[flying_line],
+        bus_items=[
+            {"item": "iron-gear-wheel", "rate": 3600},
+            {"item": "iron-plate",      "rate": 7200},
+            {"item": "copper-plate",    "rate": 3600},
+            {"item": "steel-plate",     "rate": 1800},
+            {"item": "electronic-circuit", "rate": 1800},
+            {"item": "sulfuric-acid", "rate": 3600, "fluid": True},
+            {"item": "lubricant",     "rate": 1800, "fluid": True},
+        ],
+    )]
+    return state
+
+
 def make_state_overview() -> dict:
     """Overview tab: ⚡ Power section + bus balance."""
     state = _base_state("Overview State")
@@ -532,6 +633,8 @@ SECTION_SCENARIOS = [
     ("section__research-expanded.png",      make_state_research,         ".research-section",  "overview", False,  "#research-toggle"),
     ("tab__overview.png",                   make_state_overview,         ".tab-panel.active",  "overview", False,  None),
     ("tab__lines-collapsed.png",            make_state_lines_statuses,   ".tab-panel.active",  "lines",    False,  None),
+    ("tab__logistics.png",                  make_state_logistics,        ".tab-panel.active",  "logistics", False, None),
+    ("section__logistics-table.png",        make_state_logistics,        ".logi-section",      "logistics", False, None),
     ("tab__actions.png",                    make_state_with_bottleneck,  ".tab-panel.active",  "issues",   False,  None),
     ("tab__chat.png",                       make_state_chat,             ".tab-panel.active",  "chat",     False,  None),
     ("light__tab-lines-collapsed.png",      make_state_lines_statuses,   ".tab-panel.active",  "lines",    True,   None),

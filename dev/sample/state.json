@@ -794,6 +794,159 @@
           }
         },
         {
+          "item": "flying-robot-frame",
+          "label": "Flying Robot Frame Block",
+          "target_rate": 30,
+          "effective_rate": 30,
+          "player_notes": "Belt-fed local block; excess → bot network. Battery step oversized (6 cryo-plants vs 2.67 ideal) so excess batteries also drop into bots.",
+          "reserve_items": [
+            "flying-robot-frame",
+            "battery",
+            "electric-engine-unit",
+            "engine-unit"
+          ],
+          "cli_args": {
+            "item": "flying-robot-frame",
+            "step_machines": {
+              "flying-robot-frame": 8,
+              "battery": 6,
+              "electric-engine-unit": 4,
+              "engine-unit": 4
+            },
+            "bus_items": [
+              "sulfuric-acid",
+              "lubricant",
+              "electronic-circuit",
+              "iron-plate",
+              "steel-plate",
+              "copper-plate"
+            ],
+            "logistics_items": [
+              "iron-gear-wheel"
+            ]
+          },
+          "cli_result": {
+            "item": "flying-robot-frame",
+            "rate_per_min": 30.0,
+            "location": "nauvis",
+            "assembler": 3,
+            "furnace": "electric",
+            "miner": "electric",
+            "machine_quality": "normal",
+            "beacon_quality": "normal",
+            "production_steps": [
+              {
+                "recipe": "flying-robot-frame",
+                "machine": "assembling-machine-3",
+                "machine_count": 8.0,
+                "machine_count_ceil": 8,
+                "outputs": {
+                  "flying-robot-frame": 30.0
+                },
+                "inputs": {
+                  "electronic-circuit": 90.0,
+                  "battery": 60.0,
+                  "electric-engine-unit": 30.0,
+                  "steel-plate": 30.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 3000.0,
+                "power_kw_ceil": 3000.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "battery",
+                "machine": "cryogenic-plant",
+                "machine_count": 2.6667,
+                "machine_count_ceil": 3,
+                "outputs": {
+                  "battery": 60.0
+                },
+                "inputs": {
+                  "sulfuric-acid": 1200.0,
+                  "iron-plate": 60.0,
+                  "copper-plate": 60.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 4000.0,
+                "power_kw_ceil": 4500.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "electric-engine-unit",
+                "machine": "assembling-machine-3",
+                "machine_count": 4.0,
+                "machine_count_ceil": 4,
+                "outputs": {
+                  "electric-engine-unit": 30.0
+                },
+                "inputs": {
+                  "lubricant": 450.0,
+                  "electronic-circuit": 60.0,
+                  "engine-unit": 30.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 1500.0,
+                "power_kw_ceil": 1500.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "engine-unit",
+                "machine": "assembling-machine-3",
+                "machine_count": 4.0,
+                "machine_count_ceil": 4,
+                "outputs": {
+                  "engine-unit": 30.0
+                },
+                "inputs": {
+                  "pipe": 60.0,
+                  "steel-plate": 30.0,
+                  "iron-gear-wheel": 30.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 1500.0,
+                "power_kw_ceil": 1500.0,
+                "beacon_power_kw": 0.0
+              },
+              {
+                "recipe": "pipe",
+                "machine": "assembling-machine-3",
+                "machine_count": 0.4,
+                "machine_count_ceil": 1,
+                "outputs": {
+                  "pipe": 60.0
+                },
+                "inputs": {
+                  "iron-plate": 60.0
+                },
+                "machine_quality": "normal",
+                "beacon_speed_bonus": 0.0,
+                "power_kw": 150.0,
+                "power_kw_ceil": 375.0,
+                "beacon_power_kw": 0.0
+              }
+            ],
+            "raw_resources": {},
+            "co_products": {},
+            "miners_needed": {},
+            "total_power_mw": 10.15,
+            "total_power_mw_ceil": 10.875,
+            "bus_inputs": {
+              "sulfuric-acid": 1200.0,
+              "lubricant": 450.0,
+              "electronic-circuit": 150.0,
+              "iron-plate": 120.0,
+              "steel-plate": 60.0,
+              "copper-plate": 60.0,
+              "iron-gear-wheel": 30.0
+            }
+          }
+        },
+        {
           "item": "steel-plate",
           "label": "Steel Smelting",
           "target_rate": 120,

@@ -252,6 +252,15 @@ display: flex; }
 .bus-bar-free { height: 100%; flex: 1; transition: background .4s ease; }
 .bus-meta { display: flex; justify-content: space-between;
 font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); }
+/* ── Logistics network ── */
+.logi-section { margin-bottom: 16px; }
+.logi-table { width: 100%; }
+.logi-table th, .logi-table td { padding: 5px 12px 5px 0; }
+.logi-table th:first-child, .logi-table td:first-child { padding-left: 10px; }
+.logi-table tbody tr:hover { background: var(--bg-input); }
+.empty-state code { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+background: var(--bg-input); border: 1px solid var(--border-sub);
+border-radius: 2px; padding: 0 4px; color: var(--text-muted); }
 /* ── Next steps ── */
 .next-steps { margin-top: 16px; }
 .next-step-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px;
@@ -983,10 +992,15 @@ supply[src.item] = (supply[src.item] ?? 0) + src.rate;
 busItemMap[src.item] = src;
 }
 // Demand: read bus_inputs from cli_result (set when --bus-item was used for this line)
+// Items present in a line's cli_args.logistics_items are routed via bots — exclude from bus.
 const demand = {};
-for (const line of loc.lines ?? [])
-for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {}))
+for (const line of loc.lines ?? []) {
+const logisticsSet = new Set(line.cli_args?.logistics_items ?? []);
+for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {})) {
+if (logisticsSet.has(item)) continue;
 demand[item] = (demand[item] ?? 0) + rate;
+}
+}
 // Show all items with supply OR demand
 const busItems = [...new Set([...Object.keys(supply), ...Object.keys(demand)])];
 if (!busItems.length) return '';
@@ -1046,13 +1060,117 @@ return `
 ${solidGroup}${fluidGroup}
 </div>`;
 }
+// ── Logistics network ─────────────────────────────────────────────────────────
+//
+// Each line may declare:
+//   line.reserve_items: [item-id, ...]      — items routed FROM this line into bots
+//   line.cli_args.logistics_items: [item]   — items drawn FROM bots (mirror of bus_items)
+//
+// Auto-rate per tagged reserve item, per line:
+//   primary (item == line.item): supply = effective primary rate (full step output)
+//   intermediate: supply = max(0, declared_step_machines - cli_step.machine_count)
+//                          × (cli_step.outputs[item] / cli_step.machine_count)
+//
+// Supply contributions accumulate per item across all lines.
+function findStepProducing(steps, item) {
+for (const s of steps) {
+const out = s.outputs?.[item];
+if (typeof out === 'number' && out > 0) return s;
+}
+return null;
+}
+function reserveRateFor(line, item) {
+const steps = line.cli_result?.production_steps ?? [];
+const step  = findStepProducing(steps, item);
+if (!step) return 0;
+// Primary: full effective production rate of this step.
+if (item === line.item) {
+const out = step.outputs?.[item];
+return typeof out === 'number' ? out : 0;
+}
+// Intermediate: surplus from oversizing via cli_args.step_machines.
+const stepMachines = line.cli_args?.step_machines;
+const declared = stepMachines && stepMachines[step.recipe];
+if (typeof declared !== 'number' || declared <= 0) return 0;
+const binding = step.machine_count ?? 0;
+if (!binding || declared <= binding) return 0;
+const perMachine = (step.outputs?.[item] ?? 0) / binding;
+return (declared - binding) * perMachine;
+}
+function computeLogisticsBalance(loc) {
+const supply = {};   // item → items/min from this location's reserves
+const demand = {};   // item → items/min drawn from bots
+for (const line of loc.lines ?? []) {
+for (const item of line.reserve_items ?? []) {
+const rate = reserveRateFor(line, item);
+supply[item] = (supply[item] ?? 0) + rate;
+}
+const logiSet = new Set(line.cli_args?.logistics_items ?? []);
+for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {})) {
+if (!logiSet.has(item)) continue;
+demand[item] = (demand[item] ?? 0) + rate;
+}
+}
+return { supply, demand };
+}
+function countLogisticsItems(loc) {
+const { supply, demand } = computeLogisticsBalance(loc);
+return new Set([...Object.keys(supply), ...Object.keys(demand)]).size;
+}
+function renderLogisticsTab() {
+const loc = currentLoc();
+const { supply, demand } = computeLogisticsBalance(loc);
+const items = [...new Set([...Object.keys(supply), ...Object.keys(demand)])];
+if (!items.length) return `
+<div class="empty-state">
+<p>No logistics network activity on ${esc(loc.label)}.</p>
+<p>Set <code>reserve_items</code> on a line to declare items routed to bots, or
+<code>cli_args.logistics_items</code> for items drawn from bots.</p>
+</div>`;
+items.sort((a, b) => {
+const netA = (supply[a] ?? 0) - (demand[a] ?? 0);
+const netB = (supply[b] ?? 0) - (demand[b] ?? 0);
+return netA - netB;
+});
+const rows = items.map(item => {
+const s = supply[item] ?? 0;
+const d = demand[item] ?? 0;
+const net = s - d;
+const netCol = net >= 0 ? 'var(--ok)' : 'var(--bad)';
+const sign = net >= 0 ? '+' : '';
+const tagged = (s > 0 && d === 0) ? '<span style="color:var(--text-dim);font-size:10px;margin-left:4px">supply only</span>'
+: (d > 0 && s === 0) ? '<span style="color:var(--text-dim);font-size:10px;margin-left:4px">demand only</span>'
+: '';
+return `<tr>
+<td class="name-col">${esc(label(item))}${tagged}</td>
+<td class="r">${s > 0 ? fmtN(s) : '—'}</td>
+<td class="r">${d > 0 ? fmtN(d) : '—'}</td>
+<td class="r" style="color:${netCol};font-weight:700">${sign}${fmtN(net)}</td>
+</tr>`;
+}).join('');
+return `
+<div class="logi-section">
+<div class="group-label">Logistics Network</div>
+<table class="logi-table">
+<thead><tr>
+<th>Item</th>
+<th class="r">Supply / min</th>
+<th class="r">Demand / min</th>
+<th class="r">Net / min</th>
+</tr></thead>
+<tbody>${rows}</tbody>
+</table>
+</div>`;
+}
 function renderTabs() {
 const loc = currentLoc();
+const logiCount = countLogisticsItems(loc);
 const tabs = [
-['overview', 'Overview'],
-['lines',    `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
-['issues',   `Actions${loc.next_steps?.length ? ` (${loc.next_steps.length})` : ''}`],
-['chat',     'Chat'],
+['overview',  'Overview'],
+['lines',     `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
+['logistics', `Logistics${logiCount ? ` (${logiCount})` : ''}`],
+['issues',    `Actions${loc.next_steps?.length ? ` (${loc.next_steps.length})` : ''}`],
+['chat',      'Chat'],
 ];
 return `
 <div class="tab-list">
@@ -1215,13 +1333,36 @@ const totalsSection = _totChips ? `
 <div class="chips">${_totChips}</div>
 </div>` : '';
 const busInputs = line.cli_result?.bus_inputs ?? {};
-const busInputSection = Object.keys(busInputs).length ? `
-<div class="card-section">
-<div class="section-label">Bus Inputs</div>
-<div class="chips">${Object.entries(busInputs).map(([r, rate]) => {
+const logiSet = new Set(line.cli_args?.logistics_items ?? []);
+const busOnly  = Object.entries(busInputs).filter(([r]) => !logiSet.has(r));
+const logiOnly = Object.entries(busInputs).filter(([r]) =>  logiSet.has(r));
+const renderInputChips = (entries) => entries.map(([r, rate]) => {
 const b = STATE.preferred_belt;
 const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, b);
 return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
+}).join('');
+const busInputSection = busOnly.length ? `
+<div class="card-section">
+<div class="section-label">Bus Inputs</div>
+<div class="chips">${renderInputChips(busOnly)}</div>
+</div>` : '';
+const fromLogiSection = logiOnly.length ? `
+<div class="card-section">
+<div class="section-label">From Logistics 🤖</div>
+<div class="chips">${renderInputChips(logiOnly)}</div>
+</div>` : '';
+const reserveItems = line.reserve_items ?? [];
+const reserveSection = reserveItems.length ? `
+<div class="card-section">
+<div class="section-label">Reserve → Logistics 🤖</div>
+<div class="chips">${reserveItems.map(item => {
+const rate = reserveRateFor(line, item);
+const isF = FLUID_ITEM_IDS.has(item);
+const rateStr = rate > 0
+? (isF ? fmtFluid(rate) : `${fmtN(rate)}/min`)
+: '0/min';
+const dim = rate > 0 ? '' : ' style="opacity:.5"';
+return `<span class="chip"${dim}>${esc(label(item))}: <span style="color:var(--ok)">+${rateStr}</span></span>`;
 }).join('')}</div>
 </div>` : '';
 const ownRaw = Object.entries(raw);
@@ -1268,7 +1409,7 @@ const cliArgsSection = cliArgsSummary ? `
 <div class="section-label">Sized by</div>
 <div class="chips"><span class="chip" style="font-family:var(--mono,monospace);color:var(--text-dim)">${esc(cliArgsSummary)}</span></div>
 </div>` : '';
-body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${busInputSection}${rawSection}${minerSection}${cliArgsSection}${noteSection}</div>`;
+body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${busInputSection}${fromLogiSection}${rawSection}${minerSection}${cliArgsSection}${noteSection}</div>`;
 }
 const cardClass   = line.wip ? 'wip' : sc;
 const displayRate = actual;
@@ -1342,10 +1483,11 @@ ${renderResearch()}
 ${(STATE.dataset ?? 'vanilla') !== 'vanilla' ? renderLocationBar() : ''}
 ${renderBottlenecks()}
 ${renderTabs()}
-<div class="tab-panel${activeTab==='overview'?' active':''}">${renderOverview()}</div>
-<div class="tab-panel${activeTab==='lines'  ?' active':''}">${renderLinesTab()}</div>
-<div class="tab-panel${activeTab==='issues' ?' active':''}">${renderIssues()}</div>
-<div class="tab-panel${activeTab==='chat'   ?' active':''}">${renderChat()}</div>
+<div class="tab-panel${activeTab==='overview' ?' active':''}">${renderOverview()}</div>
+<div class="tab-panel${activeTab==='lines'    ?' active':''}">${renderLinesTab()}</div>
+<div class="tab-panel${activeTab==='logistics'?' active':''}">${renderLogisticsTab()}</div>
+<div class="tab-panel${activeTab==='issues'   ?' active':''}">${renderIssues()}</div>
+<div class="tab-panel${activeTab==='chat'     ?' active':''}">${renderChat()}</div>
 </div>
 </div>`;
 bindEvents();
@@ -1528,7 +1670,7 @@ const saved = await loadState();
 if (saved) STATE = saved;
 const params = new URLSearchParams(location.search);
 const tabParam = params.get('tab');
-if (tabParam && ['overview','lines','issues','chat'].includes(tabParam)) activeTab = tabParam;
+if (tabParam && ['overview','lines','logistics','issues','chat'].includes(tabParam)) activeTab = tabParam;
 if (params.get('expand') === 'all') {
 expandedCards = new Set((currentLoc().lines ?? []).map((_, i) => i));
 }

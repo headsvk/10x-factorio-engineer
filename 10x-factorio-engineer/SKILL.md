@@ -295,6 +295,12 @@ working context and update it after every player message.
           "label": "Green Circuit Block 1",  // optional; shown as card title
           "target_rate": 60.0,
 
+          // OPTIONAL — items this line routes into the logistics (bot) network.
+          // Include the line's own item to declare it as a bot-network supplier.
+          // Include intermediates only when the line is oversized at that step
+          // via cli_args.step_machines (see §3.3).
+          // "reserve_items": ["flying-robot-frame", "battery", "electric-engine-unit", "engine-unit"],
+
           // Inputs that produced this line's cli_result. Persist these so the line can be
           // re-planned / upgraded without re-asking the player how it was sized. See §3.2.
           "cli_args": {
@@ -431,6 +437,7 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 | `recipe_modules` | `{recipe: [ModuleSpec]}` per-recipe modules | one `--recipe-modules RECIPE=...` per entry |
 | `recipe_beacon` | `{recipe: BeaconSpec}` per-recipe beacons | one `--recipe-beacon RECIPE=...` per entry |
 | `bus_items` | list of item IDs drawn from this location's bus | one `--bus-item ITEM` per entry |
+| `logistics_items` | list of item IDs drawn from the logistics (bot) network on this location | one `--bus-item ITEM` per entry (CLI doesn't distinguish; dashboard tags as bot-routed) |
 | `research` | research-level overrides for this line only | one `--research NAME=LEVEL` per entry |
 | `use_ceil` | constrain to integer machine counts | `--use-ceil` |
 
@@ -458,6 +465,51 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 This says: "size by holding `uranium-processing` at 8 centrifuges, override
 assembler to AM3, give AM3 4× prod-1 and centrifuge 2× prod-1." Re-running
 with these args reproduces the line exactly.
+
+### 3.3 Logistics network — `reserve_items` and `logistics_items`
+
+Some bases route items through bots (logistic network) instead of belts or trains.
+The dashboard models the bot network as a parallel pool to the bus, with its own
+supply/demand sheet on the **Logistics** tab.
+
+**Two opt-in fields per line:**
+
+| Field | Where | Meaning |
+|-------|-------|---------|
+| `reserve_items: [item-id, ...]` | top-level on the line | items this line *supplies* to the logistics network |
+| `cli_args.logistics_items: [item-id, ...]` | inside `cli_args` | items this line *draws from* the logistics network instead of bus/belts |
+
+**Routing rules:**
+- `cli_args.logistics_items` is a *replacement* for `cli_args.bus_items` for the items it covers — same CLI flag (`--bus-item`), different dashboard tagging. An item should appear in *one* of the two lists, never both.
+- Items in `cli_args.logistics_items` are excluded from Bus Balance demand and instead added to Logistics Network demand. This keeps the bus tab focused on belt/train items.
+
+**Reserve auto-rate (per tagged item, per line):**
+- **Primary output** (`item == line.item`): supply = full effective production rate. Caveat: V1 has no per-line "declared local consumers" object, so the primary's reserve number reflects the line's full output rate. The player must mentally subtract whatever fraction is going to local belt-fed consumers (e.g. yellow science).
+- **Intermediate** (other items the recipe tree produces): the player must oversize the step via `cli_args.step_machines`. Surplus = `(declared_step_machines - cli_step.machine_count) × per-machine rate`. Tagging an intermediate without a corresponding `step_machines` entry yields zero supply (the chip renders muted to flag the inconsistency).
+
+**Example — flying-robot-frame block on Nauvis:**
+```jsonc
+{
+  "item": "flying-robot-frame",
+  "label": "Flying Robot Frame Block",
+  "reserve_items": [
+    "flying-robot-frame",
+    "battery",
+    "electric-engine-unit",
+    "engine-unit"
+  ],
+  "cli_args": {
+    "item": "flying-robot-frame",
+    "step_machines": {
+      "flying-robot-frame":   8,
+      "battery":              6,   // oversized vs binding scale → battery surplus
+      "electric-engine-unit": 4,
+      "engine-unit":          4
+    }
+  }
+}
+```
+The CLI picks the binding step (smallest declared/ideal ratio), runs the rest at that scale, and reports each step's binding-scale `machine_count`. The dashboard compares declared vs binding to compute reserve rate per intermediate.
 
 ---
 
