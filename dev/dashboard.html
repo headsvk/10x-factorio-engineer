@@ -692,6 +692,11 @@ function fmtN(n) {
   const v = Number.isInteger(n) ? n : +n.toFixed(1);
   return v.toLocaleString('en-US');
 }
+function fmtMC(n) {
+  if (n == null) return '';
+  if (Math.abs(n - Math.round(n)) < 1e-4) return Math.round(n).toLocaleString('en-US');
+  return (+n.toFixed(2)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function fmtRB(rate, beltName) {
   const n = +rate;
   const tp = BELT_THROUGHPUT[beltName] ?? 1800;
@@ -1266,7 +1271,7 @@ function renderLineCard(line, idx) {
       return `<tr>
         <td>${esc(label(s.recipe))}</td>
         <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
-        <td class="r">${s.machine_count_ceil}</td>
+        <td class="r">${fmtMC(s.machine_count)}</td>
         <td class="r" style="color:var(--text-dim)">${powCell}</td>
       </tr>${ioRow}`;
     }).join('');
@@ -1350,7 +1355,7 @@ function renderLineCard(line, idx) {
         <div class="section-label">Miners / Extractors</div>
         <div class="chips">${ownMiners.map(([r, info]) => {
           const isYield = info.required_yield_pct != null;
-          const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${info.machine_count_ceil}×`;
+          const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${fmtMC(info.machine_count)}×`;
           const countCl = isYield ? 'var(--warn)' : 'var(--text)';
           const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
           return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ⚡${powStr}` : ''}</span></span>`;
