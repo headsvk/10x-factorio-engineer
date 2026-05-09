@@ -361,6 +361,11 @@ When a player says something like:
 - *"I have level 10 processing unit productivity"* → set `research_levels["processing-unit-productivity"] = 10`, re-run CLI for any line producing `processing-unit`.
 - Generic form: any *"level N X productivity"* where X matches one of the research names in §3.1 maps to a `research_levels` entry. Re-run CLI for every line whose recipe list in §3.1 intersects the affected recipes.
 
+**Productivity research re-runs — crafting vs mining are different.**
+
+- **Crafting productivity** (`steel-productivity`, `processing-unit-productivity`, `plastic-bar-productivity`, `low-density-structure-productivity`, `rocket-fuel-productivity`, `rocket-part-productivity`, `asteroid-productivity`, `scrap-recycling-productivity`): convert the affected line's `cli_args` to `--machines <current_count>` (if it isn't already) and let `target_rate` / `effective_rate` rise to the new throughput. Also bump the `bus_items` supply rate for that item. The player won't deconstruct in-game furnaces/assemblers just because the math says fewer would suffice — research is a free boost, not a downsizing trigger. Override only if the player explicitly says "shrink the line".
+- **Mining productivity** (`mining-productivity` only): keep `cli_args` as-is (rate-based stays rate-based) and just add `--research mining-productivity=N` to every line that has miners. Drill / pumpjack counts in `cli_result.miners_needed` will drop — that's fine, **drill counts are informational, not a tracked constraint**. The player doesn't count individual drills; mining is sized by demand. Don't convert mining-only lines to `--machines`, and don't bump bus supply rates from mining-prod alone.
+
 Always re-derive `bottlenecks` after any state change:
 - A line is a bottleneck if `effective_rate < target_rate * 0.95`.
 - A raw resource is a bottleneck if the player hasn't confirmed miners/pumps
@@ -408,6 +413,8 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
   - `machines: <int>` — sized to N machines of the top-level recipe (`--machines`).
   - `step_machines: { "<recipe>": <int>, ... }` — constrained an intermediate step (`--step-machines`).
   - `targets: [{ "item": "<id>", "rate": <items/min> }, ...]` — multi-target solve. Each entry becomes a parallel `--item ITEM --rate RATE` pair on the CLI.
+
+**Choosing the sizing key — match the player's framing.** When the player frames the line as a machine count ("I built 26 AM3s", "keep this at 240 furnaces"), use `machines: N` so the in-game footprint is the source of truth. When the player frames it as a throughput target ("I need 90 SPM", "1800 steel/min"), use `rate: X`. Avoid recording a derived rate when the player gave a machine count — `rate: 120.64` loses the "26 machines was the intent" context, and a later upgrade (modules, quality, research) re-running the same rate would shrink the machine count instead of raising throughput. When in doubt, ask which is the binding constraint.
 
 **Optional (only include when the line overrides the shared default):**
 
@@ -460,7 +467,7 @@ with these args reproduces the line exactly.
 
 1. Identify the item(s) and rate(s) the player is asking about.
 2. Run `python assets/cli.py` with the appropriate flags from factory state:
-   `--assembler`, `--furnace`, `--location` (when set), `--machine-quality`, `--beacon-quality`,
+   `--assembler`, `--furnace`, `--location <parent location's id>` (always required for any line under a `locations[]` entry — omit only for one-off vanilla calculations with no location context), `--machine-quality`, `--beacon-quality`,
    `--modules MACHINE=...` for every entry in `module_configs`,
    `--beacon BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` if `default_beacon` is set,
    `--beacon MACHINE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` for every entry in `beacon_configs`,
@@ -536,6 +543,16 @@ When starting a new session:
    - Assembler tier?
    - Using productivity modules?
 3. Initialize the factory state and offer to launch the dashboard.
+
+### Dataset → `--location` invariant
+
+If `dataset == "space-age"`, **every** `cli.py` invocation must include `--location`
+(derived from the line's parent `locations[]` entry; use `--location nauvis` for the
+default home planet). Skipping `--location` silently loads the vanilla recipe set and
+produces wrong answers for `rocket-part`, alternative `rocket-fuel` recipes, foundry
+casting variants, biochamber recipes, and anything affected by Space Age-only
+research (e.g. `rocket-part-productivity`, `asteroid-productivity`). The CLI has no
+`--dataset` flag — `--location` *is* the dataset switch.
 
 ---
 
