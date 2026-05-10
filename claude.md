@@ -120,7 +120,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
-| `dev/test_cli.py` | `unittest` suite (204 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (219 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (220 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
@@ -414,7 +414,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 204 tests covering:
+`dev/test_cli.py` contains 219 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -437,7 +437,9 @@ python -m unittest dev.test_cli -v
 | `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
 | `TestMachinesFlag` | `rate_for_machines` round-trips integer/fractional machine counts; Fraction return type without beacons; prod-module and beacon round-trips; raises on raw resource; assembler level respected |
-| `TestStepMachines` | Two-pass solve: constrain intermediate step to N machines; uranium-processing=8 yields 8 centrifuges; multiple constraints use min-scale binding; top-level recipe constraint equivalent to `--machines`; recipe-not-in-chain detection; beacon float path |
+| `TestStepMachines` | Pre-2026-05-10 scale-derivation tests (still relevant for the constraints-only path): uranium-processing=8 yields 8 centrifuges; multiple constraints use min-scale binding when no `--rate`; top-level recipe constraint equivalent to `--machines`; recipe-not-in-chain detection; beacon float path. |
+| `TestStepMachinesFloor` | Post-solve floor pass via `cli._apply_step_machines_floor`: floor < natural is a no-op (echo only); floor > natural bumps `machine_count` to N and sets `excess_output_per_min > 0`; extra demand cascades to `raw_resources`; multiple independent floors each emit their own buffer; recipe not in chain → `SystemExit` listing available; oil-recipe (e.g. `advanced-oil-processing`) rejected with explanatory error; beacon (float) path works; surplus credited from over-sized step is drained by downstream consumers via subsequent `solver.solve`. |
+| `TestStepMachinesEnd2End` | Subprocess-driven CLI tests for the unified Phase A/B/C/D flow: floor-only emits `excess_output_per_min` + top-level `co_products`; high `--rate` with low `--step-machines` triggers `chain_throttled: true` and reduces `rate_per_min`; constraints-only path derives top-level rate (uranium-processing=8); multiple-floor constraints-only run picks binding via min-scale and bumps non-binding to declared N with buffer; `--use-ceil` is no longer rejected with `--step-machines`; combined with `--machines` works (flying-robot-frame=1 + battery=3 floor); `step_machines` echoed in JSON. |
 | `TestPowerConsumption` | Electric machines have `power_kw > 0`; burner machines give 0; efficiency modules reduce power (quality-scaled); speed/prod penalty not quality-scaled; efficiency floor at −80%; beacon sharing (3×3 = ÷4, 5×5 = ÷2); `total_power_mw` in output; miner `power_kw` present; miner efficiency reduces power (quality-scaled, −80% floor); miner `beacon_power_kw` emitted and included in `total_power_mw` |
 | `TestProbabilisticOutputs` | `uranium-processing` U-238 output reflects 0.993 probability; U-235 reflects 0.007 probability; `rate_for_machines` returns correct probability-weighted rates for both isotopes; ratio U-235/U-238 machine count ≈ 141× |
 | `TestMultiTarget` | Two-item solve merges shared sub-recipes; `targets` array replaces top-level `item`/`rate_per_min`; raw_resources and bus_inputs accumulate across all targets; belt/pump fields absent in multi-target output |

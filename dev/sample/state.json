@@ -834,6 +834,16 @@
             "miner": "electric",
             "machine_quality": "normal",
             "beacon_quality": "normal",
+            "research_levels": {
+              "mining-productivity": 3,
+              "steel-productivity": 2
+            },
+            "step_machines": {
+              "flying-robot-frame": 8.0,
+              "battery": 6.0,
+              "electric-engine-unit": 4.0,
+              "engine-unit": 4.0
+            },
             "production_steps": [
               {
                 "recipe": "flying-robot-frame",
@@ -853,26 +863,30 @@
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 3000.0,
                 "power_kw_ceil": 3000.0,
-                "beacon_power_kw": 0.0
+                "beacon_power_kw": 0.0,
+                "forced_min_machines": 8.0,
+                "excess_output_per_min": 0.0
               },
               {
                 "recipe": "battery",
                 "machine": "cryogenic-plant",
-                "machine_count": 2.6667,
-                "machine_count_ceil": 3,
+                "machine_count": 6.0,
+                "machine_count_ceil": 6,
                 "outputs": {
-                  "battery": 60.0
+                  "battery": 135.0
                 },
                 "inputs": {
-                  "sulfuric-acid": 1200.0,
-                  "iron-plate": 60.0,
-                  "copper-plate": 60.0
+                  "sulfuric-acid": 2700.0,
+                  "iron-plate": 135.0,
+                  "copper-plate": 135.0
                 },
                 "machine_quality": "normal",
                 "beacon_speed_bonus": 0.0,
-                "power_kw": 4000.0,
-                "power_kw_ceil": 4500.0,
-                "beacon_power_kw": 0.0
+                "power_kw": 9000.0,
+                "power_kw_ceil": 9000.0,
+                "beacon_power_kw": 0.0,
+                "forced_min_machines": 6.0,
+                "excess_output_per_min": 75.0
               },
               {
                 "recipe": "electric-engine-unit",
@@ -891,7 +905,9 @@
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 1500.0,
                 "power_kw_ceil": 1500.0,
-                "beacon_power_kw": 0.0
+                "beacon_power_kw": 0.0,
+                "forced_min_machines": 4.0,
+                "excess_output_per_min": 0.0
               },
               {
                 "recipe": "engine-unit",
@@ -910,7 +926,9 @@
                 "beacon_speed_bonus": 0.0,
                 "power_kw": 1500.0,
                 "power_kw_ceil": 1500.0,
-                "beacon_power_kw": 0.0
+                "beacon_power_kw": 0.0,
+                "forced_min_machines": 4.0,
+                "excess_output_per_min": 0.0
               },
               {
                 "recipe": "pipe",
@@ -931,17 +949,19 @@
               }
             ],
             "raw_resources": {},
-            "co_products": {},
+            "co_products": {
+              "battery": 75.0
+            },
             "miners_needed": {},
-            "total_power_mw": 10.15,
-            "total_power_mw_ceil": 10.875,
+            "total_power_mw": 15.15,
+            "total_power_mw_ceil": 15.375,
             "bus_inputs": {
-              "sulfuric-acid": 1200.0,
+              "sulfuric-acid": 2700.0,
               "lubricant": 450.0,
+              "iron-plate": 195.0,
               "electronic-circuit": 150.0,
-              "iron-plate": 120.0,
+              "copper-plate": 135.0,
               "steel-plate": 60.0,
-              "copper-plate": 60.0,
               "iron-gear-wheel": 30.0
             }
           }

@@ -42,7 +42,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --s
 | `--item ITEM-ID` | required, repeatable | Item ID (e.g. `electronic-circuit`). Repeat for multi-target. |
 | `--rate N` | _(one required)_ | Target items/minute. Repeatable; pairs with `--item` by position. |
 | `--machines N` | _(one required)_ | Number of machines for the target item; fractional OK. Repeatable; pairs with `--item` by position. Use `--rate` or `--machines`, not both. |
-| `--step-machines RECIPE=N` | _(one required)_ | Constrain an **intermediate** step to N machines and derive the top-level rate from that. RECIPE is the recipe key (e.g. `uranium-processing`). Repeatable; if multiple constraints conflict, the most constraining (min scale) wins. Mutually exclusive with `--rate` and `--machines`. Requires exactly one `--item`. Use this when the bottleneck is an intermediate machine, not the final product. |
+| `--step-machines RECIPE=N` | _(one required)_ | Pin a step to **exactly N machines**. RECIPE is the recipe key (e.g. `uranium-processing`). Repeatable; combinable with `--rate`, `--machines`, and `--use-ceil`. Two cases: (a) **N < natural** — the chain rate throttles down so this step lands at N (`chain_throttled: true` in the JSON); (b) **N > natural** — the step over-produces, the per-step `excess_output_per_min` reports the buffer rate, and the unconsumed excess rolls up into top-level `co_products`. When `--step-machines` is the only demand source (no `--rate`/`--machines`), the smallest constraint becomes the binding one and derives the top-level rate; non-binding constraints become floors and get bumped with buffer. Requires exactly one `--item` in the constraints-only path. |
 | `--assembler 1/2/3` | `3` | Assembling machine tier |
 | `--furnace stone/steel/electric` | `electric` | Furnace type |
 | `--miner electric/big` | `electric` | `big` = Space Age big mining drill |
@@ -56,7 +56,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --s
 | `--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Per-recipe module override; repeatable |
 | `--recipe-beacon RECIPE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY[+...]` | _(none)_ | Per-recipe beacon override; same value format as `--beacon`. Repeatable. |
 | `--bus-item ITEM-ID` | _(none)_ | Treat item as a bus input (raw resource); stops recursion at this item; repeatable |
-| `--use-ceil` | _(off)_ | Re-solve at the rate the tightest-rounding (binding) step's ceiled machine count produces. Finds the step where `ceil(mc)/mc` is smallest, scales the target rate by that ratio, then re-solves so all steps are correctly sized for integer machines. Outputs `"use_ceil": true`. Single `--item` only; not compatible with `--step-machines`. Oil-product top targets are not supported. |
+| `--use-ceil` | _(off)_ | Re-solve at the rate the tightest-rounding (binding) step's ceiled machine count produces. Finds the step where `ceil(mc)/mc` is smallest, scales the target rate by that ratio, then re-solves so all steps are correctly sized for integer machines. Outputs `"use_ceil": true`. Single `--item` only. Oil-product top targets are not supported. |
 | `--research NAME=LEVEL` | _(none)_ | Infinite productivity research level. `NAME` is one of `mining-productivity`, `steel-productivity`, `low-density-structure-productivity`, `scrap-recycling-productivity`, `processing-unit-productivity`, `plastic-bar-productivity`, `rocket-fuel-productivity`, `asteroid-productivity`, `rocket-part-productivity`. `LEVEL` is an integer ≥ 0, each level = +10 % prod. `mining-productivity` multiplies every drill/pumpjack yield (not `offshore-pump`) and is uncapped. The other techs add to recipe prod on the recipes listed in §3.1 and are capped at **+300 % total machine prod** (sum of module prod + research prod). Repeatable. |
 | `--format json/human` | `json` | Output format. **Always omit this flag** (defaults to `json`) — `--format human` is for human terminal reading only, not for Claude's programmatic use. |
 
@@ -108,6 +108,16 @@ python assets/cli.py --item electronic-circuit --rate 60 --item automation-scien
 # Constrain intermediate step: 8 centrifuges for uranium processing, derive fuel cell rate
 python assets/cli.py --item uranium-fuel-cell --step-machines uranium-processing=8
 
+# Pin multiple steps to exact counts; non-binding steps over-produce as buffer
+# (FactorioLab-style "+X/min" indicators surface in `co_products` and per-step
+# `excess_output_per_min`). 9 robot-frame machines is the binding top-level
+# objective; battery/engine-unit/electric-engine-unit each over-produce.
+python assets/cli.py --item flying-robot-frame --machines 9 \
+  --step-machines battery=5 \
+  --step-machines engine-unit=5 \
+  --step-machines electric-engine-unit=5 \
+  --location nauvis
+
 # Infinite research: mining prod L5 + steel prod L3 (applies to every affected line)
 python assets/cli.py --item steel-plate --rate 60 --research mining-productivity=5 --research steel-productivity=3
 ```
@@ -141,7 +151,9 @@ The CLI emits JSON to stdout. Example:
       "beacon_speed_bonus": 10.0,
       "power_kw": 2812.5,
       "power_kw_ceil": 3000.0,
-      "beacon_power_kw": 7680.0
+      "beacon_power_kw": 7680.0,
+      "forced_min_machines": 8.0,
+      "excess_output_per_min": 0.5
     }
   ],
   "raw_resources": { "crude-oil": 487.18, "iron-ore": 120.0 },
@@ -159,7 +171,10 @@ The CLI emits JSON to stdout. Example:
   "recipe_module_overrides": { "iron-gear-wheel": [{"count": 4, "type": "prod", "tier": 3, "quality": "normal"}] },
   "recipe_beacon_overrides": { "sulfuric-acid": {"count": 4, "modules": [{"count": 2, "type": "speed", "tier": 3, "quality": "normal"}]} },
   "research_levels": { "mining-productivity": 5, "steel-productivity": 3 },
-  "research_prod_capped": true
+  "research_prod_capped": true,
+  "step_machines": { "processing-unit": 8 },
+  "chain_throttled": false,
+  "co_products": { "processing-unit": 0.5 }
 }
 ```
 
@@ -182,6 +197,10 @@ The CLI emits JSON to stdout. Example:
 | `recipe_beacon_overrides` | Present when `--recipe-beacon` was passed |
 | `research_levels` | Present when `--research` was passed; `{name: level_int}` echoing the non-zero research levels applied to the solve |
 | `research_prod_capped` | `true` when any crafting step hit the +300 % total-prod cap (module + research); omitted when no cap was hit. Useful UX signal that more research levels won't help those steps. |
+| `step_machines` | Present when `--step-machines` was passed; `{recipe_key: N}` echoing the declared exact-count constraints. |
+| `chain_throttled` | `true` when the top-level rate was throttled down to honour an `N < natural` `--step-machines` constraint; omitted otherwise. The throttled rate is reflected in `rate_per_min` (or each entry in `targets`). |
+| Per-step `forced_min_machines` | Present on each step that had `--step-machines RECIPE=N` declared; echoes N. |
+| Per-step `excess_output_per_min` | Present on each forced step; positive when N > natural (the step over-produces and the surplus rolls up into top-level `co_products`); `0.0` when N ≤ natural (no buffer). |
 | `bus_inputs` | Present when `--bus-item` was passed; `{item: rate_per_min}` for items sourced from the bus (separate from `raw_resources`, which contains only true raws like ores) |
 
 Notes:
@@ -414,10 +433,10 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 
 **Mandatory:**
 - `item` — the target (must equal `line.item`; for multi-target solves, equals the primary item the line tracks).
-- Exactly **one** sizing key:
+- At least **one** sizing key (and `step_machines` may be combined with `rate` / `machines`):
   - `rate: <items/min>` — produced this rate.
   - `machines: <int>` — sized to N machines of the top-level recipe (`--machines`).
-  - `step_machines: { "<recipe>": <int>, ... }` — constrained an intermediate step (`--step-machines`).
+  - `step_machines: { "<recipe>": <int>, ... }` — pin one or more steps to **exactly N machines** (`--step-machines`). N below natural throttles the chain rate (`chain_throttled: true` in cli_result); N above natural makes the step over-produce, with the buffer rate exposed as `step.excess_output_per_min` in cli_result and rolled up into top-level `co_products`. Combine with `rate` or `machines` to fix the top-level demand and use `step_machines` to pin specific intermediate counts; use `step_machines` alone (single `item` only) to derive the top-level rate from the binding constraint.
   - `targets: [{ "item": "<id>", "rate": <items/min> }, ...]` — multi-target solve. Each entry becomes a parallel `--item ITEM --rate RATE` pair on the CLI.
 
 **Choosing the sizing key — match the player's framing.** When the player frames the line as a machine count ("I built 26 AM3s", "keep this at 240 furnaces"), use `machines: N` so the in-game footprint is the source of truth. When the player frames it as a throughput target ("I need 90 SPM", "1800 steel/min"), use `rate: X`. Avoid recording a derived rate when the player gave a machine count — `rate: 120.64` loses the "26 machines was the intent" context, and a later upgrade (modules, quality, research) re-running the same rate would shrink the machine count instead of raising throughput. When in doubt, ask which is the binding constraint.
@@ -485,7 +504,7 @@ supply/demand sheet on the **Logistics** tab.
 
 **Reserve auto-rate (per tagged item, per line):**
 - **Primary output** (`item == line.item`): supply = full effective production rate. Caveat: V1 has no per-line "declared local consumers" object, so the primary's reserve number reflects the line's full output rate. The player must mentally subtract whatever fraction is going to local belt-fed consumers (e.g. yellow science).
-- **Intermediate** (other items the recipe tree produces): the player must oversize the step via `cli_args.step_machines`. Surplus = `(declared_step_machines - cli_step.machine_count) × per-machine rate`. Tagging an intermediate without a corresponding `step_machines` entry yields zero supply (the chip renders muted to flag the inconsistency).
+- **Intermediate** (other items the recipe tree produces): the player must oversize the step via `cli_args.step_machines: { "<recipe>": N }` with `N > natural`. The CLI computes the buffer rate authoritatively as `step.excess_output_per_min` in `cli_result.production_steps[]`; the dashboard reads that field directly. Tagging an intermediate without a corresponding `step_machines` entry (or with `N ≤ natural`, which throttles instead of buffering) yields zero supply.
 
 **Example — flying-robot-frame block on Nauvis:**
 ```jsonc

@@ -1674,6 +1674,224 @@ class TestStepMachines(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# --step-machines floor + excess-buffer semantics (post-2026-05-10)
+# ---------------------------------------------------------------------------
+#
+# `--step-machines RECIPE=N` is now an EXACT-COUNT pin:
+#   * N < natural → chain throttles down so the step ends at exactly N.
+#   * N > natural → step over-produces; excess goes to surplus, surfaces as
+#     `excess_output_per_min` per step and rolls up into top-level `co_products`.
+#
+# These tests exercise the post-solve floor pass (`_apply_step_machines_floor`)
+# directly. Throttle behaviour is exercised via subprocess against the CLI in
+# TestStepMachinesEnd2End.
+
+import json as _json
+import subprocess as _subprocess
+
+
+def _run_cli(*flags: str) -> dict:
+    """Invoke cli.py with the given flags and return parsed JSON output."""
+    cli_path = os.path.join(
+        os.path.dirname(__file__), '..', '10x-factorio-engineer', 'assets', 'cli.py'
+    )
+    proc = _subprocess.run(
+        [sys.executable, cli_path, *flags],
+        capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"cli failed (rc={proc.returncode}): {proc.stderr}")
+    return _json.loads(proc.stdout)
+
+
+class TestStepMachinesFloor(unittest.TestCase):
+    """
+    Direct tests for the floor pass: build a solver, solve at a known rate,
+    then call cli._apply_step_machines_floor and inspect the result.
+    """
+
+    def test_floor_below_natural_is_no_op(self):
+        # battery natural at rate=60 is well above 2; floor=2 → no bump (becomes
+        # a throttle case in main(), but the floor pass alone is a no-op when
+        # the step is already above the floor).
+        s = _solver_new()
+        s.solve("electronic-circuit", Fraction(60))
+        before = float(s.steps["copper-plate"]["machine_count"])
+        cli._apply_step_machines_floor(s, [("copper-plate", 1.0)])
+        # Step already above 1 machine → no excess.
+        self.assertAlmostEqual(
+            float(s.steps["copper-plate"]["machine_count"]), before, places=6
+        )
+        self.assertEqual(s.steps["copper-plate"]["forced_min_machines"], 1.0)
+        self.assertEqual(s.steps["copper-plate"]["excess_output_per_min"], 0.0)
+
+    def test_floor_above_natural_bumps_and_emits_excess(self):
+        s = _solver_new()
+        s.solve("electronic-circuit", Fraction(60))
+        # copper-cable natural at rate=60 is 0.6; floor=2 forces overshoot.
+        cli._apply_step_machines_floor(s, [("copper-cable", 2.0)])
+        self.assertAlmostEqual(
+            float(s.steps["copper-cable"]["machine_count"]), 2.0, places=6
+        )
+        self.assertEqual(s.steps["copper-cable"]["forced_min_machines"], 2.0)
+        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"], 0)
+
+    def test_extra_demand_cascades_to_raws(self):
+        # Forcing copper-cable above natural should INCREASE copper-ore demand.
+        base = _solver_new()
+        base.solve("electronic-circuit", Fraction(60))
+        base_ore = base.raw_resources.get("copper-ore", Fraction(0))
+
+        bumped = _solver_new()
+        bumped.solve("electronic-circuit", Fraction(60))
+        cli._apply_step_machines_floor(bumped, [("copper-cable", 5.0)])
+        self.assertGreater(bumped.raw_resources["copper-ore"], base_ore)
+
+    def test_multiple_independent_floors(self):
+        s = _solver_new()
+        s.solve("electronic-circuit", Fraction(60))
+        cli._apply_step_machines_floor(
+            s, [("copper-cable", 3.0), ("iron-plate", 4.0)]
+        )
+        self.assertAlmostEqual(float(s.steps["copper-cable"]["machine_count"]), 3.0, places=6)
+        self.assertAlmostEqual(float(s.steps["iron-plate"]["machine_count"]),   4.0, places=6)
+        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"], 0)
+        self.assertGreater(s.steps["iron-plate"]["excess_output_per_min"],   0)
+
+    def test_recipe_not_in_chain_errors(self):
+        s = _solver_new()
+        s.solve("electronic-circuit", Fraction(60))
+        with self.assertRaises(SystemExit) as ctx:
+            cli._apply_step_machines_floor(s, [("uranium-processing", 8.0)])
+        self.assertIn("not found in chain", str(ctx.exception))
+
+    def test_oil_recipe_rejected(self):
+        # advanced-oil-processing is added by resolve_oil and lacks the cache.
+        s = _solver_new()
+        s.solve("plastic-bar", Fraction(60))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        self.assertIn("advanced-oil-processing", s.steps)
+        with self.assertRaises(SystemExit) as ctx:
+            cli._apply_step_machines_floor(s, [("advanced-oil-processing", 5.0)])
+        self.assertIn("oil", str(ctx.exception).lower())
+
+    def test_floor_with_beacons_float_path(self):
+        # Beacon active → machine_count is float; bump still works.
+        s = _solver_new(beacon_configs={"assembling-machine-3": _bspec(8, 3)})
+        s.solve("electronic-circuit", Fraction(60))
+        self.assertIsInstance(s.steps["copper-cable"]["machine_count"], float)
+        cli._apply_step_machines_floor(s, [("copper-cable", 4.0)])
+        self.assertAlmostEqual(
+            float(s.steps["copper-cable"]["machine_count"]), 4.0, places=4
+        )
+        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"], 0)
+
+    def test_surplus_drained_by_downstream_step(self):
+        # Forcing iron-gear-wheel above natural credits surplus iron-gear-wheel.
+        # If we then call solver.solve("iron-gear-wheel", small_extra), it
+        # should drain from surplus rather than producing more machines.
+        s = _solver_new()
+        s.solve("automation-science-pack", Fraction(60))
+        nat_gear = float(s.steps["iron-gear-wheel"]["machine_count"])
+        cli._apply_step_machines_floor(s, [("iron-gear-wheel", nat_gear + 2.0)])
+        # surplus[iron-gear-wheel] should now be > 0
+        self.assertGreater(float(s.surplus["iron-gear-wheel"]), 0)
+        prev_surplus = s.surplus["iron-gear-wheel"]
+        # Pull a small extra demand: should reduce surplus, not bump count.
+        s.solve("iron-gear-wheel", Fraction(1, 10))
+        self.assertLess(float(s.surplus["iron-gear-wheel"]), float(prev_surplus))
+
+
+class TestStepMachinesEnd2End(unittest.TestCase):
+    """End-to-end CLI tests covering rate derivation + throttle + echo."""
+
+    def test_floor_only_emits_excess_and_co_products(self):
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60",
+            "--step-machines", "copper-cable=2",
+        )
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        self.assertEqual(steps["copper-cable"]["forced_min_machines"], 2.0)
+        self.assertGreater(steps["copper-cable"]["excess_output_per_min"], 0)
+        self.assertEqual(out["step_machines"], {"copper-cable": 2.0})
+        self.assertNotIn("chain_throttled", out)
+        # excess primary should appear at top level as co_product.
+        self.assertIn("copper-cable", out["co_products"])
+
+    def test_throttle_when_constraint_caps_below_natural(self):
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "6000",
+            "--step-machines", "copper-cable=5",
+        )
+        self.assertTrue(out.get("chain_throttled"))
+        self.assertLess(out["rate_per_min"], 6000)
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        self.assertAlmostEqual(steps["copper-cable"]["machine_count"], 5.0, places=4)
+        # Throttled step has zero excess — natural exactly matches floor.
+        self.assertEqual(steps["copper-cable"]["excess_output_per_min"], 0.0)
+
+    def test_constraints_only_path_derives_top_rate(self):
+        out = _run_cli(
+            "--item", "uranium-fuel-cell", "--step-machines", "uranium-processing=8",
+        )
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        self.assertAlmostEqual(steps["uranium-processing"]["machine_count"], 8.0, places=4)
+        self.assertEqual(steps["uranium-processing"]["forced_min_machines"], 8.0)
+        # The non-binding constraint case is exercised below.
+
+    def test_constraints_only_multiple_floors_non_binding_get_excess(self):
+        # For electronic-circuit with copper-cable=3 and iron-plate=4 (no --rate):
+        # ref-run scales pick the smallest n/ref ratio as the binding one;
+        # the other becomes a floor at the same chain rate, and the floor pass
+        # bumps it up with excess.
+        out = _run_cli(
+            "--item", "electronic-circuit",
+            "--step-machines", "copper-cable=3",
+            "--step-machines", "iron-plate=4",
+        )
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        self.assertAlmostEqual(steps["copper-cable"]["machine_count"], 3.0, places=4)
+        self.assertAlmostEqual(steps["iron-plate"]["machine_count"],   4.0, places=4)
+        # At least one of them should have excess > 0 (the non-binding one).
+        excess_cc = steps["copper-cable"]["excess_output_per_min"]
+        excess_ip = steps["iron-plate"]["excess_output_per_min"]
+        self.assertGreater(max(excess_cc, excess_ip), 0)
+
+    def test_combined_with_use_ceil(self):
+        # --use-ceil is no longer rejected with --step-machines.
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60",
+            "--step-machines", "copper-cable=2",
+            "--use-ceil",
+        )
+        self.assertTrue(out.get("use_ceil"))
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        self.assertGreaterEqual(
+            steps["copper-cable"]["machine_count"], 2.0 - 1e-6
+        )
+
+    def test_combined_with_machines(self):
+        # --machines on top + --step-machines floor on intermediate.
+        out = _run_cli(
+            "--item", "flying-robot-frame", "--machines", "1",
+            "--step-machines", "battery=3",
+            "--location", "nauvis",
+        )
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        self.assertAlmostEqual(steps["flying-robot-frame"]["machine_count"], 1.0, places=4)
+        self.assertAlmostEqual(steps["battery"]["machine_count"],            3.0, places=4)
+        self.assertGreater(steps["battery"]["excess_output_per_min"], 0)
+
+    def test_step_machines_echoed_in_json(self):
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60",
+            "--step-machines", "copper-cable=2",
+            "--step-machines", "iron-plate=3",
+        )
+        self.assertEqual(out["step_machines"], {"copper-cable": 2.0, "iron-plate": 3.0})
+
+
+# ---------------------------------------------------------------------------
 # Power consumption  (build_machine_power_w, _compute_step_power, miners)
 # ---------------------------------------------------------------------------
 #

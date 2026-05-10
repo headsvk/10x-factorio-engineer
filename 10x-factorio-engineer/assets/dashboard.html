@@ -1088,14 +1088,11 @@ if (item === line.item) {
 const out = step.outputs?.[item];
 return typeof out === 'number' ? out : 0;
 }
-// Intermediate: surplus from oversizing via cli_args.step_machines.
-const stepMachines = line.cli_args?.step_machines;
-const declared = stepMachines && stepMachines[step.recipe];
-if (typeof declared !== 'number' || declared <= 0) return 0;
-const binding = step.machine_count ?? 0;
-if (!binding || declared <= binding) return 0;
-const perMachine = (step.outputs?.[item] ?? 0) / binding;
-return (declared - binding) * perMachine;
+// Intermediate: surplus comes from over-sizing via --step-machines RECIPE=N.
+// The CLI is now authoritative — it emits step.excess_output_per_min directly.
+// Saved cli_results from before this field shipped will report 0, which is
+// the correct fallback (no buffer until the line is re-planned).
+return step.excess_output_per_min ?? 0;
 }
 function computeLogisticsBalance(loc) {
 const supply = {};   // item → items/min from this location's reserves
@@ -1277,19 +1274,28 @@ const ioRow = (inEntries.length || outEntries.length) ? `<tr class="step-io-row"
 <div class="step-io-col step-io-col--in"><div class="step-io-sect-label">Inputs</div>${mkItems(inEntries)}</div>
 <div class="step-io-col step-io-col--out"><div class="step-io-sect-label">Outputs</div>${mkItems(outEntries)}</div>
 </div></td></tr>` : '';
+// Red (+X/m) buffer indicator when the step is over-sized via --step-machines.
+// The CLI emits excess_output_per_min directly; we just render it.
+const excess = s.excess_output_per_min ?? 0;
+const bufferBadge = excess > 0
+? ` <span style="color:var(--bad);font-size:10px;font-weight:600" title="excess output buffered (forced ${s.forced_min_machines} machines)">(+${fmtN(excess)}/m)</span>`
+: '';
 return `<tr>
 <td>${esc(label(s.recipe))}</td>
 <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
-<td class="r">${fmtMC(s.machine_count)}</td>
+<td class="r">${fmtMC(s.machine_count)}${bufferBadge}</td>
 <td class="r" style="color:var(--text-dim)">${powCell}</td>
 </tr>${ioRow}`;
 }).join('');
 const totalPow = line.cli_result?.total_power_mw;
 const totalPowCeil = line.cli_result?.total_power_mw_ceil;
 const totalPowStr = totalPowCeil != null ? fmtPower(totalPowCeil * 1000) : null;
+const throttledBadge = clir.chain_throttled
+? ` <span style="color:var(--bad);font-weight:400;font-size:10px;margin-left:8px" title="chain rate throttled to honor a --step-machines constraint below natural demand">⚠ throttled</span>`
+: '';
 const machineSection = steps.length ? `
 <div class="card-section">
-<div class="section-label">Machines${totalPowStr ? ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px">⚡ ${totalPowStr} total (ceil)</span>` : ''}</div>
+<div class="section-label">Machines${totalPowStr ? ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px">⚡ ${totalPowStr} total (ceil)</span>` : ''}${throttledBadge}</div>
 <table>
 <thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Power</th></tr></thead>
 <tbody>${machineRows}</tbody>

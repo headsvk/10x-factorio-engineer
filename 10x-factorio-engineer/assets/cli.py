@@ -1279,6 +1279,16 @@ class Solver:
                 if prod_bonus > 0:
                     co_amt = co_amt * (Fraction(1) + prod_bonus)
                 step_outputs[co] = cycles_per_min * co_amt
+            # Per-machine cycle throughput, cached so the post-solve floor
+            # pass (--step-machines) can bump the count without re-deriving
+            # module/beacon/quality math. Stays Fraction unless beacons are
+            # active, in which case the irrational sqrt forces float.
+            if beacon_speed_bonus:
+                cycles_pm_per_machine: "Fraction | float" = (
+                    60.0 * float(effective_speed) * (1.0 + beacon_speed_bonus)
+                ) / float(energy_req)
+            else:
+                cycles_pm_per_machine = (Fraction(60) * effective_speed) / energy_req
             self.steps[recipe_key] = {
                 "recipe":             recipe_key,
                 "output_item":        item_key,
@@ -1288,6 +1298,11 @@ class Solver:
                 "beacon_speed_bonus": beacon_speed_bonus,
                 "inputs":             step_inputs,
                 "outputs":            step_outputs,
+                # Internal — stripped before serialisation in format_output
+                "_recipe_obj":           recipe,
+                "_cycles_per_min_per_m": cycles_pm_per_machine,
+                "_primary_amount":       effective_result,   # already includes prod bonus
+                "_prod_bonus":           prod_bonus,
             }
 
     def resolve_oil(self, data: dict) -> None:
@@ -1599,6 +1614,11 @@ def format_output(
             step_out["beacon_quality"] = solver.beacon_quality
         if recipe_key in solver.capped_recipes:
             step_out["prod_capped"] = True
+        # --step-machines floor / excess buffer (only present when constraint was set)
+        if "forced_min_machines" in s:
+            step_out["forced_min_machines"] = s["forced_min_machines"]
+        if "excess_output_per_min" in s:
+            step_out["excess_output_per_min"] = round(float(s["excess_output_per_min"]), 4)
         steps_list_raw.append(step_out)
 
     # Sort steps topologically: target recipe(s) first, dependencies below.
@@ -1710,6 +1730,13 @@ def format_output(
     if getattr(args, "use_ceil", False):
         out["use_ceil"] = True
 
+    # --step-machines echo: the declared (recipe, N) pairs and the throttle flag
+    sm_constraints = getattr(args, "step_machines_constraints", None) or []
+    if sm_constraints:
+        out["step_machines"] = {r: n for r, n in sm_constraints}
+    if getattr(args, "chain_throttled", False):
+        out["chain_throttled"] = True
+
     # Accumulate total power (MW)
     total_step_pwr      = sum(s["power_kw"] + s["beacon_power_kw"] for s in steps_list)
     total_step_pwr_ceil = sum(s["power_kw_ceil"] + s["beacon_power_kw"] for s in steps_list)
@@ -1747,6 +1774,11 @@ def format_human_readable(out: dict) -> str:
         lines.append(f"=== Targets: {targets_str} ===")
     else:
         lines.append(f"=== {out['item']} @ {out['rate_per_min']}/min ===")
+
+    if out.get("chain_throttled"):
+        sm = out.get("step_machines", {})
+        sm_str = ", ".join(f"{r}={n}" for r, n in sm.items())
+        lines.append(f"  (chain rate throttled by --step-machines: {sm_str})")
 
     location_val = out.get("location")
     location_str = location_val if location_val is not None else "vanilla"
@@ -1791,7 +1823,16 @@ def format_human_readable(out: dict) -> str:
         mc            = step["machine_count"]
         mc_ceil       = step["machine_count_ceil"]
         machine_label = f"{machine_q} {machine}" if machine_q != "normal" else machine
-        lines.append(f"{recipe:<30}  {mc} -> {mc_ceil} {machine_label}")
+        suffix = ""
+        if step.get("forced_min_machines") is not None:
+            forced = step["forced_min_machines"]
+            forced_str = str(int(forced)) if float(forced).is_integer() else str(forced)
+            excess = step.get("excess_output_per_min", 0)
+            if excess > 0:
+                suffix = f"  [forced {forced_str}, +{excess}/min buffer]"
+            else:
+                suffix = f"  [forced {forced_str}]"
+        lines.append(f"{recipe:<30}  {mc} -> {mc_ceil} {machine_label}{suffix}")
 
         # optional modules / beacons / speed / power detail line
         detail_parts: list[str] = []
@@ -1885,6 +1926,130 @@ def _parse_step_machines(raw: str) -> tuple[str, float]:
     return recipe_key.strip(), n
 
 
+def _clone_solver(s: "Solver") -> "Solver":
+    """Build a fresh Solver mirroring the configuration of *s*."""
+    return Solver(
+        s.recipe_idx, s.raw_set,
+        s.assembler_level, s.furnace_type,
+        module_configs=s.module_configs or None,
+        beacon_configs=s.beacon_configs or None,
+        default_beacon_config=s.default_beacon_config,
+        machine_module_slots=s.machine_module_slots or None,
+        machine_quality=s.machine_quality,
+        beacon_quality=s.beacon_quality,
+        recipe_overrides=s.recipe_overrides or None,
+        recipe_machine_overrides=s.recipe_machine_overrides or None,
+        recipe_module_overrides=s.recipe_module_overrides or None,
+        recipe_beacon_overrides=s.recipe_beacon_overrides or None,
+        bus_items=s.bus_items or None,
+        planet_props=s.planet_props or None,
+        location=s.location,
+        research_levels=s.research_levels or None,
+    )
+
+
+def _apply_step_machines_floor(
+    solver: "Solver",
+    constraints: list[tuple[str, float]],
+) -> None:
+    """
+    Post-solve floor pass for --step-machines.
+
+    For each (recipe_key, N): if the step's natural machine_count is already
+    >= N, just echo `forced_min_machines` and zero buffer. Otherwise bump the
+    count to N, credit the deficit's worth of primary output to `solver.surplus`
+    so downstream consumers in OTHER paths can drain it, cascade the deficit's
+    extra ingredient demand upstream via solver.solve(), and credit any
+    co-products to `solver.surplus` too.
+    """
+    for recipe_key, n in constraints:
+        step = solver.steps.get(recipe_key)
+        if step is None:
+            available = ", ".join(sorted(solver.steps))
+            sys.exit(
+                f"error: --step-machines recipe '{recipe_key}' not found in chain. "
+                f"Available: {available}"
+            )
+        # Oil-refinery steps come from resolve_oil(), not the recursive solver,
+        # so they lack the per-machine throughput cache we need to bump them.
+        if "_recipe_obj" not in step:
+            sys.exit(
+                f"error: --step-machines does not support oil-processing recipes "
+                f"('{recipe_key}'). Oil refinery counts are derived from a linear "
+                f"system; size them via the chain rate or by --recipe overrides."
+            )
+
+        # Always echo the declared floor so the dashboard can render it.
+        step["forced_min_machines"] = n
+
+        current = float(step["machine_count"])
+        if n <= current:
+            step["excess_output_per_min"] = 0.0
+            continue
+
+        # Use float when machine_count is float (beacon path); else exact Fraction.
+        is_float = isinstance(step["machine_count"], float) or isinstance(
+            step["_cycles_per_min_per_m"], float
+        )
+        primary_item = step["output_item"]
+        recipe       = step["_recipe_obj"]
+        prod_bonus   = step["_prod_bonus"]
+
+        if is_float:
+            cycles_per_machine = float(step["_cycles_per_min_per_m"])
+            primary_amount     = float(step["_primary_amount"])
+            deficit            = float(n) - current
+            extra_cycles       = deficit * cycles_per_machine
+            extra_primary      = extra_cycles * primary_amount
+            new_count: "Fraction | float" = float(n)
+        else:
+            cycles_per_machine = step["_cycles_per_min_per_m"]            # type: ignore[assignment]
+            primary_amount     = step["_primary_amount"]                  # type: ignore[assignment]
+            deficit            = Fraction(str(n)) - Fraction(str(current))
+            extra_cycles       = deficit * cycles_per_machine             # type: ignore[operator]
+            extra_primary      = extra_cycles * primary_amount            # type: ignore[operator]
+            new_count          = Fraction(str(n))
+
+        # Bump the step itself.
+        step["machine_count"]              = new_count
+        step["rate_per_min"]               = step["rate_per_min"] + extra_primary
+        step["outputs"][primary_item]      = step["outputs"].get(primary_item, 0) + extra_primary
+        step["excess_output_per_min"]      = float(extra_primary)
+
+        # Cascade extra ingredient demand upstream.
+        for ing in recipe.get("ingredients", []):
+            if is_float:
+                ing_extra: "Fraction | float" = extra_cycles * float(ing.get("amount", 1))  # type: ignore[operator]
+                solver_extra = Fraction(str(ing_extra))
+            else:
+                ing_extra = extra_cycles * Fraction(str(ing.get("amount", 1)))              # type: ignore[operator]
+                solver_extra = ing_extra                                                    # type: ignore[assignment]
+            step["inputs"][ing["name"]] = step["inputs"].get(ing["name"], 0) + ing_extra
+            solver.solve(ing["name"], solver_extra)
+
+        # Credit co-products to surplus (and reflect in step outputs).
+        for res in recipe.get("results", []):
+            if res["name"] == primary_item:
+                continue
+            prob   = Fraction(str(res.get("probability", 1)))
+            co_amt = Fraction(str(res.get("amount", 1))) * prob
+            if prod_bonus > 0:
+                co_amt = co_amt * (Fraction(1) + prod_bonus)
+            if is_float:
+                co_extra: "Fraction | float" = extra_cycles * float(co_amt)              # type: ignore[operator]
+                solver.surplus[res["name"]] += Fraction(str(co_extra))
+            else:
+                co_extra = extra_cycles * co_amt                                         # type: ignore[operator]
+                solver.surplus[res["name"]] += co_extra                                  # type: ignore[arg-type]
+            step["outputs"][res["name"]] = step["outputs"].get(res["name"], 0) + co_extra
+
+        # Excess primary output → surplus (drained by other consumers if any).
+        if is_float:
+            solver.surplus[primary_item] += Fraction(str(extra_primary))
+        else:
+            solver.surplus[primary_item] += extra_primary                                # type: ignore[arg-type]
+
+
 def _parse_kv(raw: str, flag: str) -> tuple[str, str]:
     """Parse 'KEY=VALUE' and exit with an error message on bad format."""
     if "=" not in raw:
@@ -1965,10 +2130,14 @@ Examples:
         "--step-machines",
         action="append", default=[], dest="step_machines", metavar="RECIPE=N",
         help=(
-            "Constrain an intermediate step to N machines and derive the top-level "
-            "rate from that. RECIPE is the recipe key in production_steps. Repeatable; "
-            "if multiple constraints conflict the most constraining (min scale) wins. "
-            "Mutually exclusive with --rate and --machines. Requires exactly one --item."
+            "Pin an intermediate step to exactly N machines. Repeatable. "
+            "If natural demand needs more than N, the chain rate is throttled "
+            "down so this step lands at N (`chain_throttled` flag set in JSON). "
+            "If natural demand needs fewer than N, the step over-produces and "
+            "the excess is reported per-step as `excess_output_per_min` and "
+            "rolled up into top-level `co_products`. Combinable with --rate, "
+            "--machines, and --use-ceil. When given alone (no --rate/--machines) "
+            "the top-level rate is derived from the smallest constraint."
         ),
     )
     p.add_argument(
@@ -1977,8 +2146,8 @@ Examples:
             "Re-solve at the rate the tightest-rounding step's ceiled machine count "
             "produces. Finds the step where ceil(mc)/mc is smallest (binding step), "
             "scales the target rate by that ratio, then re-solves so all steps are "
-            "sized for integer machines. Single --item only. Not compatible with "
-            "--step-machines. Oil-product top targets are not supported."
+            "sized for integer machines. Single --item only. Oil-product top "
+            "targets are not supported."
         ),
     )
     p.add_argument("--assembler", default=3, type=int, choices=[1, 2, 3],
@@ -2094,14 +2263,15 @@ Examples:
     has_rate          = len(args.rates) > 0
     has_machines      = len(args.machines_list) > 0
     has_step_machines = len(args.step_machines) > 0
-    if sum([has_rate, has_machines, has_step_machines]) > 1:
-        p.error("Cannot mix --rate, --machines, and --step-machines; use exactly one.")
+    if has_rate and has_machines:
+        p.error("Cannot mix --rate and --machines; pick one per --item.")
     if not any([has_rate, has_machines, has_step_machines]):
-        p.error("Exactly one of --rate, --machines, or --step-machines must be provided.")
-    if has_step_machines and len(args.items) != 1:
-        p.error("--step-machines requires exactly one --item.")
-    if args.use_ceil and has_step_machines:
-        p.error("--use-ceil cannot be combined with --step-machines.")
+        p.error("Provide at least one of --rate, --machines, or --step-machines.")
+    if has_step_machines and not (has_rate or has_machines) and len(args.items) != 1:
+        p.error(
+            "When --step-machines is the only demand source it derives the "
+            "top-level rate, so exactly one --item is required."
+        )
     if args.use_ceil and len(args.items) > 1:
         p.error("--use-ceil requires exactly one --item.")
     n = len(args.items)
@@ -2217,31 +2387,26 @@ def main() -> None:
     )
 
     targets: list[tuple[str, Fraction]] = []
+    has_rate          = len(args.rates) > 0
     has_machines      = len(args.machines_list) > 0
     has_step_machines = len(args.step_machines) > 0
+    constraints: list[tuple[str, float]] = (
+        [_parse_step_machines(r) for r in args.step_machines] if has_step_machines else []
+    )
+    chain_throttled = False
 
-    if has_step_machines:
-        constraints = [_parse_step_machines(r) for r in args.step_machines]
-
-        # Reference run at rate=1 to get proportional machine counts
-        ref = Solver(
-            solver.recipe_idx, solver.raw_set,
-            solver.assembler_level, solver.furnace_type,
-            module_configs=solver.module_configs or None,
-            beacon_configs=solver.beacon_configs or None,
-            default_beacon_config=solver.default_beacon_config,
-            machine_module_slots=solver.machine_module_slots or None,
-            machine_quality=solver.machine_quality,
-            beacon_quality=solver.beacon_quality,
-            recipe_overrides=solver.recipe_overrides or None,
-            recipe_machine_overrides=solver.recipe_machine_overrides or None,
-            recipe_module_overrides=solver.recipe_module_overrides or None,
-            recipe_beacon_overrides=solver.recipe_beacon_overrides or None,
-            bus_items=solver.bus_items or None,
-            planet_props=solver.planet_props or None,
-            location=solver.location,
-            research_levels=solver.research_levels or None,
-        )
+    # --- Phase A: derive base top-level rate(s) ---
+    if has_rate:
+        for i, item in enumerate(args.items):
+            targets.append((item, Fraction(str(args.rates[i]))))
+    elif has_machines:
+        for i, item in enumerate(args.items):
+            targets.append((item, solver.rate_for_machines(item, args.machines_list[i])))
+    elif constraints:
+        # --step-machines is the only demand source: pick the smallest scale
+        # so the most-demanding constraint becomes exact; non-binding ones
+        # will be floor-bumped in Phase D.
+        ref = _clone_solver(solver)
         ref.solve(args.item, Fraction(1))
 
         scale: float | None = None
@@ -2256,37 +2421,56 @@ def main() -> None:
             candidate = n / ref_count
             if scale is None or candidate < scale:
                 scale = candidate
-
-        actual_rate = Fraction(str(round(scale, 10)))  # type: ignore[arg-type]
+        assert scale is not None
+        actual_rate = Fraction(str(round(scale, 10)))
         targets.append((args.item, actual_rate))
 
-    elif has_machines:
-        for i, item in enumerate(args.items):
-            targets.append((item, solver.rate_for_machines(item, args.machines_list[i])))
-    else:
-        for i, item in enumerate(args.items):
-            targets.append((item, Fraction(str(args.rates[i]))))
+    # --- Phase B: throttle if any constraint caps the chain below natural ---
+    # Only meaningful when --rate or --machines provided the base rate; in the
+    # constraints-only path Phase A already yields the binding rate.
+    if constraints and (has_rate or has_machines):
+        pre = _clone_solver(solver)
+        for item, rate in targets:
+            pre.solve(item, rate)
+        pre.resolve_oil(data)
+
+        throttle_frac: Fraction | None = None
+        throttle_float: float | None   = None
+        for recipe_key, n in constraints:
+            if recipe_key not in pre.steps:
+                available = ", ".join(sorted(pre.steps))
+                sys.exit(
+                    f"error: --step-machines recipe '{recipe_key}' not found in chain. "
+                    f"Available: {available}"
+                )
+            nat = pre.steps[recipe_key]["machine_count"]
+            n_frac = Fraction(str(n))
+            if isinstance(nat, Fraction):
+                if n_frac < nat:
+                    cand_frac = n_frac / nat
+                    cand_f = float(cand_frac)
+                    if throttle_float is None or cand_f < throttle_float:
+                        throttle_float = cand_f
+                        throttle_frac  = cand_frac
+            else:
+                nat_f = float(nat)
+                if nat_f > 0 and n < nat_f:
+                    cand_f = n / nat_f
+                    if throttle_float is None or cand_f < throttle_float:
+                        throttle_float = cand_f
+                        throttle_frac  = None
+
+        if throttle_float is not None and throttle_float < 1.0:
+            chain_throttled = True
+            if throttle_frac is not None:
+                targets = [(it, rate * throttle_frac) for (it, rate) in targets]
+            else:
+                tf = Fraction(str(round(throttle_float, 10)))
+                targets = [(it, rate * tf) for (it, rate) in targets]
 
     if args.use_ceil and targets:
         # Pass 1: preliminary solve to find fractional machine counts
-        pre = Solver(
-            solver.recipe_idx, solver.raw_set,
-            solver.assembler_level, solver.furnace_type,
-            module_configs=solver.module_configs or None,
-            beacon_configs=solver.beacon_configs or None,
-            default_beacon_config=solver.default_beacon_config,
-            machine_module_slots=solver.machine_module_slots or None,
-            machine_quality=solver.machine_quality,
-            beacon_quality=solver.beacon_quality,
-            recipe_overrides=solver.recipe_overrides or None,
-            recipe_machine_overrides=solver.recipe_machine_overrides or None,
-            recipe_module_overrides=solver.recipe_module_overrides or None,
-            recipe_beacon_overrides=solver.recipe_beacon_overrides or None,
-            bus_items=solver.bus_items or None,
-            planet_props=solver.planet_props or None,
-            location=solver.location,
-            research_levels=solver.research_levels or None,
-        )
+        pre = _clone_solver(solver)
         pre.solve(targets[0][0], targets[0][1])
         pre.resolve_oil(data)
 
@@ -2326,6 +2510,10 @@ def main() -> None:
         solver.solve(item, rate)
     solver.resolve_oil(data)
 
+    # --- Phase D: floor-bump any constraint still under its declared N ---
+    if constraints:
+        _apply_step_machines_floor(solver, constraints)
+
     if len(targets) == 1:
         args.rate = float(targets[0][1])
     else:
@@ -2338,6 +2526,8 @@ def main() -> None:
     args.recipe_machine_overrides = recipe_machine_overrides or None
     args.recipe_module_overrides  = recipe_module_overrides  or None
     args.recipe_beacon_overrides  = recipe_beacon_overrides  or None
+    args.chain_throttled          = chain_throttled
+    args.step_machines_constraints = constraints  # list[(recipe, n)] for echo
 
     result = format_output(args, solver, resource_info, machine_power_w=machine_power_w)
     if args.output_format == "human":

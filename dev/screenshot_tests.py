@@ -351,10 +351,10 @@ def make_state_bus_balance() -> dict:
 def make_state_logistics() -> dict:
     """Logistics tab: primary supply + oversized intermediate + zero-supply tagged + bot draw."""
     state = _base_state("Logistics Demo")
-    # Flying-robot-frame line with step_machines oversizing battery.
+    # Flying-robot-frame line with step_machines pinning each step to an exact count.
     # Binding step is flying-robot-frame at 8 machines (rate=30/min).
-    # Battery declared at 6 machines vs 2.6667 at binding scale → surplus 3.33 × 22.5/m = 75/min.
-    # EEU and engine-unit declared at 4 (matches binding) → 0 surplus.
+    # Battery declared at 6 machines (natural 2.6667) → over-produces 75/min buffer.
+    # EEU and engine-unit declared at 4 (matches natural) → 0 buffer.
     flying_line = {
         "item": "flying-robot-frame",
         "label": "Flying Robot Frame Block",
@@ -391,15 +391,17 @@ def make_state_logistics() -> dict:
                                "electric-engine-unit": 30.0, "steel-plate": 30.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
                     "power_kw": 3000.0, "power_kw_ceil": 3000.0, "beacon_power_kw": 0.0,
+                    "forced_min_machines": 8, "excess_output_per_min": 0.0,
                 },
                 {
                     "recipe": "battery",
                     "machine": "cryogenic-plant",
-                    "machine_count": 2.6667, "machine_count_ceil": 3,
-                    "outputs": {"battery": 60.0},
-                    "inputs": {"sulfuric-acid": 1200.0, "iron-plate": 60.0, "copper-plate": 60.0},
+                    "machine_count": 6.0, "machine_count_ceil": 6,
+                    "outputs": {"battery": 135.0},
+                    "inputs": {"sulfuric-acid": 2700.0, "iron-plate": 135.0, "copper-plate": 135.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
-                    "power_kw": 4000.0, "power_kw_ceil": 4500.0, "beacon_power_kw": 0.0,
+                    "power_kw": 9000.0, "power_kw_ceil": 9000.0, "beacon_power_kw": 0.0,
+                    "forced_min_machines": 6, "excess_output_per_min": 75.0,
                 },
                 {
                     "recipe": "electric-engine-unit",
@@ -409,6 +411,7 @@ def make_state_logistics() -> dict:
                     "inputs": {"lubricant": 450.0, "electronic-circuit": 60.0, "engine-unit": 30.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
                     "power_kw": 1500.0, "power_kw_ceil": 1500.0, "beacon_power_kw": 0.0,
+                    "forced_min_machines": 4, "excess_output_per_min": 0.0,
                 },
                 {
                     "recipe": "engine-unit",
@@ -418,10 +421,11 @@ def make_state_logistics() -> dict:
                     "inputs": {"pipe": 60.0, "steel-plate": 30.0, "iron-gear-wheel": 30.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
                     "power_kw": 1500.0, "power_kw_ceil": 1500.0, "beacon_power_kw": 0.0,
+                    "forced_min_machines": 4, "excess_output_per_min": 0.0,
                 },
             ],
             "raw_resources": {},
-            "co_products": {},
+            "co_products": {"battery": 75.0},
             "miners_needed": {},
             "total_power_mw": 10.15,
             "total_power_mw_ceil": 10.875,
@@ -691,6 +695,21 @@ def make_state_line_centrifuge_uranium():
     )
 
 
+def make_state_line_step_machines_buffer():
+    """Pin multiple intermediate steps above natural; surface red (+X/m) buffer badges."""
+    cli = run_cli(
+        "--item", "flying-robot-frame", "--machines", "9",
+        "--step-machines", "battery=5",
+        "--step-machines", "engine-unit=5",
+        "--step-machines", "electric-engine-unit=5",
+        "--location", "nauvis",
+    )
+    return _line_card_state(
+        "Flying Robot Frame – Pinned Steps", "nauvis", "Nauvis",
+        "flying-robot-frame", "Flying Robot Frame", cli["rate_per_min"], cli,
+    )
+
+
 def make_state_line_oil_refinery():
     cli = run_cli("--item", "processing-unit", "--rate", "10")
     return _line_card_state(
@@ -745,6 +764,7 @@ LINE_CARD_SCENARIOS = [
     ("line-card__space-crusher.png",       make_state_line_space_crusher),
     ("line-card__research-stale.png",      make_state_line_research_stale),
     ("line-card__research-capped.png",     make_state_line_research_capped),
+    ("line-card__step-machines-buffer.png", make_state_line_step_machines_buffer),
 ]
 
 
