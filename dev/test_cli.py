@@ -1723,7 +1723,7 @@ class TestStepMachinesFloor(unittest.TestCase):
             float(s.steps["copper-plate"]["machine_count"]), before, places=6
         )
         self.assertEqual(s.steps["copper-plate"]["forced_min_machines"], 1.0)
-        self.assertEqual(s.steps["copper-plate"]["excess_output_per_min"], 0.0)
+        self.assertEqual(s.steps["copper-plate"]["excess_output_per_min"], {})
 
     def test_floor_above_natural_bumps_and_emits_excess(self):
         s = _solver_new()
@@ -1734,7 +1734,7 @@ class TestStepMachinesFloor(unittest.TestCase):
             float(s.steps["copper-cable"]["machine_count"]), 2.0, places=6
         )
         self.assertEqual(s.steps["copper-cable"]["forced_min_machines"], 2.0)
-        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"], 0)
+        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"].get("copper-cable", 0), 0)
 
     def test_extra_demand_cascades_to_raws(self):
         # Forcing copper-cable above natural should INCREASE copper-ore demand.
@@ -1755,8 +1755,8 @@ class TestStepMachinesFloor(unittest.TestCase):
         )
         self.assertAlmostEqual(float(s.steps["copper-cable"]["machine_count"]), 3.0, places=6)
         self.assertAlmostEqual(float(s.steps["iron-plate"]["machine_count"]),   4.0, places=6)
-        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"], 0)
-        self.assertGreater(s.steps["iron-plate"]["excess_output_per_min"],   0)
+        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"].get("copper-cable", 0), 0)
+        self.assertGreater(s.steps["iron-plate"]["excess_output_per_min"].get("iron-plate", 0),   0)
 
     def test_recipe_not_in_chain_errors(self):
         s = _solver_new()
@@ -1784,7 +1784,7 @@ class TestStepMachinesFloor(unittest.TestCase):
         self.assertAlmostEqual(
             float(s.steps["copper-cable"]["machine_count"]), 4.0, places=4
         )
-        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"], 0)
+        self.assertGreater(s.steps["copper-cable"]["excess_output_per_min"].get("copper-cable", 0), 0)
 
     def test_surplus_drained_by_downstream_step(self):
         # Forcing iron-gear-wheel above natural credits surplus iron-gear-wheel.
@@ -1812,7 +1812,7 @@ class TestStepMachinesEnd2End(unittest.TestCase):
         )
         steps = {s["recipe"]: s for s in out["production_steps"]}
         self.assertEqual(steps["copper-cable"]["forced_min_machines"], 2.0)
-        self.assertGreater(steps["copper-cable"]["excess_output_per_min"], 0)
+        self.assertGreater(steps["copper-cable"]["excess_output_per_min"].get("copper-cable", 0), 0)
         self.assertEqual(out["step_machines"], {"copper-cable": 2.0})
         self.assertNotIn("chain_throttled", out)
         # excess primary should appear at top level as co_product.
@@ -1828,7 +1828,7 @@ class TestStepMachinesEnd2End(unittest.TestCase):
         steps = {s["recipe"]: s for s in out["production_steps"]}
         self.assertAlmostEqual(steps["copper-cable"]["machine_count"], 5.0, places=4)
         # Throttled step has zero excess — natural exactly matches floor.
-        self.assertEqual(steps["copper-cable"]["excess_output_per_min"], 0.0)
+        self.assertEqual(steps["copper-cable"]["excess_output_per_min"], {})
 
     def test_constraints_only_path_derives_top_rate(self):
         out = _run_cli(
@@ -1853,8 +1853,8 @@ class TestStepMachinesEnd2End(unittest.TestCase):
         self.assertAlmostEqual(steps["copper-cable"]["machine_count"], 3.0, places=4)
         self.assertAlmostEqual(steps["iron-plate"]["machine_count"],   4.0, places=4)
         # At least one of them should have excess > 0 (the non-binding one).
-        excess_cc = steps["copper-cable"]["excess_output_per_min"]
-        excess_ip = steps["iron-plate"]["excess_output_per_min"]
+        excess_cc = steps["copper-cable"]["excess_output_per_min"].get("copper-cable", 0)
+        excess_ip = steps["iron-plate"]["excess_output_per_min"].get("iron-plate", 0)
         self.assertGreater(max(excess_cc, excess_ip), 0)
 
     def test_combined_with_use_ceil(self):
@@ -1880,7 +1880,29 @@ class TestStepMachinesEnd2End(unittest.TestCase):
         steps = {s["recipe"]: s for s in out["production_steps"]}
         self.assertAlmostEqual(steps["flying-robot-frame"]["machine_count"], 1.0, places=4)
         self.assertAlmostEqual(steps["battery"]["machine_count"],            3.0, places=4)
-        self.assertGreater(steps["battery"]["excess_output_per_min"], 0)
+        self.assertGreater(steps["battery"]["excess_output_per_min"].get("battery", 0), 0)
+
+    def test_co_product_excess_accounted(self):
+        # uranium-processing has two outputs: uranium-238 (primary) and uranium-235 (co-product).
+        # --rate 1 gives a natural uranium-processing count well below 8, so forcing 8
+        # over-produces both outputs; excess dict must cover both.
+        out = _run_cli(
+            "--item", "uranium-fuel-cell", "--rate", "1",
+            "--step-machines", "uranium-processing=8",
+        )
+        steps = {s["recipe"]: s for s in out["production_steps"]}
+        exc = steps["uranium-processing"]["excess_output_per_min"]
+        self.assertIsInstance(exc, dict)
+        self.assertIn("uranium-238", exc)
+        self.assertIn("uranium-235", exc)
+        self.assertGreater(exc["uranium-238"], 0)
+        self.assertGreater(exc["uranium-235"], 0)
+        # U-235/U-238 ratio must match the recipe probability ratio (0.007/0.993).
+        self.assertAlmostEqual(
+            exc["uranium-235"] / exc["uranium-238"],
+            0.007 / 0.993,
+            places=6,
+        )
 
     def test_step_machines_echoed_in_json(self):
         out = _run_cli(

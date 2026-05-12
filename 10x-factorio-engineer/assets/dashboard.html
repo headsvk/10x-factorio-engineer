@@ -1121,8 +1121,7 @@ const items = [...new Set([...Object.keys(supply), ...Object.keys(demand)])];
 if (!items.length) return `
 <div class="empty-state">
 <p>No logistics network activity on ${esc(loc.label)}.</p>
-<p>Set <code>reserve_items</code> on a line to declare items routed to bots, or
-<code>cli_args.logistics_items</code> for items drawn from bots.</p>
+<p>Tell Claude which items go to/from your logistics network to see the balance here.</p>
 </div>`;
 items.sort((a, b) => {
 const netA = (supply[a] ?? 0) - (demand[a] ?? 0);
@@ -1265,25 +1264,26 @@ const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}">◆</s
 const belt = STATE.preferred_belt;
 const inEntries = Object.entries(s.inputs ?? {});
 const outEntries = Object.entries(s.outputs ?? {});
-const mkItems = (entries) => entries.map(([item, rate]) => {
+// Amber buffer badge per output: shown next to each output when --step-machines over-sizes a step.
+// excess_output_per_min is now a dict {item: rate} mirroring outputs, covering co-products too.
+const excessMap = s.excess_output_per_min ?? {};
+const mkItems = (entries, exMap) => entries.map(([item, rate]) => {
 const isF = FLUID_ITEM_IDS.has(item);
 const rateStr = isF ? fmtFluid(rate) : fmtRB(rate, belt);
-return `<div class="step-io-item"><span class="step-io-name">${esc(label(item))}</span><span class="step-io-rate">${rateStr}</span></div>`;
+const ex = exMap?.[item] ?? 0;
+const ann = ex > 0
+? `<span style="color:var(--warn);font-size:10px;font-weight:600;opacity:0.85;margin-left:4px" title="excess output buffered (forced ${s.forced_min_machines} machines)">+${fmtN(ex)}/m buf</span>`
+: '';
+return `<div class="step-io-item"><span class="step-io-name">${esc(label(item))}</span><span class="step-io-rate">${rateStr}${ann}</span></div>`;
 }).join('');
 const ioRow = (inEntries.length || outEntries.length) ? `<tr class="step-io-row"><td colspan="4" style="padding-top:0;padding-right:0"><div class="step-io-grid">
-<div class="step-io-col step-io-col--in"><div class="step-io-sect-label">Inputs</div>${mkItems(inEntries)}</div>
-<div class="step-io-col step-io-col--out"><div class="step-io-sect-label">Outputs</div>${mkItems(outEntries)}</div>
+<div class="step-io-col step-io-col--in"><div class="step-io-sect-label">Inputs</div>${mkItems(inEntries, {})}</div>
+<div class="step-io-col step-io-col--out"><div class="step-io-sect-label">Outputs</div>${mkItems(outEntries, excessMap)}</div>
 </div></td></tr>` : '';
-// Red (+X/m) buffer indicator when the step is over-sized via --step-machines.
-// The CLI emits excess_output_per_min directly; we just render it.
-const excess = s.excess_output_per_min ?? 0;
-const bufferBadge = excess > 0
-? ` <span style="color:var(--bad);font-size:10px;font-weight:600" title="excess output buffered (forced ${s.forced_min_machines} machines)">(+${fmtN(excess)}/m)</span>`
-: '';
 return `<tr>
 <td>${esc(label(s.recipe))}</td>
 <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
-<td class="r">${fmtMC(s.machine_count)}${bufferBadge}</td>
+<td class="r">${fmtMC(s.machine_count)}</td>
 <td class="r" style="color:var(--text-dim)">${powCell}</td>
 </tr>${ioRow}`;
 }).join('');

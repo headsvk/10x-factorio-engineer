@@ -696,13 +696,21 @@ def make_state_line_centrifuge_uranium():
 
 
 def make_state_line_step_machines_buffer():
-    """Pin multiple intermediate steps above natural; surface red (+X/m) buffer badges."""
+    """Pin multiple intermediate steps above natural; surface amber (+X/m buf) buffer badges."""
     cli = run_cli(
         "--item", "flying-robot-frame", "--machines", "9",
         "--step-machines", "battery=5",
         "--step-machines", "engine-unit=5",
         "--step-machines", "electric-engine-unit=5",
         "--location", "nauvis",
+        "--bus-item", "iron-plate",
+        "--bus-item", "copper-plate",
+        "--bus-item", "steel-plate",
+        "--bus-item", "electronic-circuit",
+        "--bus-item", "lubricant",
+        "--bus-item", "sulfuric-acid",
+        "--bus-item", "pipe",
+        "--bus-item", "iron-gear-wheel",
     )
     return _line_card_state(
         "Flying Robot Frame – Pinned Steps", "nauvis", "Nauvis",

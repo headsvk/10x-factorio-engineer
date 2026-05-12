@@ -1618,7 +1618,7 @@ def format_output(
         if "forced_min_machines" in s:
             step_out["forced_min_machines"] = s["forced_min_machines"]
         if "excess_output_per_min" in s:
-            step_out["excess_output_per_min"] = round(float(s["excess_output_per_min"]), 4)
+            step_out["excess_output_per_min"] = {k: round(v, 4) for k, v in s["excess_output_per_min"].items()}
         steps_list_raw.append(step_out)
 
     # Sort steps topologically: target recipe(s) first, dependencies below.
@@ -1827,11 +1827,9 @@ def format_human_readable(out: dict) -> str:
         if step.get("forced_min_machines") is not None:
             forced = step["forced_min_machines"]
             forced_str = str(int(forced)) if float(forced).is_integer() else str(forced)
-            excess = step.get("excess_output_per_min", 0)
-            if excess > 0:
-                suffix = f"  [forced {forced_str}, +{excess}/min buffer]"
-            else:
-                suffix = f"  [forced {forced_str}]"
+            excess = step.get("excess_output_per_min", {})
+            buf_parts = [f"+{v}/min {k}" for k, v in excess.items() if v > 0]
+            suffix = f"  [forced {forced_str}, {', '.join(buf_parts)} buffer]" if buf_parts else f"  [forced {forced_str}]"
         lines.append(f"{recipe:<30}  {mc} -> {mc_ceil} {machine_label}{suffix}")
 
         # optional modules / beacons / speed / power detail line
@@ -1984,7 +1982,7 @@ def _apply_step_machines_floor(
 
         current = float(step["machine_count"])
         if n <= current:
-            step["excess_output_per_min"] = 0.0
+            step["excess_output_per_min"] = {}
             continue
 
         # Use float when machine_count is float (beacon path); else exact Fraction.
@@ -2011,10 +2009,10 @@ def _apply_step_machines_floor(
             new_count          = Fraction(str(n))
 
         # Bump the step itself.
-        step["machine_count"]              = new_count
-        step["rate_per_min"]               = step["rate_per_min"] + extra_primary
-        step["outputs"][primary_item]      = step["outputs"].get(primary_item, 0) + extra_primary
-        step["excess_output_per_min"]      = float(extra_primary)
+        step["machine_count"]         = new_count
+        step["rate_per_min"]          = step["rate_per_min"] + extra_primary
+        step["outputs"][primary_item] = step["outputs"].get(primary_item, 0) + extra_primary
+        excess_per_output: dict[str, float] = {primary_item: float(extra_primary)}
 
         # Cascade extra ingredient demand upstream.
         for ing in recipe.get("ingredients", []):
@@ -2027,7 +2025,7 @@ def _apply_step_machines_floor(
             step["inputs"][ing["name"]] = step["inputs"].get(ing["name"], 0) + ing_extra
             solver.solve(ing["name"], solver_extra)
 
-        # Credit co-products to surplus (and reflect in step outputs).
+        # Credit co-products to surplus (reflect in step outputs and excess dict).
         for res in recipe.get("results", []):
             if res["name"] == primary_item:
                 continue
@@ -2042,6 +2040,9 @@ def _apply_step_machines_floor(
                 co_extra = extra_cycles * co_amt                                         # type: ignore[operator]
                 solver.surplus[res["name"]] += co_extra                                  # type: ignore[arg-type]
             step["outputs"][res["name"]] = step["outputs"].get(res["name"], 0) + co_extra
+            excess_per_output[res["name"]] = float(co_extra)
+
+        step["excess_output_per_min"] = excess_per_output
 
         # Excess primary output → surplus (drained by other consumers if any).
         if is_float:
