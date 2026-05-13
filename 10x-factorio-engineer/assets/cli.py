@@ -1039,9 +1039,8 @@ class Solver:
                     eff_count = Fraction(spec["count"]) * scale
                     qual_mult = MODULE_QUALITY_MULT[spec["quality"]]
                     if spec["type"] == "prod":
-                        # Speed penalty applies regardless of allow_productivity
-                        speed_bonus += eff_count * PROD_MODULE_SPEED_PENALTY[spec["tier"]]
                         if allow_prod:
+                            speed_bonus += eff_count * PROD_MODULE_SPEED_PENALTY[spec["tier"]]
                             module_prod += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
                     elif spec["type"] == "speed":
                         speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
