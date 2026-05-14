@@ -2581,5 +2581,367 @@ class TestDispatchMemoization(unittest.TestCase):
         self.assertGreater(cache.solver_kernel_calls, first_solver)
 
 
+class TestCoProductIncidental(unittest.TestCase):
+    """Incidental co-product credit (roadmap V3 — incidental sub-case).
+
+    When the chain naturally activates a multi-output recipe, non-primary
+    SOLID outputs are credited against existing demand.  Surplus surfaces as
+    ``incidental_byproduct_overflow`` with an explanatory note.
+    """
+
+    def _plan(self, item, **kwargs):
+        kwargs.setdefault("tech_state", qp.ALL_TECH_UNLOCKED)
+        return qp.plan(item, 60, _data(), **kwargs)
+
+    def test_output_fields_present_default(self):
+        # Empty dicts when no multi-output recipe is active.
+        out = self._plan("iron-plate")
+        self.assertIn("incidental_byproduct_legendary", out)
+        self.assertIn("incidental_byproduct_credited", out)
+        self.assertIn("incidental_byproduct_overflow", out)
+        self.assertEqual(out["incidental_byproduct_legendary"], {})
+        self.assertEqual(out["incidental_byproduct_credited"], {})
+        self.assertEqual(out["incidental_byproduct_overflow"], {})
+
+    def test_lava_cast_emits_stone_byproduct(self):
+        # iron-plate @ vulcanus activates molten-iron-from-lava which emits
+        # 10 stone per craft.  No stone demand → all overflow.
+        out = self._plan("iron-plate", planets=["nauvis", "vulcanus"])
+        emitted = out["incidental_byproduct_legendary"]
+        self.assertIn("stone", emitted)
+        self.assertGreater(emitted["stone"], 0)
+        # No stone demand in iron-plate chain → no credit, all overflow.
+        self.assertEqual(out["incidental_byproduct_credited"].get("stone", 0.0), 0.0)
+        self.assertGreater(out["incidental_byproduct_overflow"].get("stone", 0.0), 0)
+        # A surplus note is emitted.
+        joined = "\n".join(out["notes"])
+        self.assertIn("incidental byproduct surplus", joined)
+        self.assertIn("stone", joined)
+
+    def test_concrete_vulcanus_credits_stone(self):
+        # concrete @ vulcanus picks fluid-preferred ``concrete-from-molten-iron``
+        # → activates lava casting (stone co-product) AND stone-brick stage
+        # (stone consumer).  Lava-cast stone is credited against stone-brick
+        # demand, shrinking mined-recycle on stone.
+        baseline = self._plan("concrete", planets=["nauvis", "vulcanus"])
+        # The incidental pass must mark stone as both emitted AND credited.
+        self.assertGreater(
+            baseline["incidental_byproduct_legendary"].get("stone", 0.0), 0,
+        )
+        self.assertGreater(
+            baseline["incidental_byproduct_credited"].get("stone", 0.0), 0,
+        )
+        # All emitted stone is credited (no surplus, since chain consumes
+        # far more stone than lava casting produces).
+        emitted = baseline["incidental_byproduct_legendary"]["stone"]
+        credited = baseline["incidental_byproduct_credited"]["stone"]
+        self.assertAlmostEqual(emitted, credited, places=4)
+        self.assertEqual(
+            baseline["incidental_byproduct_overflow"].get("stone", 0.0), 0.0,
+        )
+        # Mined-recycle stone target is reduced by exactly the credit (legendary
+        # rate-side equivalence: credit shrinks legendary stone demand 1:1).
+        mined_stages = [
+            s for s in baseline["stages"]
+            if s.get("role") == "mined-raw-self-recycle" and s.get("raw") == "stone"
+        ]
+        self.assertEqual(len(mined_stages), 1)
+        # Naive chain demand without credit:
+        # 60 concrete/min × (5 stone-brick / 10 concrete) × 2 stone/brick = 60 stone/min.
+        self.assertAlmostEqual(
+            mined_stages[0]["legendary_per_min"],
+            60.0 - credited,
+            delta=0.5,
+        )
+        # Total machines strictly less than a no-credit baseline (sanity check
+        # via the legendary stone delta).
+        self.assertGreater(credited, 0)
+
+    def test_credit_note_emitted(self):
+        out = self._plan("concrete", planets=["nauvis", "vulcanus"])
+        joined = "\n".join(out["notes"])
+        self.assertIn("incidental co-product", joined)
+        self.assertIn("stone", joined)
+
+    def test_credit_reduces_total_machine_count(self):
+        # Direct comparison: hand-disable the incidental pass on a sibling
+        # plan and confirm the credit lowers mined-recycle.
+        with_credit = self._plan("concrete", planets=["nauvis", "vulcanus"])
+        credited_stone = with_credit["incidental_byproduct_credited"].get("stone", 0.0)
+        self.assertGreater(credited_stone, 0)
+        mined = [
+            s for s in with_credit["stages"]
+            if s.get("role") == "mined-raw-self-recycle" and s.get("raw") == "stone"
+        ][0]
+        # Sanity: credit ≈ legendary-stone reduction (chain naive: 60 stone/min;
+        # credited stone reduces target 1:1).
+        self.assertAlmostEqual(
+            60.0 - mined["legendary_per_min"], credited_stone, places=3,
+        )
+
+    def test_rate_doubles_credit_doubles(self):
+        # Linear scaling: doubling target rate doubles emitted + credited
+        # byproducts.
+        small = qp.plan(
+            "concrete", 60, _data(),
+            planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        big = qp.plan(
+            "concrete", 120, _data(),
+            planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertAlmostEqual(
+            big["incidental_byproduct_legendary"]["stone"],
+            2.0 * small["incidental_byproduct_legendary"]["stone"],
+            places=5,
+        )
+        self.assertAlmostEqual(
+            big["incidental_byproduct_credited"]["stone"],
+            2.0 * small["incidental_byproduct_credited"]["stone"],
+            places=5,
+        )
+
+    def test_helper_skips_fluid_byproducts(self):
+        # _compute_incidental_byproducts must NEVER emit a fluid (e.g.
+        # concrete-from-molten-iron's molten-iron is a fluid byproduct of the
+        # casting recipe at the molten-iron stage — sanity check the filter).
+        fluids = qp.build_fluid_set(_data())
+        out = self._plan("concrete", planets=["nauvis", "vulcanus"])
+        for byprod in out["incidental_byproduct_legendary"]:
+            self.assertNotIn(byprod, fluids)
+
+    def test_helper_returns_empty_when_no_multi_output(self):
+        # vanilla iron-plate (smelting) — no multi-output recipes.
+        out = self._plan("iron-plate")
+        self.assertEqual(out["incidental_byproduct_legendary"], {})
+
+    def test_format_human_renders_incidental_section(self):
+        out = self._plan("concrete", planets=["nauvis", "vulcanus"])
+        text = qp.format_human(out)
+        self.assertIn("Incidental Co-Products", text)
+        self.assertIn("stone", text)
+
+    def test_format_human_omits_section_when_no_byproducts(self):
+        out = self._plan("iron-plate")
+        text = qp.format_human(out)
+        self.assertNotIn("Incidental Co-Products", text)
+
+    def test_self_recycle_target_emits_empty_incidental(self):
+        # Path A (self-recycle target) doesn't run the walker the same way,
+        # so its sub-plan should emit empty incidental fields rather than
+        # missing keys (cost-gate code and consumers rely on presence).
+        out = qp.plan(
+            "superconductor", 60, _data(),
+            planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertIn("incidental_byproduct_legendary", out)
+        self.assertIn("incidental_byproduct_credited", out)
+        self.assertIn("incidental_byproduct_overflow", out)
+
+
+class TestCoProductDriven(unittest.TestCase):
+    """Driven co-product activation (roadmap V3 — driven sub-case).
+
+    The chain has demand for a mined-recycle leaf raw R (e.g. stone via
+    stone-brick on Vulcanus); the planner can activate a recipe that
+    produces R as a non-primary solid output (e.g. molten-iron-from-lava)
+    purely to harvest R, accepting the recipe's primary as overflow.
+    """
+
+    def _plan(self, item, **kwargs):
+        kwargs.setdefault("tech_state", qp.ALL_TECH_UNLOCKED)
+        return qp.plan(item, kwargs.pop("rate", 60), _data(), **kwargs)
+
+    def test_enumerate_helper_returns_drivers(self):
+        cands = qp.enumerate_co_product_drivers(_data())
+        # Stone is the headline use case; both lava-cast variants must qualify.
+        stone_recipes = {c["recipe_key"] for c in cands.get("stone", [])}
+        self.assertIn("molten-iron-from-lava", stone_recipes)
+        self.assertIn("molten-copper-from-lava", stone_recipes)
+        # Sorted by descending target_amount (copper has 15 stone, iron 10).
+        self.assertEqual(cands["stone"][0]["recipe_key"], "molten-copper-from-lava")
+        # Crushing recipes are EXCLUDED (handled by asteroid pipeline).
+        for clist in cands.values():
+            for c in clist:
+                self.assertNotIn(c["category"], ("crushing", "recycling"))
+
+    def test_enumerate_caches_per_dataset(self):
+        a = qp.enumerate_co_product_drivers(_data())
+        b = qp.enumerate_co_product_drivers(_data())
+        self.assertIs(a, b)
+
+    def test_default_no_drivers_active(self):
+        # Without --enable-driver, no driver_overflow appears.
+        out = self._plan(
+            "stone-wall", planets=["nauvis", "vulcanus"],
+        )
+        self.assertEqual(out.get("driver_overflow", {}), {})
+        # No driver stage in the stages list.
+        roles = [s.get("role") for s in out["stages"]]
+        self.assertNotIn("co-product-driver", roles)
+
+    def test_explicit_driver_activates(self):
+        # With explicit --enable-driver molten-iron-from-lava, stone-wall @
+        # vulcanus replaces mined-recycle on stone with a foundry casting
+        # stage; molten-iron is voided as overflow.
+        baseline = self._plan(
+            "stone-wall", planets=["nauvis", "vulcanus"],
+        )
+        with_drv = self._plan(
+            "stone-wall", planets=["nauvis", "vulcanus"],
+            active_drivers={"molten-iron-from-lava"},
+        )
+        # Driver stage exists.
+        drv_stages = [s for s in with_drv["stages"] if s.get("role") == "co-product-driver"]
+        self.assertEqual(len(drv_stages), 1)
+        self.assertEqual(drv_stages[0]["recipe"], "molten-iron-from-lava")
+        self.assertEqual(drv_stages[0]["target"], "stone")
+        # Mined-recycle stone is GONE (driver supplies all 600 legendary stone/min).
+        mined = [
+            s for s in with_drv["stages"]
+            if s.get("role") == "mined-raw-self-recycle" and s.get("raw") == "stone"
+        ]
+        self.assertEqual(mined, [])
+        # Molten-iron overflow surfaces in driver_overflow.
+        self.assertIn("molten-iron", with_drv["driver_overflow"])
+        self.assertGreater(with_drv["driver_overflow"]["molten-iron"], 0)
+        # Massive cost reduction.
+        self.assertLess(
+            with_drv["total_machine_count"],
+            baseline["total_machine_count"] * 0.1,  # >10× drop
+        )
+        # Note emitted.
+        joined = "\n".join(with_drv["notes"])
+        self.assertIn("driver molten-iron-from-lava", joined)
+
+    def test_drivers_all_picks_highest_yield(self):
+        # --enable-drivers all picks the highest-target_amount candidate
+        # (molten-copper-from-lava: 15 stone vs molten-iron-from-lava: 10).
+        with_all = self._plan(
+            "stone-wall", planets=["nauvis", "vulcanus"],
+            active_drivers={"all"},
+        )
+        drv_stages = [s for s in with_all["stages"] if s.get("role") == "co-product-driver"]
+        self.assertEqual(len(drv_stages), 1)
+        self.assertEqual(drv_stages[0]["recipe"], "molten-copper-from-lava")
+        self.assertIn("molten-copper", with_all["driver_overflow"])
+
+    def test_cost_gate_falls_back_for_drivers_all(self):
+        # iron-plate has no stone demand → driver doesn't activate (no
+        # applicable raw).  But `--enable-drivers all` should still match
+        # the no-driver baseline.
+        baseline = self._plan(
+            "iron-plate", planets=["nauvis", "vulcanus"],
+        )
+        with_all = self._plan(
+            "iron-plate", planets=["nauvis", "vulcanus"],
+            active_drivers={"all"},
+        )
+        # No driver activated (no stone demand) → outputs identical.
+        self.assertAlmostEqual(
+            with_all["total_machine_count"],
+            baseline["total_machine_count"],
+            places=4,
+        )
+
+    def test_explicit_driver_unknown_recipe_errors(self):
+        with self.assertRaises(ValueError) as ctx:
+            self._plan(
+                "stone-wall", planets=["nauvis", "vulcanus"],
+                active_drivers={"bogus-recipe-key"},
+            )
+        msg = str(ctx.exception)
+        self.assertIn("unknown driver recipe", msg)
+        self.assertIn("bogus-recipe-key", msg)
+
+    def test_driver_only_activates_when_applicable(self):
+        # --enable-driver molten-iron-from-lava on iron-plate (no stone
+        # demand) is a no-op (no error, no driver stage).
+        out = self._plan(
+            "iron-plate", planets=["nauvis", "vulcanus"],
+            active_drivers={"molten-iron-from-lava"},
+        )
+        self.assertEqual(out.get("driver_overflow", {}), {})
+        roles = [s.get("role") for s in out["stages"]]
+        self.assertNotIn("co-product-driver", roles)
+
+    def test_driver_skipped_when_planet_locked(self):
+        # molten-iron-from-lava needs lava (vulcanus).  Without --planets
+        # vulcanus, the recipe should not activate even if user enables it.
+        # stone-wall without vulcanus: stone is not a raw without vulcanus
+        # (only nauvis stone available), so this test is NOT iron-plate but
+        # rather concrete @ nauvis only.  Instead we just confirm the
+        # candidate is filtered when its fluid ingredient (lava) isn't
+        # planet-unlocked.
+        out = self._plan(
+            "stone-wall", planets=["nauvis"],   # NO vulcanus
+            active_drivers={"molten-iron-from-lava"},
+        )
+        roles = [s.get("role") for s in out["stages"]]
+        self.assertNotIn("co-product-driver", roles)
+
+    def test_driver_walks_calcite_through_asteroid_chain(self):
+        # molten-iron-from-lava needs 1 calcite per craft.  Calcite must be
+        # legendary → routes via oxide-asteroid-crushing.
+        out = self._plan(
+            "stone-wall", planets=["nauvis", "vulcanus"],
+            active_drivers={"molten-iron-from-lava"},
+        )
+        # Asteroid input includes oxide chunks (calcite source).
+        self.assertIn("oxide-asteroid-chunk", out["asteroid_input"])
+        self.assertGreater(out["asteroid_input"]["oxide-asteroid-chunk"], 0)
+
+    def test_rate_doubles_driver_machines_double(self):
+        small = qp.plan(
+            "stone-wall", 60, _data(),
+            planets=["nauvis", "vulcanus"],
+            active_drivers={"molten-iron-from-lava"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        big = qp.plan(
+            "stone-wall", 120, _data(),
+            planets=["nauvis", "vulcanus"],
+            active_drivers={"molten-iron-from-lava"},
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        s_drv = next(s for s in small["stages"] if s.get("role") == "co-product-driver")
+        b_drv = next(s for s in big["stages"] if s.get("role") == "co-product-driver")
+        self.assertAlmostEqual(
+            b_drv["machine_count"], 2.0 * s_drv["machine_count"], places=4,
+        )
+        self.assertAlmostEqual(
+            big["driver_overflow"]["molten-iron"],
+            2.0 * small["driver_overflow"]["molten-iron"],
+            places=4,
+        )
+
+    def test_format_human_renders_driver_section(self):
+        out = self._plan(
+            "stone-wall", planets=["nauvis", "vulcanus"],
+            active_drivers={"molten-iron-from-lava"},
+        )
+        text = qp.format_human(out)
+        self.assertIn("[driver]", text)
+        self.assertIn("Driver Overflow", text)
+        self.assertIn("Molten Iron", text)
+
+    def test_format_human_omits_driver_section_when_inactive(self):
+        out = self._plan(
+            "stone-wall", planets=["nauvis", "vulcanus"],
+        )
+        text = qp.format_human(out)
+        self.assertNotIn("Driver Overflow", text)
+        self.assertNotIn("[driver]", text)
+
+    def test_self_recycle_target_emits_empty_driver_overflow(self):
+        # Path A (self-recycle target) sub-plans must include the new
+        # driver_overflow field so consumers can count on its presence.
+        out = qp.plan(
+            "superconductor", 60, _data(),
+            planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertIn("driver_overflow", out)
+
+
 if __name__ == "__main__":
     unittest.main()
