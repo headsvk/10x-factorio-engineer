@@ -1565,6 +1565,12 @@ def format_output(
     if machine_power_w is None:
         machine_power_w = {}
 
+    recipe_allow_prod: dict[str, bool] = {}
+    for recipes_list in solver.recipe_idx.values():
+        for r in recipes_list:
+            if "key" in r:
+                recipe_allow_prod[r["key"]] = r.get("allow_productivity", False)
+
     steps_list_raw = []
     for s in solver.steps.values():
         recipe_key  = s["recipe"]
@@ -1607,7 +1613,10 @@ def format_output(
             "beacon_power_kw":    round(bpwr,     4),
         }
         if module_specs:
-            step_out["module_specs"] = module_specs
+            allow_prod = recipe_allow_prod.get(recipe_key, False)
+            effective_specs = [sp for sp in module_specs if sp["type"] != "prod" or allow_prod]
+            if effective_specs:
+                step_out["module_specs"] = effective_specs
         if beacon_spec is not None:
             step_out["beacon_spec"]    = beacon_spec
             step_out["beacon_quality"] = solver.beacon_quality
