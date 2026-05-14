@@ -457,6 +457,7 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 | `recipe_beacon` | `{recipe: BeaconSpec}` per-recipe beacons | one `--recipe-beacon RECIPE=...` per entry |
 | `bus_items` | list of item IDs drawn from this location's bus | one `--bus-item ITEM` per entry |
 | `logistics_items` | list of item IDs drawn from the logistics (bot) network on this location | one `--bus-item ITEM` per entry (CLI doesn't distinguish; dashboard tags as bot-routed) |
+| `direct_items` | list of item IDs belt-fed directly from another line on this location (no bus, no bots) | one `--bus-item ITEM` per entry (CLI doesn't distinguish; dashboard nets against supplier's reserve) |
 | `research` | research-level overrides for this line only | one `--research NAME=LEVEL` per entry |
 | `use_ceil` | constrain to integer machine counts | `--use-ceil` |
 
@@ -485,22 +486,26 @@ This says: "size by holding `uranium-processing` at 8 centrifuges, override
 assembler to AM3, give AM3 4× prod-1 and centrifuge 2× prod-1." Re-running
 with these args reproduces the line exactly.
 
-### 3.3 Logistics network — `reserve_items` and `logistics_items`
+### 3.3 Logistics network — `reserve_items`, `logistics_items`, and `direct_items`
 
 Some bases route items through bots (logistic network) instead of belts or trains.
-The dashboard models the bot network as a parallel pool to the bus, with its own
-supply/demand sheet on the **Logistics** tab.
+Other items are belt-fed line-to-line without ever touching the main bus.
+The dashboard models the bot network as a parallel pool to the bus (with its own
+supply/demand sheet on the **Logistics** tab) and lets direct belt connections
+net silently against the supplier's reserve.
 
-**Two opt-in fields per line:**
+**Three opt-in fields per line:**
 
 | Field | Where | Meaning |
 |-------|-------|---------|
 | `reserve_items: [item-id, ...]` | top-level on the line | items this line *supplies* to the logistics network |
 | `cli_args.logistics_items: [item-id, ...]` | inside `cli_args` | items this line *draws from* the logistics network instead of bus/belts |
+| `cli_args.direct_items: [item-id, ...]` | inside `cli_args` | items belt-fed directly from another line on this location (no bus, no bots) |
 
 **Routing rules:**
-- `cli_args.logistics_items` is a *replacement* for `cli_args.bus_items` for the items it covers — same CLI flag (`--bus-item`), different dashboard tagging. An item should appear in *one* of the two lists, never both.
-- Items in `cli_args.logistics_items` are excluded from Bus Balance demand and instead added to Logistics Network demand. This keeps the bus tab focused on belt/train items.
+- `cli_args.logistics_items` and `cli_args.direct_items` are both *replacements* for `cli_args.bus_items` for the items they cover — same CLI flag (`--bus-item`), different dashboard tagging. An item should appear in *one* of the three lists, never multiple.
+- Items in `cli_args.logistics_items` are excluded from Bus Balance demand and added to Logistics Network demand.
+- Items in `cli_args.direct_items` are excluded from Bus Balance demand AND from Logistics demand. Instead they're netted against the supplying line's reserve (which must declare the item in `reserve_items`). When the direct demand fully covers the reserve, the item disappears from the Logistics tab entirely — correctly modelling "no bot traffic, no idle surplus".
 
 **Reserve auto-rate (per tagged item, per line):**
 - **Primary output** (`item == line.item`): supply = full effective production rate. Caveat: V1 has no per-line "declared local consumers" object, so the primary's reserve number reflects the line's full output rate. The player must mentally subtract whatever fraction is going to local belt-fed consumers (e.g. yellow science).

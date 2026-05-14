@@ -349,9 +349,17 @@ def make_state_bus_balance() -> dict:
 
 
 def make_state_logistics() -> dict:
-    """Logistics tab: primary supply + oversized intermediate + zero-supply tagged + bot draw."""
+    """Logistics tab: primary supply + oversized intermediate + bot draw + belt-fed direct.
+
+    Three lines on Nauvis:
+      • Flying Robot Frame Block — supplies frames + battery surplus to the network,
+        draws iron-gear-wheel from bots (logistics_items).
+      • Yellow Science — belt-fed flying-robot-frame from the FRF line (direct_items).
+        Demand nets against the FRF reserve so logistics doesn't double-count.
+      • Engine Unit Stock — pure logistics consumer of the FRF line's engine-unit
+        surplus (logistics_items, no direct connection).
+    """
     state = _base_state("Logistics Demo")
-    # Flying-robot-frame line with step_machines pinning each step to an exact count.
     # Binding step is flying-robot-frame at 8 machines (rate=30/min).
     # Battery declared at 6 machines (natural 2.6667) → over-produces 75/min buffer.
     # EEU and engine-unit declared at 4 (matches natural) → 0 buffer.
@@ -391,7 +399,7 @@ def make_state_logistics() -> dict:
                                "electric-engine-unit": 30.0, "steel-plate": 30.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
                     "power_kw": 3000.0, "power_kw_ceil": 3000.0, "beacon_power_kw": 0.0,
-                    "forced_min_machines": 8, "excess_output_per_min": 0.0,
+                    "forced_min_machines": 8, "excess_output_per_min": {},
                 },
                 {
                     "recipe": "battery",
@@ -401,7 +409,7 @@ def make_state_logistics() -> dict:
                     "inputs": {"sulfuric-acid": 2700.0, "iron-plate": 135.0, "copper-plate": 135.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
                     "power_kw": 9000.0, "power_kw_ceil": 9000.0, "beacon_power_kw": 0.0,
-                    "forced_min_machines": 6, "excess_output_per_min": 75.0,
+                    "forced_min_machines": 6, "excess_output_per_min": {"battery": 75.0},
                 },
                 {
                     "recipe": "electric-engine-unit",
@@ -411,7 +419,7 @@ def make_state_logistics() -> dict:
                     "inputs": {"lubricant": 450.0, "electronic-circuit": 60.0, "engine-unit": 30.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
                     "power_kw": 1500.0, "power_kw_ceil": 1500.0, "beacon_power_kw": 0.0,
-                    "forced_min_machines": 4, "excess_output_per_min": 0.0,
+                    "forced_min_machines": 4, "excess_output_per_min": {},
                 },
                 {
                     "recipe": "engine-unit",
@@ -421,7 +429,7 @@ def make_state_logistics() -> dict:
                     "inputs": {"pipe": 60.0, "steel-plate": 30.0, "iron-gear-wheel": 30.0},
                     "machine_quality": "normal", "beacon_speed_bonus": 0.0,
                     "power_kw": 1500.0, "power_kw_ceil": 1500.0, "beacon_power_kw": 0.0,
-                    "forced_min_machines": 4, "excess_output_per_min": 0.0,
+                    "forced_min_machines": 4, "excess_output_per_min": {},
                 },
             ],
             "raw_resources": {},
@@ -437,15 +445,94 @@ def make_state_logistics() -> dict:
             },
         },
     }
+    # Yellow science — belt-fed flying-robot-frame from the FRF line (direct_items).
+    # Demand 9/min nets against the 30/min reserve → 21/min visible in logistics.
+    yellow_line = {
+        "item": "utility-science-pack",
+        "label": "Yellow Science",
+        "target_rate": 30,
+        "effective_rate": 30,
+        "cli_args": {
+            "item": "utility-science-pack",
+            "rate": 30,
+            "bus_items": [
+                "copper-plate", "electronic-circuit", "flying-robot-frame",
+                "low-density-structure", "processing-unit",
+            ],
+            "direct_items": ["flying-robot-frame"],
+        },
+        "cli_result": {
+            "item": "utility-science-pack",
+            "rate_per_min": 30.0,
+            "production_steps": [
+                {
+                    "recipe": "utility-science-pack",
+                    "machine": "assembling-machine-3",
+                    "machine_count": 4.0, "machine_count_ceil": 4,
+                    "outputs": {"utility-science-pack": 30.0},
+                    "inputs": {"low-density-structure": 90.0, "processing-unit": 60.0,
+                               "flying-robot-frame": 9.0},
+                    "machine_quality": "normal", "beacon_speed_bonus": 0.0,
+                    "power_kw": 1500.0, "power_kw_ceil": 1500.0, "beacon_power_kw": 0.0,
+                },
+            ],
+            "raw_resources": {},
+            "co_products": {},
+            "miners_needed": {},
+            "total_power_mw": 1.5,
+            "total_power_mw_ceil": 1.5,
+            "bus_inputs": {
+                "low-density-structure": 90.0, "processing-unit": 60.0,
+                "flying-robot-frame": 9.0,
+            },
+        },
+    }
+    # Engine Unit Stock — pure logistics consumer (bot-routed, not belt-fed).
+    # Demand 6/min appears in the Logistics tab without netting against reserves.
+    engine_stock_line = {
+        "item": "logistic-chest-storage",
+        "label": "Engine Unit Stock",
+        "target_rate": 6,
+        "effective_rate": 6,
+        "cli_args": {
+            "item": "logistic-chest-storage",
+            "rate": 6,
+            "bus_items": ["engine-unit", "iron-plate", "steel-plate"],
+            "logistics_items": ["engine-unit"],
+        },
+        "cli_result": {
+            "item": "logistic-chest-storage",
+            "rate_per_min": 6.0,
+            "production_steps": [
+                {
+                    "recipe": "logistic-chest-storage",
+                    "machine": "assembling-machine-3",
+                    "machine_count": 0.4, "machine_count_ceil": 1,
+                    "outputs": {"logistic-chest-storage": 6.0},
+                    "inputs": {"engine-unit": 6.0, "iron-plate": 6.0, "steel-plate": 12.0},
+                    "machine_quality": "normal", "beacon_speed_bonus": 0.0,
+                    "power_kw": 150.0, "power_kw_ceil": 375.0, "beacon_power_kw": 0.0,
+                },
+            ],
+            "raw_resources": {},
+            "co_products": {},
+            "miners_needed": {},
+            "total_power_mw": 0.15,
+            "total_power_mw_ceil": 0.375,
+            "bus_inputs": {"engine-unit": 6.0, "iron-plate": 6.0, "steel-plate": 12.0},
+        },
+    }
     state["locations"] = [_loc(
         "nauvis", "Nauvis",
-        lines=[flying_line],
+        lines=[flying_line, yellow_line, engine_stock_line],
         bus_items=[
             {"item": "iron-gear-wheel", "rate": 3600},
             {"item": "iron-plate",      "rate": 7200},
             {"item": "copper-plate",    "rate": 3600},
             {"item": "steel-plate",     "rate": 1800},
             {"item": "electronic-circuit", "rate": 1800},
+            {"item": "low-density-structure", "rate": 90},
+            {"item": "processing-unit", "rate": 60},
             {"item": "sulfuric-acid", "rate": 3600, "fluid": True},
             {"item": "lubricant",     "rate": 1800, "fluid": True},
         ],
@@ -762,17 +849,83 @@ def make_state_line_space_crusher():
     )
 
 
+def make_state_line_selective_prod():
+    """Prod modules applied to a chain where some sub-recipes disallow productivity.
+
+    Production-science-pack chain: the top recipe + iron-stick allow prod (chip
+    appears); electric-furnace and productivity-module disallow prod (chip
+    absent on those step rows). Demonstrates the prod-modules-on-disallowed-
+    recipes fix is rendered correctly.
+    """
+    cli = run_cli(
+        "--item", "production-science-pack", "--rate", "90",
+        "--assembler", "3",
+        "--modules", "assembling-machine-3=4:prod:1:normal",
+        "--bus-item", "advanced-circuit",
+        "--bus-item", "electronic-circuit",
+        "--bus-item", "steel-plate",
+        "--bus-item", "stone-brick",
+        "--bus-item", "rail",
+    )
+    return _line_card_state(
+        "Purple Science – Selective Prod", "nauvis", "Nauvis",
+        "production-science-pack", "Production Science", 90, cli,
+        cli_args={
+            "item": "production-science-pack",
+            "rate": 90,
+            "assembler": 3,
+            "modules": {
+                "assembling-machine-3": [
+                    {"count": 4, "type": "prod", "tier": 1, "quality": "normal"},
+                ],
+            },
+            "bus_items": ["advanced-circuit", "electronic-circuit", "rail",
+                          "steel-plate", "stone-brick"],
+        },
+    )
+
+
+def make_state_line_multi_target():
+    """Multi-target CLI run (rocket-fuel + solid-fuel + light-oil).
+
+    cli_result.targets[] replaces item/rate_per_min. The line card header chip
+    renders the comma-joined targets, oil cracking is solved jointly, and
+    co_products surface the surplus.
+    """
+    cli = run_cli(
+        "--item", "rocket-fuel", "--rate", "42",
+        "--item", "solid-fuel", "--rate", "420",
+        "--item", "light-oil",  "--rate", "500",
+        "--recipe", "solid-fuel=solid-fuel-from-light-oil",
+    )
+    return _line_card_state(
+        "Rocket Fuel + Light Oil Block", "nauvis", "Nauvis",
+        "rocket-fuel", "Rocket Fuel Block", 42, cli,
+        cli_args={
+            "item": "rocket-fuel",
+            "targets": [
+                {"item": "rocket-fuel", "rate": 42},
+                {"item": "solid-fuel",  "rate": 420},
+                {"item": "light-oil",   "rate": 500},
+            ],
+            "recipe": {"solid-fuel": "solid-fuel-from-light-oil"},
+        },
+    )
+
+
 LINE_CARD_SCENARIOS = [
-    ("line-card__foundry-vulcanus.png",    make_state_line_foundry_vulcanus),
-    ("line-card__biochamber-gleba.png",    make_state_line_biochamber_gleba),
-    ("line-card__centrifuge-uranium.png",  make_state_line_centrifuge_uranium),
-    ("line-card__oil-refinery.png",        make_state_line_oil_refinery),
-    ("line-card__holmium-fulgora.png",     make_state_line_holmium_fulgora),
-    ("line-card__cryogenic-aquilo.png",    make_state_line_cryogenic_aquilo),
-    ("line-card__space-crusher.png",       make_state_line_space_crusher),
-    ("line-card__research-stale.png",      make_state_line_research_stale),
-    ("line-card__research-capped.png",     make_state_line_research_capped),
+    ("line-card__foundry-vulcanus.png",     make_state_line_foundry_vulcanus),
+    ("line-card__biochamber-gleba.png",     make_state_line_biochamber_gleba),
+    ("line-card__centrifuge-uranium.png",   make_state_line_centrifuge_uranium),
+    ("line-card__oil-refinery.png",         make_state_line_oil_refinery),
+    ("line-card__holmium-fulgora.png",      make_state_line_holmium_fulgora),
+    ("line-card__cryogenic-aquilo.png",     make_state_line_cryogenic_aquilo),
+    ("line-card__space-crusher.png",        make_state_line_space_crusher),
+    ("line-card__research-stale.png",       make_state_line_research_stale),
+    ("line-card__research-capped.png",      make_state_line_research_capped),
     ("line-card__step-machines-buffer.png", make_state_line_step_machines_buffer),
+    ("line-card__selective-prod.png",       make_state_line_selective_prod),
+    ("line-card__multi-target.png",         make_state_line_multi_target),
 ]
 
 

@@ -1080,11 +1080,15 @@ function renderBusBalance() {
 
   // Demand: read bus_inputs from cli_result (set when --bus-item was used for this line)
   // Items present in a line's cli_args.logistics_items are routed via bots — exclude from bus.
+  // Items present in a line's cli_args.direct_items are belt-fed from another line — also exclude.
   const demand = {};
   for (const line of loc.lines ?? []) {
-    const logisticsSet = new Set(line.cli_args?.logistics_items ?? []);
+    const offBusSet = new Set([
+      ...(line.cli_args?.logistics_items ?? []),
+      ...(line.cli_args?.direct_items ?? []),
+    ]);
     for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {})) {
-      if (logisticsSet.has(item)) continue;
+      if (offBusSet.has(item)) continue;
       demand[item] = (demand[item] ?? 0) + rate;
     }
   }
@@ -1160,6 +1164,10 @@ function renderBusBalance() {
 // Each line may declare:
 //   line.reserve_items: [item-id, ...]      — items routed FROM this line into bots
 //   line.cli_args.logistics_items: [item]   — items drawn FROM bots (mirror of bus_items)
+//   line.cli_args.direct_items: [item]      — items belt-fed directly from another line.
+//                                              Mirror of bus_items: excludes from bus AND
+//                                              nets against the supplying line's reserve
+//                                              (no bot traffic implied).
 //
 // Auto-rate per tagged reserve item, per line:
 //   primary (item == line.item): supply = effective primary rate (full step output)
@@ -1189,24 +1197,41 @@ function reserveRateFor(line, item) {
 
   // Intermediate: surplus comes from over-sizing via --step-machines RECIPE=N.
   // The CLI is now authoritative — it emits step.excess_output_per_min directly.
-  // Saved cli_results from before this field shipped will report 0, which is
-  // the correct fallback (no buffer until the line is re-planned).
-  return step.excess_output_per_min ?? 0;
+  // New format: dict {item: rate} (per-co-product). Old format: scalar number
+  // (assumed to apply to the step's primary output). Saved cli_results from
+  // before this field shipped will report 0 — the correct fallback.
+  const excess = step.excess_output_per_min;
+  if (excess == null) return 0;
+  if (typeof excess === 'number') return excess;
+  return excess[item] ?? 0;
 }
 
 function computeLogisticsBalance(loc) {
-  const supply = {};   // item → items/min from this location's reserves
-  const demand = {};   // item → items/min drawn from bots
+  const supply = {};        // item → items/min from this location's reserves
+  const demand = {};        // item → items/min drawn from bots
+  const directDemand = {};  // item → items/min belt-fed from another line (nets against supply)
   for (const line of loc.lines ?? []) {
     for (const item of line.reserve_items ?? []) {
       const rate = reserveRateFor(line, item);
       supply[item] = (supply[item] ?? 0) + rate;
     }
     const logiSet = new Set(line.cli_args?.logistics_items ?? []);
+    const directSet = new Set(line.cli_args?.direct_items ?? []);
     for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {})) {
-      if (!logiSet.has(item)) continue;
-      demand[item] = (demand[item] ?? 0) + rate;
+      if (logiSet.has(item)) {
+        demand[item] = (demand[item] ?? 0) + rate;
+      } else if (directSet.has(item)) {
+        directDemand[item] = (directDemand[item] ?? 0) + rate;
+      }
     }
+  }
+  // Net direct demand against the supplying line's reserve. If a direct
+  // consumer fully covers the reserve, the item drops out of logistics
+  // entirely (no bot traffic, no idle surplus).
+  for (const [item, rate] of Object.entries(directDemand)) {
+    if (supply[item] == null) continue;
+    supply[item] = Math.max(0, supply[item] - rate);
+    if (supply[item] === 0 && (demand[item] ?? 0) === 0) delete supply[item];
   }
   return { supply, demand };
 }
@@ -1465,9 +1490,11 @@ function renderLineCard(line, idx) {
       </div>` : '';
 
     const busInputs = line.cli_result?.bus_inputs ?? {};
-    const logiSet = new Set(line.cli_args?.logistics_items ?? []);
-    const busOnly  = Object.entries(busInputs).filter(([r]) => !logiSet.has(r));
-    const logiOnly = Object.entries(busInputs).filter(([r]) =>  logiSet.has(r));
+    const logiSet   = new Set(line.cli_args?.logistics_items ?? []);
+    const directSet = new Set(line.cli_args?.direct_items ?? []);
+    const busOnly    = Object.entries(busInputs).filter(([r]) => !logiSet.has(r) && !directSet.has(r));
+    const logiOnly   = Object.entries(busInputs).filter(([r]) =>  logiSet.has(r));
+    const directOnly = Object.entries(busInputs).filter(([r]) =>  directSet.has(r));
     const renderInputChips = (entries) => entries.map(([r, rate]) => {
       const b = STATE.preferred_belt;
       const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, b);
@@ -1482,6 +1509,11 @@ function renderLineCard(line, idx) {
       <div class="card-section">
         <div class="section-label">From Logistics 🤖</div>
         <div class="chips">${renderInputChips(logiOnly)}</div>
+      </div>` : '';
+    const fromDirectSection = directOnly.length ? `
+      <div class="card-section">
+        <div class="section-label">Belt-fed Direct</div>
+        <div class="chips">${renderInputChips(directOnly)}</div>
       </div>` : '';
 
     const reserveItems = line.reserve_items ?? [];
@@ -1549,7 +1581,7 @@ function renderLineCard(line, idx) {
         <div class="chips"><span class="chip" style="font-family:var(--mono,monospace);color:var(--text-dim)">${esc(cliArgsSummary)}</span></div>
       </div>` : '';
 
-    body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${busInputSection}${fromLogiSection}${rawSection}${minerSection}${cliArgsSection}${noteSection}</div>`;
+    body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${busInputSection}${fromLogiSection}${fromDirectSection}${rawSection}${minerSection}${cliArgsSection}${noteSection}</div>`;
   }
 
   const cardClass   = line.wip ? 'wip' : sc;
