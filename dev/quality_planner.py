@@ -1671,6 +1671,55 @@ def _research_prod_for_recipe(recipe_key: str, research_levels: dict[str, int]) 
     return bonus
 
 
+def _compute_incidental_byproducts(
+    stages: list[dict], fluids: frozenset[str], data: dict,
+) -> tuple[dict[str, float], dict[str, list[dict]]]:
+    """Aggregate non-primary SOLID outputs from activated assembly stages.
+
+    For each ``assembly`` stage, look up the recipe and emit a credit for every
+    solid result that isn't the stage's primary product.  Productivity scales
+    all outputs equally, so the byproduct rate is
+    ``crafts_per_min × amount × probability × eff_prod`` where ``eff_prod``
+    is reconstructed from the stage's stored ``research_prod`` + ``module_prod``
+    (capped at 4.0).
+
+    Returns ``({item: total_rate}, {item: [{recipe, primary, rate}, ...]})``.
+    Fluids and stages with non-positive ``crafts_per_min`` are skipped.
+    """
+    byproducts: defaultdict[str, float] = defaultdict(float)
+    sources: defaultdict[str, list[dict]] = defaultdict(list)
+    for st in stages:
+        if st.get("role") != "assembly":
+            continue
+        recipe_key = st.get("recipe")
+        primary = st.get("product")
+        crafts_per_min = float(st.get("crafts_per_min", 0.0))
+        if crafts_per_min <= 0 or not recipe_key or not primary:
+            continue
+        recipe = _recipe_by_key(data, recipe_key)
+        if recipe is None:
+            continue
+        eff_prod = (
+            1.0 + float(st.get("research_prod", 0.0)) + float(st.get("module_prod", 0.0))
+        )
+        if eff_prod > 4.0:
+            eff_prod = 4.0
+        for res in recipe.get("results", []):
+            name = res.get("name")
+            if not name or name == primary or name in fluids:
+                continue
+            amt = res.get("amount")
+            if amt is None:
+                amt = (res.get("amount_min", 0) + res.get("amount_max", 0)) / 2.0
+            prob = res.get("probability", 1.0)
+            rate = crafts_per_min * float(amt) * float(prob) * eff_prod
+            if rate <= 0:
+                continue
+            byproducts[name] += rate
+            sources[name].append({"recipe": recipe_key, "primary": primary, "rate": rate})
+    return dict(byproducts), dict(sources)
+
+
 def _stage_power_kw(stage: dict, power_w: dict[str, int]) -> float:
     """Compute electrical power draw (kW) for a stage, dispatching on role.
 
@@ -3043,6 +3092,9 @@ def _plan_self_recycle_target(
         "shuffle_byproduct_legendary": {},
         "shuffle_byproduct_credited": {},
         "shuffle_byproduct_overflow": {},
+        "incidental_byproduct_legendary": {},
+        "incidental_byproduct_credited": {},
+        "incidental_byproduct_overflow": {},
         "stages": [self_stage] + list(reversed(normal_stages)),
         "total_machine_count": total_machines,
         "total_power_mw": total_power_mw,
@@ -3457,6 +3509,9 @@ def _plan_self_feed_target(
         "shuffle_byproduct_legendary": {},
         "shuffle_byproduct_credited": {},
         "shuffle_byproduct_overflow": {},
+        "incidental_byproduct_legendary": {},
+        "incidental_byproduct_credited": {},
+        "incidental_byproduct_overflow": {},
         "stages": [self_stage] + list(reversed(normal_stages)),
         "total_machine_count": total_machines,
         "total_power_mw": total_power_mw,
@@ -3811,6 +3866,70 @@ def plan(
                 s["byproduct_overflow"] = dict(overflow)
                 shuffle_stages.append(s)
 
+    # ---- Incidental co-product credit (roadmap V3 item: incidental sub-case) ----
+    # Scan walker-emitted assembly stages for non-primary SOLID outputs.  When
+    # the chain naturally activates a multi-output recipe (e.g. lava casting on
+    # Vulcanus produces stone as a co-product, Gleba *-processing produces seeds
+    # / spoilage), credit the byproduct against existing demand.  Surplus is
+    # surfaced as ``incidental_byproduct_overflow`` with an explanatory note.
+    #
+    # Driven activation (running a recipe FOR its co-product when the primary
+    # has no demand) is the sequential sub-case B in the roadmap — not done
+    # here.  This pass only credits byproducts of recipes the chain already
+    # activates.
+    incidental_legendary, _inc_sources = _compute_incidental_byproducts(
+        stages, fluids, data,
+    )
+    incidental_credited: dict[str, float] = {}
+    incidental_overflow: dict[str, float] = {}
+    if incidental_legendary:
+        stage_demand_map: dict[str, float] = {}
+        for s in stages:
+            p = s.get("product")
+            if p:
+                stage_demand_map[p] = (
+                    stage_demand_map.get(p, 0.0) + float(s.get("rate_per_min", 0.0))
+                )
+        for byprod, byrate in incidental_legendary.items():
+            have = float(stage_demand_map.get(byprod, raw_demand.get(byprod, 0.0)))
+            cap = min(float(byrate), have) if have > 0 else 0.0
+            if cap > 0:
+                incidental_credited[byprod] = cap
+            surplus = float(byrate) - cap
+            if surplus > 1e-6:
+                incidental_overflow[byprod] = surplus
+        if any(v > 0 for v in incidental_credited.values()):
+            # Merge with shuffle credits (if any) so a single re-walk applies
+            # both sets of credits to the demand seed.
+            merged_credits: dict[str, float] = dict(incidental_credited)
+            for k, v in shuffle_byproduct_credited.items():
+                merged_credits[k] = merged_credits.get(k, 0.0) + float(v)
+            shuffle_primaries = (
+                frozenset(s["primary"] for s in shuffle_stages)
+                if shuffle_stages else None
+            )
+            direct_dispatches = set()
+            stages, raw_demand = walk_recipe_tree(
+                item_key, rate, data, research_levels, assembler_level,
+                fluids, planet_props, planets_fs,
+                extra_raws=shuffle_primaries,
+                byproduct_credits=merged_credits,
+                assembly_modules=assembly_modules,
+                assembly_module_quality=module_quality,
+                prod_module_tier=prod_module_tier,
+                machine_quality=machine_quality,
+                no_asteroids=no_asteroids,
+                tech_state=tech_state,
+                _cache=_cache,
+                _in_flight=_in_flight,
+                _force_tree_walk_for=_force_tree_walk_for,
+                _dispatch_env=dispatch_env,
+                _dispatch_out=direct_dispatches,
+            )
+            if shuffle_primaries:
+                for p in shuffle_primaries:
+                    raw_demand.pop(p, None)
+
     # Group raw demand by chunk type.  Each chunk is produced by one crushing recipe
     # (e.g. metallic-asteroid-crushing -> iron-ore+copper-ore).  We scale to satisfy
     # the max-demanding raw among a chunk's outputs.
@@ -4074,6 +4193,17 @@ def plan(
             notes.append(
                 f"stage {st['recipe']} uses fluid-transparent input ({list(st['fluid_inputs'].keys())})"
             )
+    # Incidental co-product credit notes.
+    for byprod, cap in sorted(incidental_credited.items()):
+        notes.append(
+            f"incidental co-product: {cap:.2f} legendary {byprod}/min "
+            f"credited from upstream multi-output recipe(s)"
+        )
+    for byprod, surplus in sorted(incidental_overflow.items()):
+        notes.append(
+            f"incidental byproduct surplus: {surplus:.2f} legendary "
+            f"{byprod}/min unused (no downstream demand)"
+        )
 
     out = {
         "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
@@ -4085,6 +4215,9 @@ def plan(
         "shuffle_byproduct_legendary": shuffle_byproduct_legendary,
         "shuffle_byproduct_credited": shuffle_byproduct_credited,
         "shuffle_byproduct_overflow": shuffle_byproduct_overflow,
+        "incidental_byproduct_legendary": dict(incidental_legendary),
+        "incidental_byproduct_credited": dict(incidental_credited),
+        "incidental_byproduct_overflow": dict(incidental_overflow),
         "stages": (
             reprocessing_stages
             + crushing_stages
@@ -4181,6 +4314,19 @@ def format_human(out: dict) -> str:
         emitted = out["shuffle_byproduct_legendary"]
         credited = out.get("shuffle_byproduct_credited", {})
         overflow = out.get("shuffle_byproduct_overflow", {})
+        for item, amt in sorted(emitted.items()):
+            c = credited.get(item, 0.0)
+            o = overflow.get(item, 0.0)
+            L.append(
+                f"  {_humanize(item)}: {amt:.2f} emitted "
+                f"(credited {c:.2f}, surplus {o:.2f})"
+            )
+    if out.get("incidental_byproduct_legendary"):
+        L.append("")
+        L.append("=== Incidental Co-Products (legendary/min) ===")
+        emitted = out["incidental_byproduct_legendary"]
+        credited = out.get("incidental_byproduct_credited", {})
+        overflow = out.get("incidental_byproduct_overflow", {})
         for item, amt in sorted(emitted.items()):
             c = credited.get(item, 0.0)
             o = overflow.get(item, 0.0)

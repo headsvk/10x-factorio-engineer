@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-08. Tests: `python -m unittest dev.test_quality_planner -v` — **220 tests, all passing, ~0.78 s.**
+**Last updated:** 2026-05-14. Tests: `python -m unittest dev.test_quality_planner -v` — **231 tests, all passing, ~1.4 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -28,6 +28,7 @@ Currently shipped:
 - `--no-asteroids` early-game gating
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
 - **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber / quality-module tier. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`.
+- **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are now credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge `uranium-processing` / `kovarex-enrichment-process` give the other isotope.  Surplus surfaces as `incidental_byproduct_overflow` with an explanatory note.  Driven activation (running a recipe FOR its co-product) is the remaining roadmap sub-case.
 
 Future additions in the [Roadmap](#roadmap) section below.
 
@@ -86,7 +87,7 @@ Sanity numbers (60/min legendary, `--module-quality legendary`, no research, mod
 | target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
 |---|---|---|---|---|---|
 | `iron-plate` | — | 18.3 | metallic 281, oxide 28 | — | — |
-| `processing-unit` | nauvis | 620.2 | metallic 1406, carbonic 703, oxide 59 | coal 321 874 | crude-oil 5 333 |
+| `processing-unit` | nauvis | 614.2 | metallic 1406, carbonic 703, oxide 59 | coal 321 874 | crude-oil 5 333 |
 | `artillery-shell` | nauvis,vulcanus | ~5 000 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.5M | lava 9 300 |
 
 With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from 620 machines to **~12.6 machines** (50× drop) — modules off is the conservative baseline.
@@ -140,6 +141,12 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
   "shuffle_byproduct_legendary": {"copper-plate": 240, "steel-plate": 24},
   "shuffle_byproduct_credited":  {"copper-plate": 240},  // capped at observed demand
   "shuffle_byproduct_overflow":  {"steel-plate": 24},    // surplus
+
+  // Incidental co-products from walker-activated multi-output recipes
+  // (lava casting → stone, *-processing → seeds, bacteria → spoilage, etc.)
+  "incidental_byproduct_legendary": {"stone": 4.8},
+  "incidental_byproduct_credited":  {"stone": 4.8},   // capped at observed demand
+  "incidental_byproduct_overflow":  {},                // surplus
 
   "stages": [/* see roles below */],
 
@@ -243,6 +250,7 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_env_signature` | Frozen tuple of cost-affecting kwargs; used as the secondary key in `_cache.plans` |
 | `choose_path_self_recycle` | Dispatcher: picks min(Path A, Path B) for SELF_RECYCLE_TARGETS items at any depth. Cycle-guards via `_in_flight`. Subsumes the top-level auto-comparator AND walker intermediate dispatch |
 | `_assembly_prod_bonus` | (machine, recipe, slots, flag, quality, tier) → (prod_fraction, slots_filled). Includes inherent prod for foundry/EM/biochamber |
+| `_compute_incidental_byproducts` | Walks activated assembly stages, returns `({item: rate}, {item: [{recipe, primary, rate}, ...]})` of non-primary SOLID outputs.  `eff_prod` reconstructed from stored `research_prod` + `module_prod` on the stage |
 | `_stage_power_kw` | Dispatches per role; compound stages split power between machine types |
 | `_hot_spot_suggestions` | Inspects `summary.by_role`, emits actionable notes when one role > 50 % of machines |
 | `_pick_recipe_fluid_preferred` | Recipe selection: prefer recipes with most fluid ingredients (foundry casting > furnace); drops candidates whose machine is locked under `tech_state` |
@@ -497,7 +505,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **220 tests**, 29 classes.
+`dev/test_quality_planner.py` — **231 tests**, 30 classes.
 
 | Class | Coverage |
 |---|---|
@@ -529,6 +537,7 @@ MACHINE_INHERENT_PROD = {
 | `TestGlebaTargets` (V3 item 4) | `biolab`/`captive-biter-spawner` in `SELF_RECYCLE_TARGETS`; auto-comparator picks Path B for tungsten-carbide, plans succeed for captive-biter-spawner (post-audit Path B may now win); explanatory notes always present; shuffle enumeration includes buildings + modules + military + endgame; single-output recyclers excluded; `tank`/`biochamber`/`capture-robot-rocket`/`productivity-module-3` plan as shuffle targets; shuffle DP correctly skips prod-bearing slots when recipe has `allow_productivity=False`. |
 | `TestSelfRecycleIntermediate` (post-2026-05-08 audit) | 14 previously-failing endgame targets now plan: `electromagnetic-plant`, `foundry`, `mech-armor`, `fusion-reactor`, `quality-module-3`, `metallurgic-/electromagnetic-/cryogenic-science-pack`. Verifies normal-quality inputs propagate (`holmium-solution` in `normal_fluid_input`). Verifies `summary.by_role` includes `self-recycle-target`. Verifies linear scaling under rate doubling. Verifies Pass 2 deduplicates intermediates so duplicate `order` entries don't re-emit. |
 | `TestDispatchMemoization` (post-2026-05-08 audit) | Solver kernel called once per unique `(item, env)` key; Path A/B decision cached and re-used; per-`plan()` cache isolation (no cross-call leak); cycle detection via pre-populated `_in_flight` forces Path A with explanatory note; solver cache keyed by env (epic-quality variant gets a fresh kernel call). |
+| `TestCoProductIncidental` (shipped 2026-05-14) | `incidental_byproduct_legendary` / `_credited` / `_overflow` fields always present (empty when no multi-output recipe active).  `iron-plate @ vulcanus` emits stone byproduct as overflow (no stone demand).  `concrete @ vulcanus` emits 4.8 legendary stone/min, all credited, dropping mined-recycle target from 60 to 55.2 stone/min.  Surplus + credit notes appear in `notes`.  Linear scaling under rate doubling.  Fluid byproducts excluded from helper output.  `format_human` renders an `Incidental Co-Products` section when non-empty.  `_plan_self_recycle_target` sub-plan emits the empty fields. |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.
@@ -565,23 +574,31 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 
 In rough priority order (fully shipped items removed):
 
-### Co-product credits (HIGH priority — ~50 LoC incidental, +~150 LoC driven)
+### Co-product credits — incidental sub-case (shipped 2026-05-14)
 
-The byproduct-credit machinery exists (`byproduct_credits` kwarg on `walk_recipe_tree`) but is wired only into shuffle activations.  Standard tree-walk recipes don't credit their non-primary outputs, which loses meaningful optimizations:
+The byproduct-credit machinery exists (`byproduct_credits` kwarg on `walk_recipe_tree`) and was previously wired only into shuffle activations.  The incidental sub-case ships in `plan()` as a post-shuffle pass that walks the activated assembly stages, computes each stage's non-primary SOLID outputs at full chain rate (`crafts_per_min × amount × probability × eff_prod`), caps each byproduct at observed legendary demand, and re-walks the chain once with the merged credits.
 
-- **Lava casting** (`molten-iron-from-lava`, `molten-copper-from-lava`) produces 10/15 stone per cast as a co-product.  Any chain on Vulcanus that uses iron or copper plate is throwing away free legendary stone.  Today `stone-wall @ 60/min` plans 2244 machines (mined-recycle-bound on stone) even with `--planets nauvis,vulcanus`; with lava-casting credit and a stone driver the cost should drop ~30–40×.
-- **Gleba bacteria** (`copper-bacteria`, `iron-bacteria`) and `*-processing` recipes (`yumako-processing`, `jellynut-processing`) produce spoilage and seeds as co-products — same pattern.
+Currently active credits:
 
-Two sub-cases, sequenced:
+- **Lava casting** (`molten-iron-from-lava`, `molten-copper-from-lava`) → stone.  Any Vulcanus chain that ALSO consumes stone (concrete, electric-furnace, landfill via stone-brick, etc.) sheds the credited portion from its mined-recycle stone target.  Example: `concrete @ 60/min --planets nauvis,vulcanus` credits 4.8 legendary stone/min and drops mined-recycle from 60→55.2 stone/min.
+- **Gleba `*-processing`** (`yumako-processing`, `jellynut-processing`) → seeds (used for replanting; usually surplus in legendary chains).
+- **Gleba bacteria** (`copper-bacteria`, `iron-bacteria`) → spoilage.
+- **Centrifuge** (`uranium-processing`, `kovarex-enrichment-process`) → the other uranium isotope.
+- **Advanced asteroid crushing** is NOT included here — it lives in the existing `raw-crushing` stage which already routes multiple outputs into the chunk-demand pipeline.
 
-| Sub-case | Description | Approach |
-|---|---|---|
-| **Incidental credit** | Chain naturally activates a recipe with a useful co-product; credit it against existing demand, surplus → `byproduct_overflow` + note | ~50 LoC walker change.  Reuses `byproduct_credits` plumbing.  Add a per-walk pass to enumerate all multi-solid-output recipes activated and accumulate their non-primary outputs as credits |
-| **Driven credit** | Chain has demand for the co-product but no driver for the primary; activate the recipe *for* the co-product with the primary as overflow | New candidate class — recipes where stone (or another otherwise-unreachable raw) appears as a co-product.  Cost-gate against the mined-recycle baseline.  Subsumes the previously-deferred "single-output shuffle" idea more cleanly |
+Shape of the credit: `incidental_byproduct_legendary` lists the gross emitted rate; `incidental_byproduct_credited` is the portion absorbed by chain demand; `incidental_byproduct_overflow` is the surplus.  Surplus rows surface as `notes` so users can see they have legendary stone / seeds / spoilage they could route elsewhere.
 
-Recommended ship order: incidental first (small, safe, broad — every Vulcanus iron/copper chain benefits for free).  Driven case after validation, primarily targeting stone-bound items (`stone-wall`, `gate`, `concrete`, `landfill`, `agricultural-tower`, `captive-biter-spawner`) where the savings vs mined-recycle are largest.
+**Implementation choice — single re-walk vs iteration.**  Credits monotonically reduce demand, never increase it.  Upstream activations (the byproduct producers, e.g. lava casting) sit above their byproduct in the recipe DAG, so their rates don't change when the byproduct credit deactivates a downstream consumer (e.g. stone-brick).  A single re-walk suffices for the realistic Space Age chains.  If a future recipe graph creates a tighter cycle (byproduct producer's recipe consumes the byproduct itself), extend `plan()` to iterate; for now the simpler implementation is correct.
 
-Tests: `TestCoProductIncidental` — verify `iron-plate @ vulcanus` activates lava casting and credits stone byproduct correctly; verify overflow shape when no stone is demanded.  `TestCoProductDriven` (after sub-case B) — `stone-wall @ vulcanus` plans via lava-casting driver; cost-gate falls back to mined-recycle when driver is more expensive (e.g. iron-only planet without lava).
+Tests: `TestCoProductIncidental` (11 cases) covers field presence, emitted vs credited vs overflow rates, the concrete @ vulcanus headline case, rate-linearity, fluid filtering, format_human rendering, and `_plan_self_recycle_target` sub-plan parity.
+
+### Co-product credits — driven sub-case (HIGH priority, deferred)
+
+Activate a multi-output recipe FOR its co-product when the primary has no demand.  New candidate class — recipes where stone (or another otherwise-unreachable raw) appears as a co-product.  Cost-gate against the mined-recycle baseline.  Subsumes the previously-deferred "single-output shuffle" idea more cleanly.
+
+Primary targets: stone-bound items (`stone-wall`, `gate`, `landfill`, `agricultural-tower`, `captive-biter-spawner`) where mined-recycle on stone dominates the cost (e.g. `stone-wall @ 60/min --planets nauvis,vulcanus` still plans ~2244 machines because the iron/copper chain isn't activated to harvest the stone byproduct).
+
+Tests TBD: `TestCoProductDriven` — `stone-wall @ vulcanus` plans via lava-casting driver; cost-gate falls back to mined-recycle when driver is more expensive (e.g. iron-only planet without lava).
 
 ### Full research-state tracking (V3 item 2)
 

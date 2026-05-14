@@ -122,7 +122,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
 | `dev/test_cli.py` | `unittest` suite (219 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
-| `dev/test_quality_planner.py` | `unittest` suite (220 tests) for quality_planner |
+| `dev/test_quality_planner.py` | `unittest` suite (231 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
@@ -450,7 +450,7 @@ python -m unittest dev.test_cli -v
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
 | `TestUseCeil` | `--use-ceil` two-pass re-solve: single-step bus-only line gives integer `machine_count`; two-step chain tops out at integer with intermediate correctly sized; binding-is-intermediate case leaves rate unchanged; already-integer counts produce no rescaling; `use_ceil: true` echoed in JSON output |
 
-### `dev/test_quality_planner.py` (220 tests)
+### `dev/test_quality_planner.py` (231 tests)
 
 Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-partial LDS-shuffle wiring:
 
