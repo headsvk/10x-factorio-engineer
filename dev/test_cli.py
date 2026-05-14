@@ -2614,6 +2614,21 @@ class TestStepConfig(unittest.TestCase):
         ip = steps["iron-plate"]
         self.assertNotIn("module_specs", ip)
 
+    def test_prod_modules_stripped_from_disallowed_recipe(self):
+        # Prod modules configured globally must not appear in step output for
+        # recipes where allow_productivity=false (e.g. rail), so the dashboard
+        # does not show them as inserted. Iron-stick in the same chain allows
+        # productivity and must keep them.
+        s = _solver_new("vanilla", module_configs={
+            "assembling-machine-3": [_mspec(4, "prod", 1)],
+        })
+        s.solve("rail", Fraction(1500))
+        s.resolve_oil(_DATA["vanilla"]["data"])
+        out = _fmt_new("vanilla", "rail", 1500, solver=s)
+        steps = self._steps(out)
+        self.assertNotIn("module_specs", steps["rail"])
+        self.assertIn("module_specs", steps["iron-stick"])
+
     def test_recipe_module_override_wins_per_step(self):
         # --recipe-modules electronic-circuit=2:speed:3:normal → only ec step gets specs
         s = _solver_new("vanilla", recipe_module_overrides={
