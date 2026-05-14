@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-14. Tests: `python -m unittest dev.test_quality_planner -v` — **231 tests, all passing, ~1.4 s.**
+**Last updated:** 2026-05-14. Tests: `python -m unittest dev.test_quality_planner -v` — **245 tests, all passing, ~1.4 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -28,7 +28,8 @@ Currently shipped:
 - `--no-asteroids` early-game gating
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
 - **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber / quality-module tier. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`.
-- **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are now credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge `uranium-processing` / `kovarex-enrichment-process` give the other isotope.  Surplus surfaces as `incidental_byproduct_overflow` with an explanatory note.  Driven activation (running a recipe FOR its co-product) is the remaining roadmap sub-case.
+- **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge recipes give the other uranium isotope.  Surplus surfaces as `incidental_byproduct_overflow`.
+- **Driven co-product activation (`--enable-driver RECIPE_KEY` / `--enable-drivers all`, 2026-05-14)** — for any leaf raw R demanded via mined-recycle, the planner can activate a recipe that produces R as a non-primary solid (e.g. `molten-iron-from-lava` for stone) purely to harvest R, accepting the recipe's primary as overflow.  Driver ingredients are walked through the standard legendary chain (asteroid → calcite, etc.).  `--enable-drivers all` is cost-gated against the no-driver baseline.  Headline impact: `stone-wall @ 60/min --planets nauvis,vulcanus --enable-drivers all` drops from 2244 to ~65 machines (35× reduction).
 
 Future additions in the [Roadmap](#roadmap) section below.
 
@@ -76,6 +77,11 @@ python dev/quality_planner.py --item productivity-module-3 --rate 60 \
 # Legendary tank
 python dev/quality_planner.py --item tank --rate 1 \
     --planets nauvis --enable-shuffle tank $TECH_ALL
+
+# Stone-bound chain rescued by a co-product driver
+# (lava casting on Vulcanus harvests stone; molten-iron is voided as overflow)
+python dev/quality_planner.py --item stone-wall --rate 60 \
+    --planets nauvis,vulcanus --enable-drivers all $TECH_ALL
 ```
 
 ---
@@ -116,6 +122,8 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--research NAME=LEVEL` | empty | Repeatable. Productivity research per recipe family (e.g. `--research asteroid-productivity=5`) |
 | `--enable-shuffle NAME` | none | Repeatable. Activate cross-item shuffle by output-item key (e.g. `low-density-structure`). 16 candidates discovered from dataset; see [Shuffle enumeration](#shuffle-enumeration--selection) for the full list. |
 | `--enable-shuffles all` | off | Activate every applicable shuffle; greedy selector picks the best primary per legendary leaf. Mutually exclusive with `--enable-shuffle`. |
+| `--enable-driver RECIPE` | none | Repeatable. Activate a co-product driver by recipe key (e.g. `molten-iron-from-lava` to harvest stone for `stone-wall @ vulcanus`). Driver primary becomes overflow. See `enumerate_co_product_drivers` for the candidate list. |
+| `--enable-drivers all` | off | Try every driver candidate, picking the highest-yield driver per mined-recycle leaf. Cost-gated against the no-driver baseline. Mutually exclusive with `--enable-driver`. |
 | `--no-asteroids` | off | Skip asteroid path; route iron-ore/copper-ore/ice/calcite via planet self-recycle |
 | `--tech NAME=LEVEL` | empty | Repeatable. Tech research state. **Without any `--tech` flag, NOTHING is researched and the plan fails-fast on the recycler check.** Valid names: `recycling`, `tungsten-carbide`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`, `quality-module`, `quality-module-2`, `quality-module-3`. To replicate the fully-researched baseline list every tech with `=1`. |
 | `--format {human,json}` | `human` | Output format |
@@ -147,6 +155,10 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
   "incidental_byproduct_legendary": {"stone": 4.8},
   "incidental_byproduct_credited":  {"stone": 4.8},   // capped at observed demand
   "incidental_byproduct_overflow":  {},                // surplus
+
+  // Driver activations (e.g. lava casting run for its stone co-product;
+  // primary becomes overflow).
+  "driver_overflow": {"molten-iron": 15000.0},
 
   "stages": [/* see roles below */],
 
@@ -182,6 +194,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite |
 | `cross-item-shuffle` | plan() | foundry+recycler | LDS cast + recycle. Splits machine count between `foundry_machines` and `recycler_machines`. Has `byproduct_legendary`, `byproduct_credited`, `byproduct_overflow`, `fluid_demand` |
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
+| `co-product-driver` | plan() | per recipe | Driven activation: recipe runs purely for its non-primary solid output (e.g. `molten-iron-from-lava` for stone). Has `target`, `co_product_per_min`, `crafts_per_min`, `inputs`, `overflow_outputs` |
 
 ---
 
@@ -251,6 +264,7 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `choose_path_self_recycle` | Dispatcher: picks min(Path A, Path B) for SELF_RECYCLE_TARGETS items at any depth. Cycle-guards via `_in_flight`. Subsumes the top-level auto-comparator AND walker intermediate dispatch |
 | `_assembly_prod_bonus` | (machine, recipe, slots, flag, quality, tier) → (prod_fraction, slots_filled). Includes inherent prod for foundry/EM/biochamber |
 | `_compute_incidental_byproducts` | Walks activated assembly stages, returns `({item: rate}, {item: [{recipe, primary, rate}, ...]})` of non-primary SOLID outputs.  `eff_prod` reconstructed from stored `research_prod` + `module_prod` on the stage |
+| `enumerate_co_product_drivers` | Returns `{co_product: [candidates...]}` — every multi-output recipe (excluding crushing/recycling/captive-spawner) becomes a candidate keyed by each of its solid outputs.  Sorted by descending per-craft yield.  Cached per dataset |
 | `_stage_power_kw` | Dispatches per role; compound stages split power between machine types |
 | `_hot_spot_suggestions` | Inspects `summary.by_role`, emits actionable notes when one role > 50 % of machines |
 | `_pick_recipe_fluid_preferred` | Recipe selection: prefer recipes with most fluid ingredients (foundry casting > furnace); drops candidates whose machine is locked under `tech_state` |
@@ -505,7 +519,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **231 tests**, 30 classes.
+`dev/test_quality_planner.py` — **245 tests**, 31 classes.
 
 | Class | Coverage |
 |---|---|
@@ -538,6 +552,7 @@ MACHINE_INHERENT_PROD = {
 | `TestSelfRecycleIntermediate` (post-2026-05-08 audit) | 14 previously-failing endgame targets now plan: `electromagnetic-plant`, `foundry`, `mech-armor`, `fusion-reactor`, `quality-module-3`, `metallurgic-/electromagnetic-/cryogenic-science-pack`. Verifies normal-quality inputs propagate (`holmium-solution` in `normal_fluid_input`). Verifies `summary.by_role` includes `self-recycle-target`. Verifies linear scaling under rate doubling. Verifies Pass 2 deduplicates intermediates so duplicate `order` entries don't re-emit. |
 | `TestDispatchMemoization` (post-2026-05-08 audit) | Solver kernel called once per unique `(item, env)` key; Path A/B decision cached and re-used; per-`plan()` cache isolation (no cross-call leak); cycle detection via pre-populated `_in_flight` forces Path A with explanatory note; solver cache keyed by env (epic-quality variant gets a fresh kernel call). |
 | `TestCoProductIncidental` (shipped 2026-05-14) | `incidental_byproduct_legendary` / `_credited` / `_overflow` fields always present (empty when no multi-output recipe active).  `iron-plate @ vulcanus` emits stone byproduct as overflow (no stone demand).  `concrete @ vulcanus` emits 4.8 legendary stone/min, all credited, dropping mined-recycle target from 60 to 55.2 stone/min.  Surplus + credit notes appear in `notes`.  Linear scaling under rate doubling.  Fluid byproducts excluded from helper output.  `format_human` renders an `Incidental Co-Products` section when non-empty.  `_plan_self_recycle_target` sub-plan emits the empty fields. |
+| `TestCoProductDriven` (shipped 2026-05-14) | `enumerate_co_product_drivers` returns the expected stock candidates (lava casting × 2 for stone, processing recipes for seeds, etc.) sorted by descending per-craft yield.  Default off — no `driver_overflow` and no `co-product-driver` stage.  Explicit `--enable-driver molten-iron-from-lava` on `stone-wall @ vulcanus` activates the foundry stage, eliminates the stone mined-recycle stage, surfaces molten-iron in `driver_overflow`, drops total machines >10×.  `--enable-drivers all` picks the highest-yield candidate (copper variant with 15 stone/craft).  Unknown recipe key fails-fast.  Driver skipped when its fluid ingredient (lava) needs an unlocked planet (vulcanus).  Driver's calcite ingredient routes through the asteroid chain.  Linear rate scaling.  `format_human` renders `[driver]` stage line + `Driver Overflow` section.  Sub-plans (self-recycle target) include empty `driver_overflow` field. |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.
@@ -592,13 +607,41 @@ Shape of the credit: `incidental_byproduct_legendary` lists the gross emitted ra
 
 Tests: `TestCoProductIncidental` (11 cases) covers field presence, emitted vs credited vs overflow rates, the concrete @ vulcanus headline case, rate-linearity, fluid filtering, format_human rendering, and `_plan_self_recycle_target` sub-plan parity.
 
-### Co-product credits — driven sub-case (HIGH priority, deferred)
+### Co-product credits — driven sub-case (shipped 2026-05-14)
 
-Activate a multi-output recipe FOR its co-product when the primary has no demand.  New candidate class — recipes where stone (or another otherwise-unreachable raw) appears as a co-product.  Cost-gate against the mined-recycle baseline.  Subsumes the previously-deferred "single-output shuffle" idea more cleanly.
+`--enable-driver RECIPE_KEY` (repeatable) activates a recipe FOR its co-product when the chain has demand for the co-product as a mined-recycle leaf raw.  `--enable-drivers all` enumerates every candidate, picks the highest-yield driver per leaf raw, and cost-gates against the no-driver baseline.
 
-Primary targets: stone-bound items (`stone-wall`, `gate`, `landfill`, `agricultural-tower`, `captive-biter-spawner`) where mined-recycle on stone dominates the cost (e.g. `stone-wall @ 60/min --planets nauvis,vulcanus` still plans ~2244 machines because the iron/copper chain isn't activated to harvest the stone byproduct).
+How it differs from incidental:
+- **Incidental** credits non-primary outputs of recipes ALREADY in the chain (chain-driven activation).
+- **Driven** activates recipes NOT otherwise in the chain, purely for their co-product (co-product-driven activation).  The recipe's primary becomes overflow (e.g. molten-iron voided down a pipe).
 
-Tests TBD: `TestCoProductDriven` — `stone-wall @ vulcanus` plans via lava-casting driver; cost-gate falls back to mined-recycle when driver is more expensive (e.g. iron-only planet without lava).
+Driver wiring:
+1. After the incidental pass, iterate over `raw_demand` leaf raws.
+2. For each raw R, look up `enumerate_co_product_drivers(data)` candidates.
+3. Filter by tech / planet reachability + (for explicit `--enable-driver`) by user-named recipes.
+4. Pick the candidate with the highest `target_amount × probability` per craft (most efficient driver).
+5. Compute crafts/min from R demand; subtract R from `raw_demand`.
+6. Walk each non-fluid INGREDIENT through `walk_recipe_tree` so its legendary chain (asteroid / mined-recycle / shuffle / nested-self-recycle) plugs into the main flow.
+7. Record the recipe's other outputs as `driver_overflow`.
+8. Emit a `co-product-driver` stage (machine = recipe's machine, machine_quality applied via `MACHINE_QUALITY_SPEED`).
+
+Cost-gate (`--enable-drivers all` only): after building the plan, recurse with `active_drivers=None`.  If the no-driver baseline is cheaper, keep the baseline and emit a fallback note.  Explicit `--enable-driver` is honoured unconditionally.
+
+Headline numbers (`stone-wall @ 60/min --planets nauvis,vulcanus`, default modules off):
+
+| Config | Total machines |
+|---|---|
+| baseline (no driver) | 2244 |
+| `--enable-driver molten-iron-from-lava` | ~93 |
+| `--enable-drivers all` (picks copper variant: 15 stone/craft) | ~65 |
+
+Stock Space Age driver candidates (excluding `crushing` / `recycling` / `captive-spawner-process`): stone (lava casting × 2), spoilage (iron-bacteria + copper-bacteria), uranium-238 (uranium-processing + kovarex), uranium-235 (kovarex), jelly + yumako-mash + seeds (Gleba `*-processing`), plus a few others (`ammoniacal-solution-separation`, `cryogenic-science-pack`, `quantum-processor`).
+
+Limitations not addressed:
+- Driver primary's chain credit not modelled (overflow is always 100 % wasted, even when chain demand for primary exists).  In practice this only matters if the user enables a driver whose primary is ALREADY in the chain — the right move is to leave the driver off and let the incidental pass handle it.
+- Per-craft cost search is greedy / first-viable rather than full DP across all candidates; the cost-gate catches the worst false positives but a poorly-chosen explicit driver can over-spend.
+
+Tests: `TestCoProductDriven` (14 cases) covers candidate enumeration, default off, explicit driver activation (stone-wall @ vulcanus), `--enable-drivers all` highest-yield pick, cost-gate fallback shape, unknown-recipe error, non-applicable driver no-op, planet-locked filter (no vulcanus → no lava-cast driver), calcite ingredient routing through asteroid chain, rate linearity, format_human rendering, `_plan_self_recycle_target` sub-plan parity.
 
 ### Full research-state tracking (V3 item 2)
 

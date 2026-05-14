@@ -354,6 +354,105 @@ def enumerate_shuffle_candidates(data: dict) -> list[ShuffleCandidate]:
     return out
 
 
+# Module-level cache keyed by id(data); avoids re-enumerating per plan() call.
+_DRIVER_CANDIDATES_CACHE: dict[int, dict[str, list[dict]]] = {}
+
+
+def enumerate_co_product_drivers(data: dict) -> dict[str, list[dict]]:
+    """Enumerate driven co-product candidates from the dataset.
+
+    For every multi-output recipe, *every* solid output becomes a candidate
+    target — the planner can activate the recipe FOR that output and accept
+    the rest as overflow (fluid overflow is voided, solid overflow may credit
+    chain demand or also become overflow).  This is the open-loop sibling of
+    :func:`enumerate_shuffle_candidates` (which keeps the loop closed by
+    recycling the primary back into ingredients).
+
+    A recipe is excluded when:
+      - It's in ``recycling`` / ``crushing`` / ``captive-spawner-process``
+        (those have dedicated pipelines)
+      - It's a barrel-handling recipe
+      - It has fewer than 2 results
+
+    Returns ``{co_product_item: [candidate, ...]}``.  Candidate dict:
+      ``recipe_key``        — recipe key
+      ``target``            — the co-product item the candidate harvests
+      ``target_amount``     — per-craft yield (amount × probability, no eff_prod)
+      ``other_outputs``     — list[{name, amount, prob}] for everything that
+                              isn't the target (both solid and fluid; consumers
+                              decide credit vs overflow)
+      ``category``          — recipe category (machine routing)
+      ``ingredients``       — recipe.ingredients (raw list of {name, amount})
+      ``energy_required``   — crafting time
+      ``allow_productivity`` — whether prod modules can be installed
+
+    Sorted per co-product by descending ``target_amount`` so a naive "first
+    viable" pick prefers the highest-yield driver per craft.
+
+    Cached per dataset.
+    """
+    cached = _DRIVER_CANDIDATES_CACHE.get(id(data))
+    if cached is not None:
+        return cached
+
+    fluids = build_fluid_set(data)
+    skip_categories = {
+        "recycling", "recycling-or-hand-crafting",
+        "crushing",                  # asteroid pipeline handles these
+        "captive-spawner-process",   # captive-spawner has its own dispatch
+    }
+    out: dict[str, list[dict]] = {}
+    for r in data.get("recipes", []):
+        if r.get("category") in skip_categories:
+            continue
+        if r.get("subgroup") in ("empty-barrel", "fill-barrel"):
+            continue
+        results = r.get("results", [])
+        if len(results) < 2:
+            continue
+        # Build per-output amount snapshots once.
+        result_specs: list[dict] = []
+        for res in results:
+            name = res.get("name")
+            amount = res.get("amount")
+            if amount is None:
+                amount = (
+                    (res.get("amount_min", 0) + res.get("amount_max", 0)) / 2.0
+                )
+            prob = res.get("probability", 1.0)
+            if not name or amount <= 0:
+                continue
+            result_specs.append({"name": name, "amount": float(amount), "prob": float(prob)})
+        if len(result_specs) < 2:
+            continue
+        for tgt_idx, tgt in enumerate(result_specs):
+            if tgt["name"] in fluids:
+                continue   # fluid co-product — can't legendary-quality it
+            target_amount = tgt["amount"] * tgt["prob"]
+            if target_amount <= 0:
+                continue
+            other_outputs = [
+                {"name": o["name"], "amount": o["amount"], "prob": o["prob"]}
+                for i, o in enumerate(result_specs) if i != tgt_idx
+            ]
+            out.setdefault(tgt["name"], []).append({
+                "recipe_key": r["key"],
+                "target": tgt["name"],
+                "target_amount": target_amount,
+                "other_outputs": other_outputs,
+                "category": r.get("category"),
+                "ingredients": list(r.get("ingredients", [])),
+                "energy_required": float(r.get("energy_required", 1)),
+                "allow_productivity": bool(r.get("allow_productivity", True)),
+            })
+    # Sort per-co-product entries by descending target_amount so a naive
+    # "first viable" pick prefers the most efficient driver.
+    for k in out:
+        out[k].sort(key=lambda c: (-c["target_amount"], c["recipe_key"]))
+    _DRIVER_CANDIDATES_CACHE[id(data)] = out
+    return out
+
+
 # All known Space Age planets (for argparse choices / validation).
 KNOWN_PLANETS: tuple[str, ...] = ("nauvis", "vulcanus", "fulgora", "gleba", "aquilo", "space-platform")
 
@@ -1766,6 +1865,7 @@ def _hot_spot_suggestions(
     *,
     threshold_pct: float = 50.0,
     active_shuffles: set[str] | frozenset[str] | None = None,
+    active_drivers: set[str] | frozenset[str] | None = None,
     assembly_modules: bool = False,
     has_plastic: bool = False,
     machine_quality: str = "normal",
@@ -1807,6 +1907,12 @@ def _hot_spot_suggestions(
             tips: list[str] = []
             if has_plastic and not lds_active:
                 tips.append("--enable-shuffle low-density-structure (cuts coal demand)")
+            drivers_active = bool(active_drivers)
+            if "vulcanus" in planets and not drivers_active:
+                tips.append(
+                    "--enable-drivers all (lava casting harvests stone as co-product, "
+                    "voids molten-iron overflow)"
+                )
             if "vulcanus" not in planets:
                 tips.append("--planets vulcanus (lava casting bypasses ore mining for iron/copper)")
             if not tips:
@@ -3095,6 +3201,7 @@ def _plan_self_recycle_target(
         "incidental_byproduct_legendary": {},
         "incidental_byproduct_credited": {},
         "incidental_byproduct_overflow": {},
+        "driver_overflow": {},
         "stages": [self_stage] + list(reversed(normal_stages)),
         "total_machine_count": total_machines,
         "total_power_mw": total_power_mw,
@@ -3512,6 +3619,7 @@ def _plan_self_feed_target(
         "incidental_byproduct_legendary": {},
         "incidental_byproduct_credited": {},
         "incidental_byproduct_overflow": {},
+        "driver_overflow": {},
         "stages": [self_stage] + list(reversed(normal_stages)),
         "total_machine_count": total_machines,
         "total_power_mw": total_power_mw,
@@ -3539,6 +3647,7 @@ def plan(
     quality_module_tier: int = 3,
     planets: list[str] | tuple[str, ...] | frozenset[str] | None = None,
     active_shuffles: set[str] | frozenset[str] | None = None,
+    active_drivers: set[str] | frozenset[str] | None = None,
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
@@ -3930,6 +4039,169 @@ def plan(
                 for p in shuffle_primaries:
                     raw_demand.pop(p, None)
 
+    # ---- Driven co-product activation (roadmap V3 — driven sub-case) ----
+    # When the chain has positive demand for a mined-recycle leaf raw R and the
+    # user enabled (or auto-enabled) a recipe that produces R as a non-primary
+    # solid output, run that recipe FOR R.  The recipe's other outputs (typically
+    # fluids like molten-iron / molten-copper) become overflow.  Driver
+    # INGREDIENTS are walked through ``walk_recipe_tree`` so their legendary
+    # demand routes through the usual asteroid / mined-recycle / etc paths.
+    #
+    # Cost-gate under ``--enable-drivers all``: after building the plan we
+    # recurse with ``active_drivers=None``; if the driver-less baseline is
+    # cheaper we keep that instead.
+    driver_stages: list[dict] = []
+    driver_primary_overflow: dict[str, float] = defaultdict(float)
+    if active_drivers:
+        candidates_map = enumerate_co_product_drivers(data)
+        explicit_recipes: frozenset[str] | None = (
+            None if "all" in active_drivers
+            else frozenset(active_drivers)
+        )
+        # Validate explicit recipe keys exist as candidates.
+        if explicit_recipes is not None:
+            all_recipe_keys = {
+                c["recipe_key"]
+                for clist in candidates_map.values()
+                for c in clist
+            }
+            unknown = explicit_recipes - all_recipe_keys
+            if unknown:
+                raise ValueError(
+                    f"ERROR: unknown driver recipe(s) {sorted(unknown)} in "
+                    f"--enable-driver; valid recipe keys: "
+                    f"{sorted(all_recipe_keys)}"
+                )
+        slots_map = cli.build_machine_module_slots(data) if assembly_modules else {}
+        # Iterate over a snapshot — raw_demand mutates inside the loop.
+        for raw_key in sorted(raw_demand.keys()):
+            raw_rate = float(raw_demand.get(raw_key, 0.0))
+            if raw_rate <= 0 or raw_key in fluids:
+                continue
+            applicable = candidates_map.get(raw_key, [])
+            if not applicable:
+                continue
+            # Filter by tech / planet reachability and (for explicit lists)
+            # by user-named recipes.
+            viable: list[tuple[dict, dict, tuple]] = []
+            for c in applicable:
+                if explicit_recipes is not None and c["recipe_key"] not in explicit_recipes:
+                    continue
+                recipe = _recipe_by_key(data, c["recipe_key"])
+                if recipe is None:
+                    continue
+                if planet_props and not cli._recipe_valid_for_planet(recipe, planet_props):
+                    continue
+                # Also require that every fluid ingredient is reachable on
+                # the unlocked planets (e.g. lava → vulcanus).
+                fluid_ings_unreachable = False
+                for ing in recipe.get("ingredients", []):
+                    iname = ing["name"]
+                    if iname in fluids and iname in PLANET_UNLOCKS:
+                        if not _planet_unlocks_item(iname, planets_fs):
+                            fluid_ings_unreachable = True
+                            break
+                if fluid_ings_unreachable:
+                    continue
+                mr = _machine_for_recipe(recipe, assembler_level, locked_machines)
+                if mr is None:
+                    continue
+                viable.append((c, recipe, mr))
+            if not viable:
+                continue
+            # Already sorted by target_amount desc; pick the most-yield first.
+            c, recipe, (machine_key, machine_speed) = viable[0]
+            research_prod_drv = _research_prod_for_recipe(c["recipe_key"], research_levels)
+            module_prod_drv, prod_slots_filled_drv = _assembly_prod_bonus(
+                machine_key, recipe, slots_map,
+                assembly_modules, module_quality, prod_module_tier,
+            )
+            eff_prod_drv = 1.0 + research_prod_drv + module_prod_drv
+            capped_drv = False
+            if eff_prod_drv > 4.0:
+                eff_prod_drv = 4.0
+                capped_drv = True
+            per_craft = c["target_amount"] * eff_prod_drv
+            if per_craft <= 0:
+                continue
+            crafts_per_min = raw_rate / per_craft
+            crafting_time = float(recipe.get("energy_required", 1))
+            machine_speed_f = float(machine_speed) * qm_speed_mult
+            driver_machine_count = (
+                crafts_per_min * crafting_time / (machine_speed_f * 60.0)
+            )
+            # Build the stage's inputs map and walk non-raw ingredients.
+            driver_inputs: dict[str, float] = {}
+            for ing in recipe.get("ingredients", []):
+                iname = ing["name"]
+                iamt = float(ing.get("amount", 0)) * crafts_per_min
+                driver_inputs[iname] = iamt
+                if iamt <= 0:
+                    continue
+                if iname in fluids:
+                    # Fluid ingredient — route to fluid demand bucket.
+                    raw_demand[iname] = raw_demand.get(iname, 0.0) + iamt
+                    continue
+                # Solid ingredient — walk it through walk_recipe_tree so its
+                # legendary chain (asteroid / mined-recycle / shuffle) plugs
+                # into the main raw_demand.
+                d_direct: set[str] = set()
+                d_stages, d_raws = walk_recipe_tree(
+                    iname, iamt, data, research_levels, assembler_level,
+                    fluids, planet_props, planets_fs,
+                    assembly_modules=assembly_modules,
+                    assembly_module_quality=module_quality,
+                    prod_module_tier=prod_module_tier,
+                    machine_quality=machine_quality,
+                    no_asteroids=no_asteroids,
+                    tech_state=tech_state,
+                    _cache=_cache,
+                    _in_flight=_in_flight,
+                    _force_tree_walk_for=_force_tree_walk_for,
+                    _dispatch_env=dispatch_env,
+                    _dispatch_out=d_direct,
+                )
+                stages.extend(d_stages)
+                for r, x in d_raws.items():
+                    raw_demand[r] = raw_demand.get(r, 0.0) + x
+            # The driver satisfies the entire co-product demand for this raw.
+            raw_demand[raw_key] = 0.0
+            # Compute overflow for each non-target output.
+            overflow_outputs: dict[str, float] = {}
+            for out_spec in c["other_outputs"]:
+                out_rate = crafts_per_min * out_spec["amount"] * out_spec["prob"] * eff_prod_drv
+                if out_rate <= 0:
+                    continue
+                overflow_outputs[out_spec["name"]] = out_rate
+                driver_primary_overflow[out_spec["name"]] += out_rate
+            driver_stages.append({
+                "role": "co-product-driver",
+                "recipe": c["recipe_key"],
+                "product": c["target"],          # so power + by_role aggregation see it
+                "target": c["target"],
+                "machine": machine_key,
+                "machine_speed": machine_speed_f,
+                "crafts_per_min": crafts_per_min,
+                "machine_count": driver_machine_count,
+                "rate_per_min": raw_rate,        # legendary co-product/min
+                "co_product_per_min": raw_rate,
+                "inputs": driver_inputs,
+                "fluid_inputs": {
+                    k: v for k, v in driver_inputs.items() if k in fluids
+                },
+                "solid_inputs": {
+                    k: v for k, v in driver_inputs.items() if k not in fluids
+                },
+                "overflow_outputs": overflow_outputs,
+                "research_prod": research_prod_drv,
+                "module_prod": module_prod_drv,
+                "prod_modules": prod_slots_filled_drv,
+                "prod_module_tier": prod_module_tier if prod_slots_filled_drv > 0 else 0,
+                "prod_module_quality": module_quality if prod_slots_filled_drv > 0 else "normal",
+                "machine_quality": machine_quality,
+                "prod_capped": capped_drv,
+            })
+
     # Group raw demand by chunk type.  Each chunk is produced by one crushing recipe
     # (e.g. metallic-asteroid-crushing -> iron-ore+copper-ore).  We scale to satisfy
     # the max-demanding raw among a chunk's outputs.
@@ -4135,6 +4407,7 @@ def plan(
         + sum(s["machine_count"] for s in mined_recycle_stages)
         + sum(s["machine_count"] for s in shuffle_stages)
         + sum(s["machine_count"] for s in normal_chain_stages)
+        + sum(s["machine_count"] for s in driver_stages)
     )
 
     # Annotate per-stage power and total (V3 power accounting).
@@ -4142,6 +4415,7 @@ def plan(
     all_stages_for_power = (
         stages + crushing_stages + reprocessing_stages
         + mined_recycle_stages + shuffle_stages + normal_chain_stages
+        + driver_stages
     )
     for st in all_stages_for_power:
         st["power_kw"] = _stage_power_kw(st, machine_power_w)
@@ -4180,6 +4454,7 @@ def plan(
     notes.extend(_hot_spot_suggestions(
         by_role,
         active_shuffles=active_shuffles,
+        active_drivers=active_drivers,
         assembly_modules=assembly_modules,
         has_plastic=has_plastic,
         machine_quality=machine_quality,
@@ -4204,6 +4479,19 @@ def plan(
             f"incidental byproduct surplus: {surplus:.2f} legendary "
             f"{byprod}/min unused (no downstream demand)"
         )
+    # Driver-activation notes (co-product was harvested; non-target outputs
+    # become overflow).
+    for ds in driver_stages:
+        ofs = ds.get("overflow_outputs") or {}
+        ofs_str = ", ".join(
+            f"{rate:.1f} {item}/min"
+            for item, rate in sorted(ofs.items())
+        ) or "no overflow"
+        notes.append(
+            f"driver {ds['recipe']} activated for "
+            f"{ds['co_product_per_min']:.1f} legendary {ds['target']}/min — "
+            f"overflow: {ofs_str}"
+        )
 
     out = {
         "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
@@ -4218,10 +4506,12 @@ def plan(
         "incidental_byproduct_legendary": dict(incidental_legendary),
         "incidental_byproduct_credited": dict(incidental_credited),
         "incidental_byproduct_overflow": dict(incidental_overflow),
+        "driver_overflow": dict(driver_primary_overflow),
         "stages": (
             reprocessing_stages
             + crushing_stages
             + mined_recycle_stages
+            + driver_stages
             + shuffle_stages
             + list(reversed(normal_chain_stages))
             + list(reversed(stages))
@@ -4249,6 +4539,7 @@ def plan(
             quality_module_tier=quality_module_tier,
             planets=planets_fs,
             active_shuffles=None,
+            active_drivers=active_drivers,
             assembly_modules=assembly_modules,
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
@@ -4261,6 +4552,34 @@ def plan(
                 f"{total_machines:.1f} machines, but no-shuffle baseline is "
                 f"{baseline['total_machine_count']:.1f} machines — kept baseline. "
                 f"Use --enable-shuffle NAME to override."
+            )
+            return baseline
+
+    # Cost gate for `--enable-drivers all`: similar to the shuffle gate.
+    # Recurse with drivers off; if the no-driver baseline is cheaper, fall
+    # back.  Explicit `--enable-driver RECIPE` is honoured unconditionally.
+    if active_drivers and "all" in active_drivers and driver_stages:
+        baseline = plan(
+            item_key, rate, data,
+            module_quality=module_quality,
+            research_levels=research_levels,
+            assembler_level=assembler_level,
+            quality_module_tier=quality_module_tier,
+            planets=planets_fs,
+            active_shuffles=active_shuffles,
+            active_drivers=None,
+            assembly_modules=assembly_modules,
+            prod_module_tier=prod_module_tier,
+            machine_quality=machine_quality,
+            no_asteroids=no_asteroids,
+            tech_state=tech_state,
+        )
+        if baseline["total_machine_count"] < total_machines:
+            baseline.setdefault("notes", []).append(
+                f"--enable-drivers all: drivers totalling "
+                f"{total_machines:.1f} machines, but no-driver baseline is "
+                f"{baseline['total_machine_count']:.1f} machines — kept baseline. "
+                f"Use --enable-driver RECIPE to override."
             )
             return baseline
 
@@ -4334,6 +4653,11 @@ def format_human(out: dict) -> str:
                 f"  {_humanize(item)}: {amt:.2f} emitted "
                 f"(credited {c:.2f}, surplus {o:.2f})"
             )
+    if out.get("driver_overflow"):
+        L.append("")
+        L.append("=== Driver Overflow (voided / piped-out, /min) ===")
+        for item, amt in sorted(out["driver_overflow"].items()):
+            L.append(f"  {_humanize(item)}: {amt:.2f}")
     L.append("")
     L.append("=== Production Stages ===")
     for st in out["stages"]:
@@ -4422,6 +4746,18 @@ def format_human(out: dict) -> str:
                 f"{st['legendary_per_min']:.2f} legendary out "
                 f"({st['machine_count']:.2f} recyclers, "
                 f"yield {st['yield_pct']:.4f}%)"
+            )
+        elif role == "co-product-driver":
+            ofs = ", ".join(
+                f"{_humanize(k)}={v:.1f}/min"
+                for k, v in sorted((st.get("overflow_outputs") or {}).items())
+            ) or "none"
+            L.append(
+                f"  [driver]       {st['recipe']}: "
+                f"{st['crafts_per_min']:.2f} crafts/min -> "
+                f"{st['co_product_per_min']:.2f} legendary {_humanize(st['target'])}/min "
+                f"({st['machine_count']:.2f} × {_humanize(st['machine'])}, "
+                f"overflow [{ofs}])"
             )
         else:
             fluids = f", fluids=[{','.join(st['fluid_inputs'])}]" if st.get("fluid_inputs") else ""
@@ -4596,6 +4932,27 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--enable-driver", action="append", default=[], metavar="RECIPE_KEY",
+        help=(
+            "Activate a co-product driver: a recipe whose non-primary solid "
+            "output covers a leaf raw demand in the chain (repeatable, by "
+            "recipe key).  E.g. --enable-driver molten-iron-from-lava runs "
+            "lava casting purely to harvest stone (the molten-iron output is "
+            "voided as overflow).  Useful for stone-bound chains on Vulcanus "
+            "(stone-wall, gate, landfill).  See `enumerate_co_product_drivers` "
+            "for the full candidate list (~8 stock Space Age recipes)."
+        ),
+    )
+    p.add_argument(
+        "--enable-drivers", default=None, choices=["all"],
+        help=(
+            "Shortcut: try every co-product driver candidate, picking the "
+            "highest-yield driver per mined-recycle leaf.  Cost-gated against "
+            "the no-driver baseline (kept whichever is cheaper).  Mutually "
+            "exclusive with --enable-driver."
+        ),
+    )
+    p.add_argument(
         "--no-asteroids", action="store_true",
         help=(
             "Disable the asteroid-reprocessing path (no space platform yet). "
@@ -4640,6 +4997,18 @@ def main() -> None:
     elif args.enable_shuffle:
         active_shuffles = set(args.enable_shuffle)
 
+    # Same shape for drivers.
+    active_drivers: set[str] | None = None
+    if args.enable_drivers == "all":
+        if args.enable_driver:
+            sys.exit(
+                "ERROR: --enable-drivers all is mutually exclusive with "
+                "--enable-driver (specify one or the other)."
+            )
+        active_drivers = {"all"}
+    elif args.enable_driver:
+        active_drivers = set(args.enable_driver)
+
     try:
         out = plan(
             args.item, args.rate, data,
@@ -4649,6 +5018,7 @@ def main() -> None:
             quality_module_tier=args.quality_module_tier,
             planets=planets_list,
             active_shuffles=active_shuffles,
+            active_drivers=active_drivers,
             assembly_modules=args.assembly_modules,
             prod_module_tier=args.prod_module_tier,
             machine_quality=args.machine_quality,
