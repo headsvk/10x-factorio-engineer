@@ -3103,6 +3103,156 @@ class TestLocationFilter(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Planet machine unlocks (location-aware machine routing)
+# ---------------------------------------------------------------------------
+
+class TestPlanetMachineUnlocks(unittest.TestCase):
+    """Tests that --location gates planet-locked machines (foundry, biochamber,
+    EM-plant, cryo-plant) to the planets that unlock them, and falls back to
+    the basic machine on planets that don't."""
+
+    def test_compute_location_unlocks_table(self):
+        self.assertEqual(cli.compute_location_unlocks("nauvis"),   frozenset())
+        self.assertEqual(cli.compute_location_unlocks("vulcanus"), frozenset(["foundry"]))
+        self.assertEqual(cli.compute_location_unlocks("gleba"),    frozenset(["biochamber"]))
+        self.assertEqual(cli.compute_location_unlocks("fulgora"),  frozenset(["electromagnetic-plant"]))
+        self.assertEqual(
+            cli.compute_location_unlocks("aquilo"),
+            frozenset(["foundry", "biochamber", "electromagnetic-plant", "cryogenic-plant"]),
+        )
+        self.assertEqual(cli.compute_location_unlocks("space-platform"), frozenset())
+        # No location → no filtering
+        self.assertIsNone(cli.compute_location_unlocks(None))
+
+    def test_get_machine_none_unlocks_keeps_premium(self):
+        # Legacy behaviour: with location_unlocks=None, premium machines win.
+        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric")
+        self.assertEqual(m, "cryogenic-plant")
+        m, _ = cli.get_machine("electronics", 3, "electric")
+        self.assertEqual(m, "electromagnetic-plant")
+        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric")
+        self.assertEqual(m, "foundry")
+
+    def test_get_machine_nauvis_falls_back_to_basics(self):
+        unlocks = cli.compute_location_unlocks("nauvis")
+        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric", unlocks)
+        self.assertEqual(m, "chemical-plant")
+        m, _ = cli.get_machine("organic-or-chemistry", 3, "electric", unlocks)
+        self.assertEqual(m, "chemical-plant")
+        m, _ = cli.get_machine("electronics", 3, "electric", unlocks)
+        self.assertEqual(m, "assembling-machine-3")
+        m, _ = cli.get_machine("electronics-with-fluid", 3, "electric", unlocks)
+        self.assertEqual(m, "assembling-machine-3")
+        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric", unlocks)
+        self.assertEqual(m, "assembling-machine-3")
+        m, _ = cli.get_machine("crafting-with-fluid-or-metallurgy", 3, "electric", unlocks)
+        self.assertEqual(m, "assembling-machine-3")
+        m, _ = cli.get_machine("pressing", 3, "electric", unlocks)
+        self.assertEqual(m, "assembling-machine-3")
+        m, _ = cli.get_machine("cryogenics-or-assembling", 3, "electric", unlocks)
+        self.assertEqual(m, "assembling-machine-3")
+
+    def test_get_machine_vulcanus_keeps_foundry_only(self):
+        unlocks = cli.compute_location_unlocks("vulcanus")
+        # foundry-bearing categories keep foundry
+        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric", unlocks)
+        self.assertEqual(m, "foundry")
+        m, _ = cli.get_machine("crafting-with-fluid-or-metallurgy", 3, "electric", unlocks)
+        self.assertEqual(m, "foundry")
+        m, _ = cli.get_machine("metallurgy", 3, "electric", unlocks)
+        self.assertEqual(m, "foundry")
+        # cryo / biochamber / EM-plant categories fall back
+        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric", unlocks)
+        self.assertEqual(m, "chemical-plant")
+        m, _ = cli.get_machine("organic-or-chemistry", 3, "electric", unlocks)
+        self.assertEqual(m, "chemical-plant")
+        m, _ = cli.get_machine("electronics", 3, "electric", unlocks)
+        self.assertEqual(m, "assembling-machine-3")
+
+    def test_get_machine_aquilo_keeps_everything(self):
+        unlocks = cli.compute_location_unlocks("aquilo")
+        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric", unlocks)
+        self.assertEqual(m, "cryogenic-plant")
+        m, _ = cli.get_machine("electronics", 3, "electric", unlocks)
+        self.assertEqual(m, "electromagnetic-plant")
+        m, _ = cli.get_machine("organic-or-chemistry", 3, "electric", unlocks)
+        self.assertEqual(m, "biochamber")
+        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric", unlocks)
+        self.assertEqual(m, "foundry")
+
+    def test_nauvis_lds_routes_to_chemical_plant_and_assembler(self):
+        """Regression: on Nauvis, plastic-bar must use chemical-plant (not
+        cryogenic-plant) and oil cracking must use chemical-plant (not biochamber)."""
+        d = _DATA["nauvis"]
+        s = _solver("nauvis")
+        s.solve("low-density-structure", Fraction(10))
+        s.resolve_oil(d["data"])
+
+        machines = {step["recipe"]: step["machine"] for step in s.steps.values()}
+        self.assertEqual(machines.get("plastic-bar"),         "chemical-plant")
+        self.assertEqual(machines.get("light-oil-cracking"),  "chemical-plant")
+        self.assertEqual(machines.get("heavy-oil-cracking"),  "chemical-plant")
+        # LDS itself is `crafting` → assembler
+        self.assertEqual(machines.get("low-density-structure"), "assembling-machine-3")
+
+    def test_nauvis_electronic_circuit_uses_assembler(self):
+        d = _DATA["nauvis"]
+        s = _solver("nauvis")
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(d["data"])
+        ec_step = next(st for st in s.steps.values() if st["recipe"] == "electronic-circuit")
+        self.assertEqual(ec_step["machine"], "assembling-machine-3")
+
+    def test_fulgora_uses_em_plant_for_electronics(self):
+        d = _DATA["fulgora"]
+        s = _solver("fulgora")
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(d["data"])
+        ec_step = next(st for st in s.steps.values() if st["recipe"] == "electronic-circuit")
+        self.assertEqual(ec_step["machine"], "electromagnetic-plant")
+
+    def test_vulcanus_foundry_still_used(self):
+        # tungsten-plate is metallurgy → must stay on foundry
+        d = _DATA["vulcanus"]
+        s = _solver("vulcanus")
+        s.solve("tungsten-plate", Fraction(60))
+        s.resolve_oil(d["data"])
+        step = next(st for st in s.steps.values() if st["recipe"] == "tungsten-plate")
+        self.assertEqual(step["machine"], "foundry")
+
+    def test_aquilo_all_four_machines_available(self):
+        d = _DATA["aquilo"]
+        # plastic-bar on Aquilo: chemistry-or-cryogenics → cryogenic-plant available
+        s = _solver("aquilo")
+        s.solve("plastic-bar", Fraction(60))
+        s.resolve_oil(d["data"])
+        plastic_step = next(st for st in s.steps.values() if st["recipe"] == "plastic-bar")
+        self.assertEqual(plastic_step["machine"], "cryogenic-plant")
+
+    def test_nauvis_hard_metallurgy_recipe_filtered_out(self):
+        """casting-iron (category=metallurgy) requires foundry — on Nauvis,
+        pick_recipe must filter it out so iron-plate falls back to the
+        smelting recipe (electric-furnace)."""
+        d = _DATA["nauvis"]
+        idx = d["recipe_idx"]
+        unlocks = cli.compute_location_unlocks("nauvis")
+        # casting-iron is among iron-plate candidates
+        cands = [r["key"] for r in idx.get("iron-plate", [])]
+        self.assertIn("casting-iron", cands)
+        # but pick_recipe drops it on Nauvis
+        r = cli.pick_recipe("iron-plate", idx, location_unlocks=unlocks)
+        assert r is not None
+        self.assertEqual(r["key"], "iron-plate")
+
+    def test_explicit_recipe_machine_override_bypasses_unlocks(self):
+        """--recipe-machine override should bypass location filtering."""
+        s = _solver("nauvis", recipe_machine_overrides={"plastic-bar": "cryogenic-plant"})
+        s.solve("plastic-bar", Fraction(60))
+        plastic_step = next(st for st in s.steps.values() if st["recipe"] == "plastic-bar")
+        self.assertEqual(plastic_step["machine"], "cryogenic-plant")
+
+
+# ---------------------------------------------------------------------------
 # Research productivity (--research flag / research_levels)
 # ---------------------------------------------------------------------------
 

@@ -120,7 +120,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
-| `dev/test_cli.py` | `unittest` suite (219 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (233 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (245 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
@@ -151,7 +151,8 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `build_machine_power_w(data)` | `{machine_key: watts}` for electric machines only (burners excluded); scans `crafting_machines`, `agricultural_tower`, `rocket_silo`, `mining_drills` |
 | `_beacon_sharing_factor(machine_key)` | Returns how many machines share each physical beacon (4 for ≤4-tile machines, 2 for 5–7-tile, 1 for ≥8-tile) |
 | `_compute_step_power(...)` | Returns `(power_kw, power_kw_ceil, beacon_power_kw)` for a production step using module/beacon config |
-| `get_machine(cat, assembler_level, furnace_type)` | Maps recipe category → `(machine_key, speed)` |
+| `compute_location_unlocks(location)` | Return the `frozenset` of planet-locked advanced machines unlocked at `location` (e.g. Vulcanus → `{foundry}`). `None` for `location=None` (legacy "all unlocked"). |
+| `get_machine(cat, assembler_level, furnace_type, location_unlocks=None)` | Maps recipe category → `(machine_key, speed)`. When `location_unlocks` is given, planet-locked machines that aren't in the set are routed to the basic alternative via `CATEGORY_LOCATION_FALLBACK`. |
 | `pick_recipe(item_key, recipe_idx, overrides, planet_props)` | Picks canonical recipe; filters by planet surface_conditions when planet_props given (see selection logic below) |
 | `_gauss2 / _gauss3` | Exact `Fraction` Gaussian elimination (2×2 and 3×3) |
 | `solve_oil_system(...)` | Joint linear solve for refinery recipe (AOP / CL / simple-CL) + cracking |
@@ -286,11 +287,60 @@ Same lookup order applies to beacon config (`recipe_beacon_overrides` → `beaco
 
 ---
 
+## Planet Machine Unlocks
+
+Each `--location` defines which planet-locked advanced machines (foundry,
+biochamber, electromagnetic-plant, cryogenic-plant) are available. Without
+`--location`, all are considered unlocked (legacy behaviour).
+
+### `PLANET_MACHINE_UNLOCKS`
+
+| Location | Unlocked advanced machines |
+|----------|----------------------------|
+| `nauvis` | (none) |
+| `vulcanus` | `foundry` |
+| `gleba` | `biochamber` |
+| `fulgora` | `electromagnetic-plant` |
+| `aquilo` | all four (final-tier planet) |
+| `space-platform` | (none — conservative default; everything must be shipped) |
+
+### `CATEGORY_LOCATION_FALLBACK`
+
+When the primary machine for a recipe category is locked at the current
+location, `get_machine` routes to the basic alternative:
+
+| Category | Premium machine | Nauvis fallback |
+|----------|-----------------|-----------------|
+| `chemistry-or-cryogenics` | cryogenic-plant | chemical-plant |
+| `organic-or-chemistry` | biochamber | chemical-plant |
+| `organic-or-assembling`, `organic-or-hand-crafting` | biochamber | assembler-N |
+| `electronics`, `electronics-or-assembling`, `electronics-with-fluid` | EM-plant | assembler-N |
+| `metallurgy-or-assembling`, `crafting-with-fluid-or-metallurgy` | foundry | assembler-N |
+| `cryogenics-or-assembling` | cryogenic-plant | assembler-N |
+| `pressing` | foundry | assembler-N |
+
+### `HARD_CATEGORY_REQUIRES`
+
+Categories with no fallback — recipes are filtered out by `pick_recipe` if the
+required machine isn't unlocked:
+
+| Category | Required machine |
+|----------|------------------|
+| `organic` | biochamber |
+| `metallurgy` | foundry |
+| `electromagnetics` | electromagnetic-plant |
+| `cryogenics` | cryogenic-plant |
+
+Explicit `--recipe` and `--recipe-machine` overrides bypass both filters (user opt-in).
+
+---
+
 ## Recipe Selection Logic (`pick_recipe`)
 
 Priority (in `pick_recipe`):
 1. Explicit `--recipe ITEM=RECIPE` override passed in from CLI — bypasses planet filtering entirely.
 2. Planet filtering: when `planet_props` given, remove candidates whose `surface_conditions` are not satisfied. If all candidates are filtered out, return `None`.
+2.5. Machine-unlock filtering: when `location_unlocks` given, drop candidates whose hard category (`organic`, `metallurgy`, `electromagnetics`, `cryogenics`) requires a planet-locked machine not in the set. "X-or-Y" categories are not filtered here — `get_machine` routes them to the basic alternative.
 3. Recipe whose `key == item_key` (exact match).
 4. `advanced-oil-processing` (legacy fallback for oil products).
 4.5. Entry in `RECIPE_DEFAULTS_BY_LOCATION[location]` — location-specific preferred recipe (wins over exact-key-match heuristic and order-sort).
@@ -414,7 +464,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 219 tests covering:
+`dev/test_cli.py` contains 233 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -447,6 +497,7 @@ python -m unittest dev.test_cli -v
 | `TestStepConfig` | `machine_quality` always present per step; `module_specs` present only when modules configured (global or per-recipe override); `beacon_spec`+`beacon_quality` present only when beacon configured; per-recipe override wins over global |
 | `TestHumanReadableOutput` | `format_human_readable()` returns non-JSON text; header contains item+rate; sections present (Production Steps, Raw Resources, Miners Needed, Power); machine names in steps; module/beacon config in header and detail lines; machine quality in step label; pumpjack shows yield%; bus inputs section when bus items present |
 | `TestLocationFilter` | `--location` raw_set filtering (vulcanus has tungsten-ore+sulfuric-acid, not iron-ore; gleba has yumako+jellynut+spoilage as raw; space-platform is empty); planet surface_conditions filtering; explicit `--recipe` override bypasses planet filter; `location` field in JSON output; Vulcanus water→steam-condensation+acid-neutralisation; Gleba plastic/sulfur/lubricant→bio-substitutes; Aquilo ice→ammoniacal-solution-separation |
+| `TestPlanetMachineUnlocks` | `compute_location_unlocks` per-planet table (nauvis empty, vulcanus={foundry}, gleba={biochamber}, fulgora={EM-plant}, aquilo=all four); `get_machine` legacy behaviour (no unlocks) keeps premium machines; Nauvis falls back to chemical-plant for `chemistry-or-cryogenics` / `organic-or-chemistry`, assembler for `electronics*` / `metallurgy-or-assembling` / `pressing` / `cryogenics-or-assembling`; Vulcanus keeps foundry only (cryo/biochamber/EM cats fall back); Aquilo keeps all four; end-to-end regression: Nauvis LDS routes plastic-bar + oil cracking to chemical-plant, electronic-circuit to assembler-3; Fulgora EC uses EM-plant; Vulcanus tungsten-plate stays on foundry; Aquilo plastic-bar uses cryogenic-plant; `pick_recipe` filters out `metallurgy` recipes (casting-iron) on Nauvis; `--recipe-machine` override bypasses unlock filtering. |
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
 | `TestUseCeil` | `--use-ceil` two-pass re-solve: single-step bus-only line gives integer `machine_count`; two-step chain tops out at integer with intermediate correctly sized; binding-is-intermediate case leaves rate unchanged; already-integer counts produce no rescaling; `use_ceil: true` echoed in JSON output |
 

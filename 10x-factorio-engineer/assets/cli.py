@@ -168,6 +168,74 @@ SMELTING_CATS   = frozenset(["smelting"])
 SKIP_SUBGROUPS  = frozenset(["empty-barrel", "fill-barrel"])
 SKIP_CATEGORIES = frozenset(["recycling", "recycling-or-hand-crafting"])
 
+# Planet-locked advanced machines. Each requires planet-specific tech to build,
+# so by default we only route to them when --location is set to a planet that
+# has the relevant tech unlocked. With --location absent (vanilla / "anywhere"
+# mode) all four are treated as unlocked — matching legacy CLI behaviour.
+PLANET_LOCKED_MACHINES: frozenset[str] = frozenset([
+    "foundry",
+    "biochamber",
+    "electromagnetic-plant",
+    "cryogenic-plant",
+])
+
+# Per-location set of unlocked advanced machines. Locations not in this map
+# (or location=None) are treated as "all unlocked".
+# Aquilo is the final-tier planet; players arrive with everything researched.
+PLANET_MACHINE_UNLOCKS: dict[str, frozenset[str]] = {
+    "nauvis":         frozenset(),
+    "vulcanus":       frozenset(["foundry"]),
+    "gleba":          frozenset(["biochamber"]),
+    "fulgora":        frozenset(["electromagnetic-plant"]),
+    "aquilo":         frozenset(["foundry", "biochamber", "electromagnetic-plant", "cryogenic-plant"]),
+    "space-platform": frozenset(),
+}
+
+# When the primary machine for a recipe category is locked at the current
+# location, fall back to the basic machine for the alternate side of the
+# "X-or-Y" category. "_assembler" means "the configured assembler level".
+CATEGORY_LOCATION_FALLBACK: dict[str, str] = {
+    # Assembler-3 (and 2 for fluid variants) directly supports these.
+    "electronics":                       "_assembler",
+    "electronics-with-fluid":            "_assembler",
+    "pressing":                          "_assembler",
+    # `*-or-*` variants — primary is the premium machine, fallback is the
+    # generic machine the category name implies.
+    "electronics-or-assembling":         "_assembler",
+    "metallurgy-or-assembling":          "_assembler",
+    "cryogenics-or-assembling":          "_assembler",
+    "organic-or-assembling":             "_assembler",
+    "organic-or-hand-crafting":          "_assembler",
+    "organic-or-chemistry":              "chemistry",
+    "chemistry-or-cryogenics":           "chemistry",
+    "crafting-with-fluid-or-metallurgy": "_assembler",
+}
+
+# Hard categories that have NO fallback — recipes with these categories can
+# only be produced by their dedicated machine. When that machine is locked at
+# the current location, pick_recipe filters out the recipe entirely.
+HARD_CATEGORY_REQUIRES: dict[str, str] = {
+    "organic":          "biochamber",
+    "metallurgy":       "foundry",
+    "electromagnetics": "electromagnetic-plant",
+    "cryogenics":       "cryogenic-plant",
+}
+
+
+def compute_location_unlocks(location: str | None) -> frozenset[str] | None:
+    """Return the set of planet-locked machines unlocked at *location*.
+
+    None means "no filtering applied" (vanilla / multi-planet mode).
+    Returns an explicit frozenset (possibly empty) for known locations.
+    Unknown location strings are treated as "all unlocked" to avoid
+    accidentally breaking custom location names.
+    """
+    if location is None:
+        return None
+    if location in PLANET_MACHINE_UNLOCKS:
+        return PLANET_MACHINE_UNLOCKS[location]
+    return None
+
 # These three products are solved jointly via a linear system to avoid
 # double-counting crude-oil when multiple oil products are needed.
 OIL_PRODUCTS = frozenset(["petroleum-gas", "light-oil", "heavy-oil"])
@@ -676,12 +744,38 @@ def _compute_step_power(
 # Machine / recipe helpers
 # ---------------------------------------------------------------------------
 
-def get_machine(cat: str, assembler_level: int, furnace_type: str) -> tuple[str, Fraction]:
-    """Return (machine_key, crafting_speed) for a recipe category."""
+def get_machine(
+    cat: str,
+    assembler_level: int,
+    furnace_type: str,
+    location_unlocks: frozenset[str] | None = None,
+) -> tuple[str, Fraction]:
+    """Return (machine_key, crafting_speed) for a recipe category.
+
+    When ``location_unlocks`` is provided (non-None), planet-locked advanced
+    machines (foundry / biochamber / EM-plant / cryo-plant) that are not in
+    the set are routed to their basic alternative via CATEGORY_LOCATION_FALLBACK.
+    Categories listed in HARD_CATEGORY_REQUIRES have no fallback and are left
+    pointing at the locked machine — pick_recipe should have filtered them
+    out before reaching here.
+    """
     if cat in SMELTING_CATS:
         return FURNACE_KEY[furnace_type], FURNACE_SPEED[furnace_type]
     if cat in FIXED_MACHINE_FOR_CAT:
-        return FIXED_MACHINE_FOR_CAT[cat]
+        primary_key, primary_speed = FIXED_MACHINE_FOR_CAT[cat]
+        if (
+            location_unlocks is not None
+            and primary_key in PLANET_LOCKED_MACHINES
+            and primary_key not in location_unlocks
+        ):
+            fb = CATEGORY_LOCATION_FALLBACK.get(cat)
+            if fb == "_assembler":
+                return ASSEMBLER_KEY[assembler_level], ASSEMBLER_SPEED[assembler_level]
+            if fb is not None and fb in FIXED_MACHINE_FOR_CAT:
+                return FIXED_MACHINE_FOR_CAT[fb]
+            # Hard category with no fallback — return the primary (caller is
+            # expected to have filtered the recipe out via pick_recipe).
+        return primary_key, primary_speed
     return ASSEMBLER_KEY[assembler_level], ASSEMBLER_SPEED[assembler_level]
 
 
@@ -701,6 +795,7 @@ def pick_recipe(
     overrides: dict | None = None,
     planet_props: dict | None = None,
     location: str | None = None,
+    location_unlocks: frozenset[str] | None = None,
 ) -> dict | None:
     """
     Select canonical recipe for item_key.
@@ -737,6 +832,23 @@ def pick_recipe(
             candidates = filtered
         elif not (overrides and item_key in overrides):
             return None  # all recipes filtered out by planet conditions
+
+    # Machine-unlock filtering: drop recipes whose hard category requires a
+    # planet-locked machine not unlocked at the current location.
+    # "X-or-Y" categories with a fallback are NOT filtered here — get_machine
+    # routes them to the basic alternative instead.
+    if location_unlocks is not None:
+        filtered = []
+        for r in candidates:
+            cat = r.get("category", "")
+            required = HARD_CATEGORY_REQUIRES.get(cat)
+            if required is not None and required not in location_unlocks:
+                continue
+            filtered.append(r)
+        if filtered:
+            candidates = filtered
+        elif not (overrides and item_key in overrides):
+            return None  # all candidates require a locked machine
 
     # Sort by the game's display order so fallback picks the preferred variant
     candidates = sorted(candidates, key=lambda r: r.get("order", ""))
@@ -968,6 +1080,7 @@ class Solver:
         self.bus_items: frozenset = frozenset(bus_items) if bus_items else frozenset()
         self.planet_props: dict = planet_props or {}
         self.location: str | None = location
+        self.location_unlocks: frozenset[str] | None = compute_location_unlocks(location)
 
         # Infinite productivity research:
         #   research_levels         – {tech_name: level_int} as passed in
@@ -1085,7 +1198,7 @@ class Solver:
         formula in solve(), so solve(item, rate_for_machines(item, N)) gives
         back exactly N machines for the top-level step.
         """
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location, self.location_unlocks)
         if recipe is None:
             raise ValueError(f"No recipe found for item '{item_key}'")
 
@@ -1134,7 +1247,7 @@ class Solver:
             ovr = self.recipe_machine_overrides[recipe_key]
             if ovr in MACHINE_CRAFTING_SPEED:
                 return ovr, MACHINE_CRAFTING_SPEED[ovr]
-        return get_machine(cat, self.assembler_level, self.furnace_type)
+        return get_machine(cat, self.assembler_level, self.furnace_type, self.location_unlocks)
 
     # ------------------------------------------------------------------
     # Core solver
@@ -1165,7 +1278,7 @@ class Solver:
             self.raw_resources[item_key] += rate
             return
 
-        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location)
+        recipe = pick_recipe(item_key, self.recipe_idx, self.recipe_overrides, self.planet_props or None, self.location, self.location_unlocks)
 
         # No recipe → treat as raw (or raise if planet-restricted)
         if recipe is None:

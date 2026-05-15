@@ -28,7 +28,7 @@ dev/
   sample/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
-  test_cli.py               # unittest suite (219 tests, stdlib only)
+  test_cli.py               # unittest suite (233 tests, stdlib only)
   quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
   test_quality_planner.py   # unittest suite (245 tests) for quality_planner
   artifact-api/
