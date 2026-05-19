@@ -489,11 +489,17 @@ SELF_RECYCLE_TARGETS = frozenset([
 # has no positive fixed point.  Modeled as a linear-flow LP instead — see
 # `solve_self_feed_target_loop`.
 #
-# Currently only pentapod-egg is wired up.  Bacteria-cultivation recipes
-# (copper-bacteria-cultivation, iron-bacteria-cultivation) and fish-breeding
-# share the same shape and could be added later by joining this set.
+# pentapod-egg and raw-fish are wired up.  Bacteria-cultivation recipes
+# (copper-bacteria-cultivation, iron-bacteria-cultivation) share the same
+# shape but the item itself has TWO recipes: the cultivation multiplier and a
+# yumako-mash/jelly seeding recipe with no self-ingredient.  cli.pick_recipe
+# returns the seeding recipe by default, so joining bacteria to this set
+# would also require recipe-disambiguation logic in solve_self_feed_target_loop
+# to pick the cultivation recipe.  Deferred — bacteria are rarely a legendary
+# target in practice.
 SELF_FEED_TARGETS = frozenset([
     "pentapod-egg",
+    "raw-fish",
 ])
 
 # Inherent productivity bonus per machine type (Space Age).  Cryogenic plant
@@ -4468,6 +4474,18 @@ def plan(
             notes.append(
                 f"stage {st['recipe']} uses fluid-transparent input ({list(st['fluid_inputs'].keys())})"
             )
+    # Agricultural-tower constraint: yumako / jellynut are harvested only by
+    # agricultural towers, which have 0 module slots — harvest output is
+    # always normal-quality.  When the chain demands them legendary, the
+    # only route is the self-recycle loop emitted above.  Surface this so
+    # users don't expect a quality-module slot on the tower itself.
+    agri_raws = sorted(r for r in mined_input if r in ("yumako", "jellynut"))
+    if agri_raws:
+        notes.append(
+            f"agricultural tower has 0 module slots — {'/'.join(agri_raws)} "
+            f"harvest is normal-quality only; legendary tier comes from the "
+            f"mined-raw-self-recycle loop above"
+        )
     # Incidental co-product credit notes.
     for byprod, cap in sorted(incidental_credited.items()):
         notes.append(

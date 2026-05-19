@@ -29,8 +29,8 @@ dev/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (233 tests, stdlib only)
-  quality_planner.py        # Legendary production planner (V1 MVP) — DP quality loop solver
-  test_quality_planner.py   # unittest suite (245 tests) for quality_planner
+  quality_planner.py        # Legendary production planner — DP/LP quality loop solver
+  test_quality_planner.py   # unittest suite (250 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -153,9 +153,9 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-219 CLI tests + 220 quality-planner tests, stdlib only.
+233 CLI tests + 250 quality-planner tests, stdlib only.
 
-### Legendary Production Planner (V1 + V2 + V3-partial)
+### Legendary Production Planner
 
 `dev/quality_planner.py` is a separate tool focused on legendary-tier production.
 It computes the cheapest input rate and the per-stage machine / module layout
@@ -276,10 +276,6 @@ the same data that powers <https://kirkmcdonald.github.io/calc.html>.
 ---
 
 ## Future Work
-
-### CLI / Calculator
-
-- **Quality recycling loops** — V1 implemented in `dev/quality_planner.py` (asteroid-path only); V2 will extend to per-item recycling loops, planet exclusives, and self-recycling items
 
 ### Skill / Workflow
 

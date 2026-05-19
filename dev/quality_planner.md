@@ -6,7 +6,7 @@ A separate stdlib-only Python tool that answers:
 
 Lives at `dev/quality_planner.py` (~2600 LoC) alongside `10x-factorio-engineer/assets/cli.py`. Imports `cli.py` as a library; does not modify it.
 
-This document is the single source of truth — supersedes the original `quality_planner_v1.md` and `quality_planner_v2.md` specs (deleted). The history of how features evolved is in git; this doc only covers what exists today and what's planned.
+This document is the single source of truth — supersedes the original `quality_planner_v1.md` and `quality_planner_v2.md` specs (deleted). The history of how features evolved is in git; this doc only covers what exists today.
 
 ---
 
@@ -31,7 +31,6 @@ Currently shipped:
 - **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge recipes give the other uranium isotope.  Surplus surfaces as `incidental_byproduct_overflow`.
 - **Driven co-product activation (`--enable-driver RECIPE_KEY` / `--enable-drivers all`, 2026-05-14)** — for any leaf raw R demanded via mined-recycle, the planner can activate a recipe that produces R as a non-primary solid (e.g. `molten-iron-from-lava` for stone) purely to harvest R, accepting the recipe's primary as overflow.  Driver ingredients are walked through the standard legendary chain (asteroid → calcite, etc.).  `--enable-drivers all` is cost-gated against the no-driver baseline.  Headline impact: `stone-wall @ 60/min --planets nauvis,vulcanus --enable-drivers all` drops from 2244 to ~65 machines (35× reduction).
 
-Future additions in the [Roadmap](#roadmap) section below.
 
 ---
 
@@ -569,7 +568,7 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 - **Oil-recipe selection picks `basic-oil-processing`** because it has fewer fluid byproducts (`_pick_recipe_fluid_preferred` picks lowest-complexity).
 - **`--prod-module-tier` defaults to 3.** No speed modules — speed doesn't reduce ingredient demand, and the planner sizes by throughput.
 - **Walker passes must use the SAME `eff_prod`.** `_assembly_prod_bonus` is called identically in both passes — if they diverge, demand propagation upstream and stage `inputs` rates will not match.
-- **LDS shuffle saturation:** when `research_prod` saturates the +300 % cap, per-cycle return ratio `r → 1.0` and machine count diverges. Clamped to `r=0.999` (~1500 machines for 60/min). Mathematically correct in the limit; practically a tell that the planner should split into multiple parallel loops with smaller per-tier prod configs (deferred — see [Roadmap](#roadmap)).
+- **LDS shuffle saturation:** when `research_prod` saturates the +300 % cap, per-cycle return ratio `r → 1.0` and machine count diverges. Clamped to `r=0.999` (~1500 machines for 60/min). Mathematically correct in the limit; practically a tell that the planner should split into multiple parallel loops with smaller per-tier prod configs.
 - **Argparse % escaping.** Help strings containing `%` must escape as `%%` — argparse format-substitutes them otherwise (`--assembly-modules` and `--machine-quality` flags both have `%%`).
 - **`--tech` default is locked.** A bare CLI invocation now produces an empty `tech_state={}` and fails-fast on the recycler check. Library callers (incl. tests) MUST pass `tech_state` — there is no default. Use `qp.ALL_TECH_UNLOCKED` for the legacy "fully researched" baseline. This was a deliberate breaking change to make the user's research state explicit (V3 item 2).
 - **Shuffle DP solvers ignore tech_state.** `solve_shuffle_loop` / `compute_shuffle_stage` use `cli.get_machine` directly and do not consult `tech_state`. If the user enables a shuffle whose cast machine is locked (e.g. `--enable-shuffle low-density-structure --tech tungsten-carbide=0`), the shuffle still runs as if the foundry exists. The main-chain walker and `_pick_recipe_fluid_preferred` correctly gate locked machines, so this only matters when the user explicitly opts-in to a shuffle that requires a locked machine.
@@ -582,122 +581,6 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 - **Aggregating intermediate sub-plans uses `_dispatch_out`, not a cache diff.** Walker writes the keys it directly dispatched into a kwarg-passed set. Plan() reads only those, NOT all of `_cache.intermediates` — a recursive Path B plan() has already aggregated its own inner intermediates' `normal_solid_input` into its own, so the outer level reading the full cache would double-count.
 - **`_force_tree_walk` (top-level) and `_force_tree_walk_for` (walker) are different.** `_force_tree_walk=True` on `plan()` skips the SELF_RECYCLE_TARGETS dispatch at top level (used by Path B re-entry). `_force_tree_walk_for=frozenset({item})` on `walk_recipe_tree` makes the walker treat `item` as a normal recipe even though it's in the blocklist (used by Path B inside `choose_path_self_recycle` so it can attempt the ingredient-upcycle of its own item without the dispatcher catching it).
 - **Decision cache is rate-independent.** Both Path A and Path B scale linearly with rate, so the choice doesn't depend on rate. The cache stores `"A"`/`"B"` keyed by `(item, env_signature)`. On hit, only the chosen branch re-runs at the actual rate. This is the main memoization win for deep chains where the same item appears at different rates.
-
----
-
-## Roadmap
-
-In rough priority order (fully shipped items removed):
-
-### Co-product credits — incidental sub-case (shipped 2026-05-14)
-
-The byproduct-credit machinery exists (`byproduct_credits` kwarg on `walk_recipe_tree`) and was previously wired only into shuffle activations.  The incidental sub-case ships in `plan()` as a post-shuffle pass that walks the activated assembly stages, computes each stage's non-primary SOLID outputs at full chain rate (`crafts_per_min × amount × probability × eff_prod`), caps each byproduct at observed legendary demand, and re-walks the chain once with the merged credits.
-
-Currently active credits:
-
-- **Lava casting** (`molten-iron-from-lava`, `molten-copper-from-lava`) → stone.  Any Vulcanus chain that ALSO consumes stone (concrete, electric-furnace, landfill via stone-brick, etc.) sheds the credited portion from its mined-recycle stone target.  Example: `concrete @ 60/min --planets nauvis,vulcanus` credits 4.8 legendary stone/min and drops mined-recycle from 60→55.2 stone/min.
-- **Gleba `*-processing`** (`yumako-processing`, `jellynut-processing`) → seeds (used for replanting; usually surplus in legendary chains).
-- **Gleba bacteria** (`copper-bacteria`, `iron-bacteria`) → spoilage.
-- **Centrifuge** (`uranium-processing`, `kovarex-enrichment-process`) → the other uranium isotope.
-- **Advanced asteroid crushing** is NOT included here — it lives in the existing `raw-crushing` stage which already routes multiple outputs into the chunk-demand pipeline.
-
-Shape of the credit: `incidental_byproduct_legendary` lists the gross emitted rate; `incidental_byproduct_credited` is the portion absorbed by chain demand; `incidental_byproduct_overflow` is the surplus.  Surplus rows surface as `notes` so users can see they have legendary stone / seeds / spoilage they could route elsewhere.
-
-**Implementation choice — single re-walk vs iteration.**  Credits monotonically reduce demand, never increase it.  Upstream activations (the byproduct producers, e.g. lava casting) sit above their byproduct in the recipe DAG, so their rates don't change when the byproduct credit deactivates a downstream consumer (e.g. stone-brick).  A single re-walk suffices for the realistic Space Age chains.  If a future recipe graph creates a tighter cycle (byproduct producer's recipe consumes the byproduct itself), extend `plan()` to iterate; for now the simpler implementation is correct.
-
-Tests: `TestCoProductIncidental` (11 cases) covers field presence, emitted vs credited vs overflow rates, the concrete @ vulcanus headline case, rate-linearity, fluid filtering, format_human rendering, and `_plan_self_recycle_target` sub-plan parity.
-
-### Co-product credits — driven sub-case (shipped 2026-05-14)
-
-`--enable-driver RECIPE_KEY` (repeatable) activates a recipe FOR its co-product when the chain has demand for the co-product as a mined-recycle leaf raw.  `--enable-drivers all` enumerates every candidate, picks the highest-yield driver per leaf raw, and cost-gates against the no-driver baseline.
-
-How it differs from incidental:
-- **Incidental** credits non-primary outputs of recipes ALREADY in the chain (chain-driven activation).
-- **Driven** activates recipes NOT otherwise in the chain, purely for their co-product (co-product-driven activation).  The recipe's primary becomes overflow (e.g. molten-iron voided down a pipe).
-
-Driver wiring:
-1. After the incidental pass, iterate over `raw_demand` leaf raws.
-2. For each raw R, look up `enumerate_co_product_drivers(data)` candidates.
-3. Filter by tech / planet reachability + (for explicit `--enable-driver`) by user-named recipes.
-4. Pick the candidate with the highest `target_amount × probability` per craft (most efficient driver).
-5. Compute crafts/min from R demand; subtract R from `raw_demand`.
-6. Walk each non-fluid INGREDIENT through `walk_recipe_tree` so its legendary chain (asteroid / mined-recycle / shuffle / nested-self-recycle) plugs into the main flow.
-7. Record the recipe's other outputs as `driver_overflow`.
-8. Emit a `co-product-driver` stage (machine = recipe's machine, machine_quality applied via `MACHINE_QUALITY_SPEED`).
-
-Cost-gate (`--enable-drivers all` only): after building the plan, recurse with `active_drivers=None`.  If the no-driver baseline is cheaper, keep the baseline and emit a fallback note.  Explicit `--enable-driver` is honoured unconditionally.
-
-Headline numbers (`stone-wall @ 60/min --planets nauvis,vulcanus`, default modules off):
-
-| Config | Total machines |
-|---|---|
-| baseline (no driver) | 2244 |
-| `--enable-driver molten-iron-from-lava` | ~93 |
-| `--enable-drivers all` (picks copper variant: 15 stone/craft) | ~65 |
-
-Stock Space Age driver candidates (excluding `crushing` / `recycling` / `captive-spawner-process`): stone (lava casting × 2), spoilage (iron-bacteria + copper-bacteria), uranium-238 (uranium-processing + kovarex), uranium-235 (kovarex), jelly + yumako-mash + seeds (Gleba `*-processing`), plus a few others (`ammoniacal-solution-separation`, `cryogenic-science-pack`, `quantum-processor`).
-
-Limitations not addressed:
-- Driver primary's chain credit not modelled (overflow is always 100 % wasted, even when chain demand for primary exists).  In practice this only matters if the user enables a driver whose primary is ALREADY in the chain — the right move is to leave the driver off and let the incidental pass handle it.
-- Per-craft cost search is greedy / first-viable rather than full DP across all candidates; the cost-gate catches the worst false positives but a poorly-chosen explicit driver can over-spend.
-
-Tests: `TestCoProductDriven` (14 cases) covers candidate enumeration, default off, explicit driver activation (stone-wall @ vulcanus), `--enable-drivers all` highest-yield pick, cost-gate fallback shape, unknown-recipe error, non-applicable driver no-op, planet-locked filter (no vulcanus → no lava-cast driver), calcite ingredient routing through asteroid chain, rate linearity, format_human rendering, `_plan_self_recycle_target` sub-plan parity.
-
-### Full research-state tracking (V3 item 2)
-
-**Shipped** as `--tech NAME=LEVEL` (see §Tech-state gating).  Covers recycler, foundry, EM-plant, cryogenic-plant, biochamber, quality-module tiers.  Per-planet-landing distinction (narrower than `--planets`) was deferred — for now `--planets X` continues to imply the user has landed on planet X.
-
-### Gleba quality targets (V3 item 4 — shipped)
-
-Originally framed as "Gleba spoilage timing"; refactored to focus on the more-valuable question: **how do you make legendary buildings/modules?** The shipped solution:
-- `enumerate_shuffle_candidates` no longer filters by `allow_productivity=True` → 195 candidates (was 16). Buildings, modules, military equipment, end-game power, logistics all qualify.
-- `biolab` and `captive-biter-spawner` added to `SELF_RECYCLE_TARGETS`.
-- Auto-comparator (always-on for `SELF_RECYCLE_TARGETS`): runs Path A (self-recycle target loop) and Path B (ingredient-upcycle), picks lower machine count, attaches explanatory note.
-
-Spoilage time-budget modelling was deliberately skipped — when Path B is infeasible because ingredients are too perishable, the DP yield collapses and Path B's machine count goes astronomical, naturally losing the cost gate.
-
-### Pentapod-egg as a self-feed target (V3 item 4 — shipped)
-
-Recipe is `1 pentapod-egg + 30 nutrients + 60 water → 2 pentapod-egg` (Gleba, biochamber, +50% inherent prod, `allow_productivity=true`).  The ingredient is also the output — a "self-feed" / doubling recipe.
-
-`solve_self_recycle_target_loop` doesn't apply: the per-atom value DP `V(q) = max(craft, recycle)` has no positive fixed point whenever `output × p_stay > 1` (always true here).  So a separate solver `solve_self_feed_target_loop` was added with a small **linear flow LP**:
-
-- Per processing tier `q ∈ {0,1,2,3}` (legendary q=4 drains): `x_q` crafts/min and `y_q` recycles/min (≥ 0).
-- Balance at each tier: `A_q · x_q + B_q · y_q = I_q` where `A_q = 1 - output_q · cp_q[q→q]` (negative for super-productive), `B_q = 1 - retention · rp_q[q→q]` (positive), `I_q` accumulates from lower tiers, `I_0 = 0`.
-- Drain at q=4: `Σ_q [x_q · output_q · cp_q[q→4] + y_q · retention · rp_q[q→4]] = rate`.
-- Substitute `y_q = (I_q + |A_q| · x_q) / B_q` to eliminate balance equations → 4-variable LP with 1 equality + non-negativity → **corner-optimal** with exactly one `x_{q*}` positive.  Try all 4 corners, pick min-cost.
-
-Config search is collapsed by exploiting that lower-tier configs are inert when only `x_{q*}` is positive (no atoms at q < q*) and upper-tier configs only need `rq` (no crafts).  Per corner: `25 · 5^(3-q*)` configs.  Total ≤ 4 000 configs in well under a second — no aggressive pruning needed.
-
-Wired in via `SELF_FEED_TARGETS = frozenset(["pentapod-egg"])` and the `_plan_self_feed_target` dispatcher in `plan()`.  **Auto-comparator is intentionally skipped** — Path B (ingredient-upcycle) recurses into the same problem since ingredient = output.
-
-Tests: `TestSelfFeedTarget` in `dev/test_quality_planner.py` (11 cases) covers basic plan shape, planet gating, rate-doubles, ingredient walking, no-auto-compare note, per-tier flows, module config exposure, human-format rendering, and solver edge cases (unknown item, non-self-feed item).
-
-Known limitation: the LP assumes a steady-state pool exists at the chosen `q*` tier (e.g. epic eggs at `q*=3`).  Bootstrapping that pool from a single normal egg requires a finite warm-up period the model does not size.  In practice the warm-up is irrelevant once steady state is reached.
-
-Remaining Gleba work (deferred):
-- **Bacteria-cultivation / fish-breeding.** Same self-feed shape as pentapod-egg (`copper-bacteria-cultivation`, `iron-bacteria-cultivation`, `fish-breeding`).  They plug into the same solver — just add to `SELF_FEED_TARGETS` — but they're lower-priority targets (rarely needed at legendary tier).
-- **Agricultural quality.** Towers have 0 module slots; harvest is normal-quality only. Constraint already correct but worth surfacing to users.
-
-### Alternate objectives (V3 item 6 — scope TBD)
-
-Switch the implicit "minimize asteroid input" objective to user-selected:
-- Fewest machines (current default-ish)
-- Lowest power (efficiency modules instead of prod)
-- Smallest footprint (different module mix per stage)
-- UPS-sensitive
-
-Each is a different objective on the same DP — would require a `--objective` flag and per-objective module-config search. Efficiency modules are currently not modelled; adding them affects per-stage power computation in `_stage_power_kw`.
-
----
-
-## Considered and deferred
-
-Decisions surfaced by the 2026-05-08 audit that we've consciously chosen not to act on, so future contributors don't re-litigate them:
-
-- **`_pick_recipe_fluid_preferred` → cost-based DP.**  Recipe selection is currently a heuristic ("most fluid ingredients wins") rather than a cost-minimizing search.  Memoizing the heuristic result is trivial and worth doing if profiling shows hot spots; converting to a cost-based DP is a substantially larger refactor and not justified by current outputs (the heuristic produces the right answer in every case observed so far).  Revisit if a future recipe routing turns out to be wrong, or if the [Self-recycling intermediate dispatch](#self-recycling-intermediate-dispatch-high-priority--150-loc) DP makes the cost primitive cheap to share.
-- **`_plan_self_feed_target` LP → DP unification.**  The pentapod-egg LP corner search is already optimal per call and does not share structure with the quality DPs — folding it into the dispatch DP would complicate the latter without payoff.  Leave as-is.
-- **Raw sourcing branch (asteroid vs mined-recycle vs `--no-asteroids`).**  This is flag-driven, not a cost choice.  No DP needed.
 
 ---
 

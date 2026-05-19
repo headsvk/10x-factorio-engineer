@@ -991,6 +991,61 @@ class TestSelfFeedTarget(unittest.TestCase):
         self.assertIn("total_power_mw", out)
         self.assertGreaterEqual(out["total_power_mw"], 0.0)
 
+    def test_raw_fish_self_feed_dispatched(self):
+        # Fish-breeding (2 raw-fish + 100 nutrients + 100 water -> 3 raw-fish)
+        # is the second self-feed target.  Needs --planets nauvis (raw-fish
+        # planet-gated) and --planets gleba (nutrients chain).
+        out = qp.plan(
+            "raw-fish", 60, _data(),
+            planets=["nauvis", "gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        sts = [s for s in out["stages"] if s.get("role") == "self-feed-target"]
+        self.assertEqual(len(sts), 1)
+        self.assertEqual(sts[0]["target"], "raw-fish")
+        self.assertGreater(sts[0]["craft_machines"], 0.0)
+        self.assertEqual(sts[0]["rate_per_min"], 60)
+
+    def test_raw_fish_requires_nauvis(self):
+        with self.assertRaises(ValueError) as ctx:
+            qp.plan(
+                "raw-fish", 60, _data(),
+                planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+            )
+        self.assertIn("nauvis", str(ctx.exception).lower())
+
+
+class TestAgriculturalQualityNote(unittest.TestCase):
+    """Surface the agricultural-tower 0-module-slots constraint when the chain
+    demands legendary yumako or jellynut.  The planner already models the
+    self-recycle loop correctly; this is purely a UX note."""
+
+    def test_yumako_target_emits_note(self):
+        out = qp.plan(
+            "yumako", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        joined = " ".join(out.get("notes", []))
+        self.assertIn("agricultural tower", joined)
+        self.assertIn("yumako", joined)
+
+    def test_jellynut_target_emits_note(self):
+        out = qp.plan(
+            "jellynut", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        joined = " ".join(out.get("notes", []))
+        self.assertIn("agricultural tower", joined)
+        self.assertIn("jellynut", joined)
+
+    def test_no_agri_demand_no_note(self):
+        # iron-plate via asteroid path has no agri raws -> no note.
+        out = qp.plan(
+            "iron-plate", 60, _data(),
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        joined = " ".join(out.get("notes", []))
+        self.assertNotIn("agricultural tower", joined)
+
 
 class TestAssemblyModules(unittest.TestCase):
     """V3 item 5: --assembly-modules fills assembly stage slots with prod modules."""
