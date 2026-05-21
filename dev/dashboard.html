@@ -96,18 +96,21 @@
     .header-title-row { display: flex; align-items: center; gap: 8px; }
     .header-title { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900;
                     color: var(--accent); letter-spacing: .06em; text-transform: uppercase; }
+    .header-save-row { display: flex; align-items: center; gap: 8px; }
     .header-save  { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
     .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .main { padding: 16px; }
     .main-inner { max-width: 1280px; margin-inline: auto; }
 
-    /* ── Storage pill ── */
-    .storage-pill { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 0 8px;
-                    height: 28px; display: inline-flex; align-items: center; line-height: 1;
-                    font-family: 'JetBrains Mono', monospace; letter-spacing: .02em; }
-    .storage-pill.cloud { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-border); }
-    .storage-pill.local { background: transparent; color: var(--text-muted); border-color: var(--border); }
-    .storage-pill.none  { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-border); }
+    /* ── Storage pill (passive status indicator next to save-name) ── */
+    .storage-pill { font-size: 10px; padding: 0;
+                    display: inline-flex; align-items: center; line-height: 1;
+                    font-family: 'JetBrains Mono', monospace; letter-spacing: .02em;
+                    color: var(--text-dim); }
+    .storage-pill::before { content: '·'; margin-right: 6px; opacity: .6; }
+    .storage-pill.cloud { color: var(--ok); }
+    .storage-pill.local { color: var(--text-dim); }
+    .storage-pill.none  { color: var(--bad); }
 
     /* ── Badges ── */
     .badges { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -125,8 +128,9 @@
                  border-radius: 3px; padding: 3px 10px; height: 28px; text-transform: uppercase; }
     .btn:hover { background: var(--border); color: var(--text); }
     .btn-ghost { background: transparent; border: none; color: var(--text-dim);
-                 border-radius: 3px; padding: 3px 8px; height: 28px; }
-    .btn-ghost:hover { background: var(--bg-input); color: var(--text); }
+                 border-radius: 3px; padding: 3px 8px; height: 28px; opacity: .5;
+                 transition: opacity .12s, background .12s, color .12s; }
+    .btn-ghost:hover { background: var(--bg-input); color: var(--text); opacity: 1; }
     .btn-primary { background: var(--accent); border: none; color: #1c1508;
                    border-radius: 3px; padding: 4px 16px; font-weight: 900; text-transform: uppercase; }
     .btn-primary:hover { background: var(--accent-hover); }
@@ -196,7 +200,7 @@
                  text-transform: uppercase; letter-spacing: .05em; border-radius: 3px;
                  padding: 1px 6px; border: 1px solid; display: inline-flex; align-items: center; }
     .card-chip.stale  { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
-    .card-chip.capped { color: var(--text-dim); border-color: var(--border); background: var(--bg-input); }
+    .card-chip.capped { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
 
     /* ── Bottleneck banner ── */
     .bottleneck-banner { background: var(--bad-bg); border: 1px solid var(--bad-border);
@@ -280,14 +284,14 @@
                         background: var(--bg-input); border: 1px solid var(--border-sub);
                         border-radius: 2px; padding: 0 4px; color: var(--text-muted); }
 
-    /* ── Next steps ── */
+    /* ── Next steps (neutral palette — these are pending actions, not done) ── */
     .next-steps { margin-top: 16px; }
     .next-step-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px;
-                      border-radius: 4px; background: var(--ok-bg); border: 1px solid var(--ok-border);
-                      border-left: 3px solid var(--ok);
+                      border-radius: 4px; background: var(--bg-card); border: 1px solid var(--border-sub);
+                      border-left: 3px solid var(--accent);
                       font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
     .next-step-item:last-child { margin-bottom: 0; }
-    .arrow { color: var(--ok); opacity: .7; flex-shrink: 0; margin-top: 1px; }
+    .arrow { color: var(--accent); opacity: .7; flex-shrink: 0; margin-top: 1px; }
 
     /* ── Line cards ── */
     .line-card { border-radius: 4px; border: 1px solid; background: var(--bg-card); margin-bottom: 8px; overflow: hidden; }
@@ -314,6 +318,7 @@
     .card-title        { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px;
                          letter-spacing: .02em; color: var(--text); }
     .card-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+    .rate-line { display: inline-flex; align-items: baseline; gap: 6px; }
     .rate-num  { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted);
                  font-variant-numeric: tabular-nums; }
     .rate-unit { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
@@ -379,6 +384,7 @@
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: var(--bg-input);
             border: 1px solid var(--border); border-radius: 3px; padding: 3px 8px; color: var(--text-muted); }
+    .chip-tag { display: inline-block; margin-right: 4px; opacity: .8; font-size: 10px; }
 
     /* ── Module & beacon chips ── */
     .mod-chip {
@@ -408,9 +414,11 @@
     .bcn-chip .qdot, .mod-chip .qdot, td.name-col .qdot { width: 5px; height: 5px; }
     .bcn-sep { margin: 0 3px; }
 
-    /* ── Issues ── */
+    /* ── Issues / Next steps (neutral palette — these are pending actions, not done) ── */
     .issue-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px;
-                  border-radius: 4px; font-size: 13px; margin-bottom: 8px; }
+                  border-radius: 4px; font-size: 13px; margin-bottom: 8px;
+                  background: var(--bg-card); border: 1px solid var(--border-sub);
+                  border-left: 3px solid var(--accent); color: var(--text-muted); }
     .issue-item:last-child { margin-bottom: 0; }
     .issue-item.bad  { background: var(--bad-bg);  border: 1px solid var(--bad-border);
                        border-left: 3px solid var(--bad);  color: var(--bad); }
@@ -903,7 +911,10 @@ function renderHeader() {
         <div class="header-title-row">
           <span class="header-title">10x Factorio Engineer</span>
         </div>
-        <div class="header-save">${esc(save_name)}</div>
+        <div class="header-save-row">
+          <span class="header-save">${esc(save_name)}</span>
+          ${renderStoragePill()}
+        </div>
       </div>
       <div class="header-right">
         <div class="badges">
@@ -913,22 +924,12 @@ function renderHeader() {
           ${(machine_quality && machine_quality !== 'normal') ? `<span class="badge">${label(machine_quality)} Machines</span>` : ''}
           ${preferred_belt ? `<span class="badge">${label(preferred_belt)} Belt</span>` : ''}
           ${Object.keys(module_configs ?? {}).length ? '<span class="badge">Modules</span>' : ''}
-          ${(() => {
-            const targets = allSciTargets();
-            const sciKeys = Object.keys(targets);
-            if (!sciKeys.length) return '';
-            const rates = allSciRates();
-            const activeKeys = sciKeys.filter(k => !rates[k]?.allWip);
-            const eff = activeKeys.length ? Math.min(...activeKeys.map(k => rates[k]?.total ?? 0)) : 0;
-            return `<span class="badge">${Math.round(eff)} SPM</span>`;
-          })()}
         </div>
         <div class="btn-group">
           <button class="btn" id="btn-export">↓ Export</button>
           <button class="btn" id="btn-import">↑ Import</button>
           <button class="btn" id="btn-theme" title="Toggle light/dark mode">${document.documentElement.getAttribute('data-theme') === 'light' ? '☾ Dark' : '☀ Light'}</button>
-          ${renderStoragePill()}
-          <button class="btn-ghost" id="btn-reset" title="Reset all factory data">↺</button>
+          <button class="btn-ghost" id="btn-reset" title="Reset all factory data" aria-label="Reset all factory data">↺</button>
         </div>
       </div>
     </div>`;
@@ -1653,28 +1654,21 @@ function renderLineCard(line, idx) {
     const busInputs = line.cli_result?.bus_inputs ?? {};
     const logiSet   = new Set(line.cli_args?.logistics_items ?? []);
     const directSet = new Set(line.cli_args?.direct_items ?? []);
-    const busOnly    = Object.entries(busInputs).filter(([r]) => !logiSet.has(r) && !directSet.has(r));
-    const logiOnly   = Object.entries(busInputs).filter(([r]) =>  logiSet.has(r));
-    const directOnly = Object.entries(busInputs).filter(([r]) =>  directSet.has(r));
-    const renderInputChips = (entries) => entries.map(([r, rate]) => {
+    // Merged inputs section — chip carries a small tag indicating source
+    // (bus / 🤖 logistics / → direct). Replaces the three sibling sections.
+    const inputEntries = Object.entries(busInputs);
+    const renderInputChip = ([r, rate]) => {
       const b = STATE.preferred_belt;
       const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, b);
-      return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
-    }).join('');
-    const busInputSection = busOnly.length ? `
+      const tag = logiSet.has(r)   ? `<span class="chip-tag" title="From logistics bots">🤖</span>`
+                : directSet.has(r) ? `<span class="chip-tag" title="Belt-fed directly from another line">→</span>`
+                : '';
+      return `<span class="chip">${tag}${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
+    };
+    const inputsSection = inputEntries.length ? `
       <div class="card-section">
-        <div class="section-label">Bus Inputs</div>
-        <div class="chips">${renderInputChips(busOnly)}</div>
-      </div>` : '';
-    const fromLogiSection = logiOnly.length ? `
-      <div class="card-section">
-        <div class="section-label">From Logistics 🤖</div>
-        <div class="chips">${renderInputChips(logiOnly)}</div>
-      </div>` : '';
-    const fromDirectSection = directOnly.length ? `
-      <div class="card-section">
-        <div class="section-label">Belt-fed Direct</div>
-        <div class="chips">${renderInputChips(directOnly)}</div>
+        <div class="section-label">Inputs</div>
+        <div class="chips">${inputEntries.map(renderInputChip).join('')}</div>
       </div>` : '';
 
     const reserveItems = line.reserve_items ?? [];
@@ -1692,45 +1686,50 @@ function renderLineCard(line, idx) {
         }).join('')}</div>
       </div>` : '';
 
-    const ownRaw = Object.entries(raw);
+    // Merged Raws section — one chip per ore showing rate + miner count + power.
+    // Items present in both raw_resources and miners_needed combine into one
+    // chip; items in only one still render with the available datum.
+    const ownRaw    = Object.entries(raw);
     const ownMiners = Object.entries(miners);
-
-    const rawSection = ownRaw.length ? `
+    const allRawKeys = [...new Set([...ownRaw.map(([k]) => k), ...ownMiners.map(([k]) => k)])];
+    const rawsSection = allRawKeys.length ? `
       <div class="card-section">
-        <div class="section-label">Raw Resources</div>
-        <div class="chips">${ownRaw.map(([r, rate]) => {
-          const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
-          return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
+        <div class="section-label">Raws</div>
+        <div class="chips">${allRawKeys.map(r => {
+          const rate = raw[r];
+          const info = miners[r];
+          const rateFmt = rate != null
+            ? (FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt))
+            : null;
+          let minerStr = '';
+          if (info) {
+            const isYield = info.required_yield_pct != null;
+            const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${fmtMC(info.machine_count)}×`;
+            const countCl = isYield ? 'var(--warn)' : 'var(--text)';
+            const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
+            minerStr = ` · <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ⚡${powStr}` : ''}</span>`;
+          }
+          const rateStr = rateFmt ? `<span style="color:var(--text)">${rateFmt}</span>` : '';
+          return `<span class="chip">${esc(label(r))}: ${rateStr}${minerStr}</span>`;
         }).join('')}</div>
       </div>` : '';
 
-    const minerSection = ownMiners.length ? `
-      <div class="card-section">
-        <div class="section-label">Miners / Extractors</div>
-        <div class="chips">${ownMiners.map(([r, info]) => {
-          const isYield = info.required_yield_pct != null;
-          const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${fmtMC(info.machine_count)}×`;
-          const countCl = isYield ? 'var(--warn)' : 'var(--text)';
-          const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
-          return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ⚡${powStr}` : ''}</span></span>`;
-        }).join('')}</div>
-      </div>` : '';
-
+    // Outputs section — only render when there are co-products. The primary
+    // rate is already shown in the card header.
     const coProds = Object.entries(line.cli_result?.co_products ?? {});
     const primaryRate = line.effective_rate ?? line.target_rate ?? 0;
     const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, STATE.preferred_belt);
-    const outputChips = [
-      `<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
-      ...coProds.map(([r, rate]) => {
-        const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
-        return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
-      })
-    ].join('');
-    const coProductSection = `
+    const coProductSection = coProds.length ? `
       <div class="card-section">
         <div class="section-label">Outputs</div>
-        <div class="chips">${outputChips}</div>
-      </div>`;
+        <div class="chips">${[
+          `<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
+          ...coProds.map(([r, rate]) => {
+            const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
+            return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
+          })
+        ].join('')}</div>
+      </div>` : '';
 
     const noteSection = line.player_notes ? `
       <div class="player-notes">${esc(line.player_notes)}</div>` : '';
@@ -1742,7 +1741,7 @@ function renderLineCard(line, idx) {
         <div class="chips"><span class="chip" style="font-family:var(--mono,monospace);color:var(--text-dim)">${esc(cliArgsSummary)}</span></div>
       </div>` : '';
 
-    body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${busInputSection}${fromLogiSection}${fromDirectSection}${rawSection}${minerSection}${cliArgsSection}${noteSection}</div>`;
+    body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${inputsSection}${rawsSection}${cliArgsSection}${noteSection}</div>`;
   }
 
   const cardClass   = line.wip ? 'wip' : sc;
@@ -1776,8 +1775,10 @@ function renderLineCard(line, idx) {
           </div>
         </div>
         <div class="card-header-right">
-          <span class="rate-num">${fmtRateOnly(displayRate)}</span>
-          <span class="rate-unit">${isFluid ? fmtFluidUnitOnly(displayRate) : fmtUnitOnly(displayRate, belt ?? STATE.preferred_belt)}</span>
+          <span class="rate-line">
+            <span class="rate-num">${fmtRateOnly(displayRate)}</span>
+            <span class="rate-unit">· ${isFluid ? fmtFluidUnitOnly(displayRate) : fmtUnitOnly(displayRate, belt ?? STATE.preferred_belt)}</span>
+          </span>
         </div>
       </div>
       ${body}
