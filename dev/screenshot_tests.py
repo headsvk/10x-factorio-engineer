@@ -102,8 +102,16 @@ def run_cli(*args) -> dict:
 
 
 def make_minimal_line(item, label, target_rate, effective_rate,
-                      wip=False, notes=None, bus_inputs=None):
-    """Line with a stub cli_result — renders card header but no expanded steps."""
+                      wip=False, notes=None, bus_inputs=None, machine=None):
+    """Line with a stub cli_result — renders card header but no expanded steps.
+
+    machine: optional first-step machine id, so the Lines-tab grouping logic
+    (Smelting / Circuits / Other) can route the card to the right bucket."""
+    steps = [{
+        "recipe": item, "machine": machine, "machine_count": 1, "machine_count_ceil": 1,
+        "inputs": {}, "outputs": {item: effective_rate}, "power_kw": 0.0, "beacon_power_kw": 0.0,
+        "machine_quality": "normal", "beacon_speed_bonus": 0.0,
+    }] if machine else []
     return {
         "item": item,
         "label": label,
@@ -114,7 +122,7 @@ def make_minimal_line(item, label, target_rate, effective_rate,
         "cli_result": {
             "item": item,
             "rate_per_min": effective_rate,
-            "production_steps": [],
+            "production_steps": steps,
             "raw_resources": {},
             "co_products": {},
             "miners_needed": {},
@@ -311,12 +319,25 @@ def make_state_science_space_age() -> dict:
 
 
 def make_state_location_bar() -> dict:
-    """Space Age — 3 planet locations (Nauvis active)."""
+    """Space Age — 3 planet locations with line counts (Nauvis active)."""
     state = _base_state("Three-Planet Factory")
     state["locations"] = [
-        _loc("nauvis",   "Nauvis",   lines=[make_minimal_line("iron-plate", "Iron Plate", 60, 60)]),
-        _loc("vulcanus", "Vulcanus", lines=[]),
-        _loc("gleba",    "Gleba",    lines=[]),
+        _loc("nauvis",   "Nauvis", lines=[
+            make_minimal_line("iron-plate",                "Iron Plate",        60,  60),
+            make_minimal_line("copper-plate",              "Copper Plate",      60,  60),
+            make_minimal_line("electronic-circuit",        "Green Circuits",    60,  60),
+            make_minimal_line("processing-unit",           "Processing Units",  20,  20),
+            make_minimal_line("automation-science-pack",   "Automation Science",90,  90),
+            make_minimal_line("logistic-science-pack",     "Logistic Science",  90,  72),
+            make_minimal_line("chemical-science-pack",     "Chemical Science",  90,  40),
+        ]),
+        _loc("vulcanus", "Vulcanus", lines=[
+            make_minimal_line("metallurgic-science-pack",  "Metallurgic Science", 30, 30),
+            make_minimal_line("tungsten-plate",            "Tungsten Plate",      30, 30),
+        ]),
+        _loc("gleba",    "Gleba", lines=[
+            make_minimal_line("agricultural-science-pack", "Agricultural Science", 30, 30),
+        ]),
     ]
     return state
 
@@ -563,16 +584,30 @@ def make_state_overview() -> dict:
 
 
 def make_state_lines_statuses() -> dict:
-    """Lines tab (collapsed): ok / warn / bad / wip status variants."""
+    """Lines tab (collapsed): ok / warn / bad / wip status variants + extras
+    for the toolbar (search box, status chips, group counts, expand-all)."""
     state = _base_state("Status Variants")
     lines = [
+        # Science group — covers ok / warn / bad / wip status dots
         make_minimal_line("automation-science-pack", "Automation Science",  90,  90),
         make_minimal_line("logistic-science-pack",   "Logistic Science",    90,  72),
         make_minimal_line("chemical-science-pack",   "Chemical Science",    90,  40),
-        make_minimal_line("military-science-pack",   "Military Science (WIP)", 60, 60, wip=True),
+        make_minimal_line("military-science-pack",   "Military Science",    60,  60, wip=True),
+        # Smelting group — populates a second sticky header
+        make_minimal_line("iron-plate",              "Iron Smelting",      600, 600, machine="electric-furnace"),
+        make_minimal_line("copper-plate",            "Copper Smelting",    600, 480, machine="electric-furnace"),
+        # Circuits group — third sticky header
+        make_minimal_line("electronic-circuit",      "Green Circuits",     120, 120),
+        make_minimal_line("advanced-circuit",        "Red Circuits",        60,  60),
     ]
     state["locations"] = [_loc("nauvis", "Nauvis", lines=lines)]
     return state
+
+
+def make_state_lines_filtered() -> dict:
+    """Same as lines_statuses but with the search box pre-populated to
+    demonstrate the filtered-view caption ('N of M')."""
+    return make_state_lines_statuses()
 
 
 def make_state_with_bottleneck() -> dict:
@@ -730,6 +765,8 @@ SECTION_SCENARIOS = [
     ("tab__chat.png",                       make_state_chat,             ".tab-panel.active",  "chat",     False,  None),
     ("light__tab-lines-collapsed.png",      make_state_lines_statuses,   ".tab-panel.active",  "lines",    True,   None),
     ("light__section-science-vanilla.png",  make_state_science_vanilla,  ".science-section",   "overview", True,   None),
+    ("section__lines-toolbar.png",          make_state_lines_statuses,   ".lines-toolbar",     "lines",    False,  None),
+    ("tab__lines-filtered.png",             make_state_lines_statuses,   ".tab-panel.active",  "lines",    False,  None, ("#lines-search", "science")),
 ]
 
 
@@ -1017,8 +1054,12 @@ README_SCENARIOS = [
 # ── Playwright helpers ────────────────────────────────────────────────────────
 
 async def capture_section(context, state, selector, tab, out_path,
-                           light_theme=False, url_suffix="", pre_click=None):
-    """Render state, navigate to tab, and screenshot the first matching element."""
+                           light_theme=False, url_suffix="", pre_click=None,
+                           pre_fill=None):
+    """Render state, navigate to tab, and screenshot the first matching element.
+
+    pre_click: (selector,) click before screenshot.
+    pre_fill:  (input_selector, value) — fill an input + dispatch input event."""
     html = build_html(state, light_theme=light_theme)
     with tempfile.NamedTemporaryFile(
         suffix=".html", mode="w", encoding="utf-8", delete=False
@@ -1034,6 +1075,13 @@ async def capture_section(context, state, selector, tab, out_path,
         if pre_click:
             await page.locator(pre_click).first.click()
             await page.wait_for_timeout(150)
+        if pre_fill:
+            sel, value = pre_fill
+            await page.fill(sel, value)
+            await page.wait_for_timeout(200)
+            # Blur so the focus ring doesn't render in the screenshot.
+            await page.evaluate(f"document.querySelector({sel!r})?.blur()")
+            await page.wait_for_timeout(100)
         await page.locator(selector).first.screenshot(path=out_path)
         await page.close()
     finally:
@@ -1101,13 +1149,17 @@ async def run_quality_combinations(context):
 
 async def run_sections(context):
     total = 0
-    for filename, state_factory, selector, tab, light_theme, pre_click in SECTION_SCENARIOS:
+    for entry in SECTION_SCENARIOS:
+        # Optional 7th element: pre_fill (input_selector, value)
+        filename, state_factory, selector, tab, light_theme, pre_click = entry[:6]
+        pre_fill = entry[6] if len(entry) > 6 else None
         state    = state_factory()
         out_path = os.path.join(SCREENSHOTS_DIR, filename)
         theme_tag = " [light]" if light_theme else ""
         try:
             await capture_section(context, state, selector, tab, out_path,
-                                   light_theme=light_theme, pre_click=pre_click)
+                                   light_theme=light_theme, pre_click=pre_click,
+                                   pre_fill=pre_fill)
             total += 1
             print(f"  section  {filename}{theme_tag}")
         except Exception as exc:

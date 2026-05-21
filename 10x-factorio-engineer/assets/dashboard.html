@@ -450,6 +450,59 @@ font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
 letter-spacing: .05em; text-transform: uppercase; cursor: pointer; transition: background .12s, color .12s; }
 .loc-btn:hover:not(.active) { background: var(--border); color: var(--text); }
 .loc-btn.active { background: var(--bg-input); color: var(--accent); border-color: var(--accent); border-bottom: 2px solid var(--accent); }
+.loc-btn-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+color: var(--text-dim); margin-left: 4px; letter-spacing: 0; }
+.loc-btn.active .loc-btn-count { color: var(--accent); opacity: .8; }
+/* ── Lines toolbar (search + status filters + expand-all) ── */
+.lines-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.lines-search-wrap { position: relative; flex: 1 1 220px; min-width: 180px; max-width: 360px; }
+.lines-search { width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+border-radius: 3px; color: var(--text); font-family: 'Barlow Condensed', sans-serif;
+font-size: 13px; padding: 4px 26px 4px 10px; height: 28px; letter-spacing: .02em; }
+.lines-search::placeholder { color: var(--text-dim); }
+.lines-search:focus { outline: none; border-color: var(--accent); }
+.lines-search-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+background: transparent; border: none; color: var(--text-dim);
+width: 20px; height: 20px; padding: 0; font-size: 14px;
+display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.lines-search-clear:hover { color: var(--text); background: var(--border); border-radius: 2px; }
+.lines-filter-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.filter-chip { background: var(--bg-input); border: 1px solid var(--border);
+color: var(--text-muted); border-radius: 3px; padding: 3px 9px; height: 28px;
+font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
+letter-spacing: .05em; text-transform: uppercase; cursor: pointer;
+transition: background .12s, color .12s, border-color .12s;
+display: inline-flex; align-items: center; gap: 5px; }
+.filter-chip:hover:not(.active) { background: var(--border); color: var(--text); }
+.filter-chip.active { background: var(--bg-input); color: var(--accent); border-color: var(--accent); }
+.filter-chip-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+color: var(--text-dim); letter-spacing: 0; }
+.filter-chip.active .filter-chip-count { color: var(--accent); opacity: .8; }
+.lines-count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
+margin-left: auto; white-space: nowrap; }
+/* ── Sticky group header ── */
+.lines-group-header { position: sticky; top: 0; z-index: 2; background: var(--bg);
+margin: 12px 0 8px; padding: 4px 0;
+display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.lines-group-header:first-child { margin-top: 0; }
+.lines-group-header .group-label { margin: 0; padding-bottom: 4px; flex: 1; }
+.lines-group-count { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+color: var(--text-dim); letter-spacing: 0; padding-bottom: 4px;
+border-bottom: 1px solid var(--border-sub); }
+/* ── Line card status dot + location pill ── */
+.card-status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+margin-right: 6px; vertical-align: middle; flex-shrink: 0; }
+.card-status-dot.ok   { background: var(--ok); }
+.card-status-dot.warn { background: var(--warn); }
+.card-status-dot.bad  { background: var(--bad); }
+.card-status-dot.wip  { background: transparent; border: 1.5px dashed var(--warn); }
+.card-loc-pill { font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 500;
+color: var(--text-dim); background: var(--bg-input);
+border: 1px solid var(--border-sub); border-radius: 2px;
+padding: 1px 5px; margin-left: 6px; letter-spacing: .02em;
+text-transform: uppercase; vertical-align: middle; }
+/* ── Lines empty (filtered) ── */
+.lines-empty-filter { text-align: center; padding: 24px 0; color: var(--text-dim); font-size: 13px; }
 /* ── Science location chips ── */
 .sci-loc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .sci-loc-chip  { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
@@ -718,6 +771,8 @@ let activeLocationIdx = 0;
 let expandedCards = new Set();
 let storageMode = 'checking';
 let chatSending = false;
+let linesSearch = '';
+let linesStatusFilter = 'all'; // 'all' | 'attention' | 'warn' | 'wip' | 'stale' | 'capped'
 function currentLoc() {
 return STATE.locations?.[activeLocationIdx] ?? STATE.locations?.[0] ?? makeLocation('nauvis', 'planet');
 }
@@ -893,7 +948,9 @@ const planets   = locs.filter(l => l.type === 'planet');
 const platforms = locs.filter(l => l.type === 'space-platform');
 const btnFor = (loc) => {
 const i = locs.indexOf(loc);
-return `<button class="loc-btn${i === activeLocationIdx ? ' active' : ''}" data-locidx="${i}">${esc(loc.label)}</button>`;
+const n = loc.lines?.length ?? 0;
+const count = n ? ` <span class="loc-btn-count">${n}</span>` : '';
+return `<button class="loc-btn${i === activeLocationIdx ? ' active' : ''}" data-locidx="${i}">${esc(loc.label)}${count}</button>`;
 };
 const planetBtns   = planets.map(btnFor).join('');
 const platformBtns = platforms.map(btnFor).join('');
@@ -1222,15 +1279,37 @@ if (!busSection && !powerSection) return `
 </div>`;
 return powerSection + busSection;
 }
-function renderLinesTab() {
-const loc = currentLoc();
-const lines = loc.lines ?? [];
-if (!lines.length) return `
-<div class="empty-state">
-<p>No production lines yet.</p>
-<p>Ask Claude to plan one in the Chat tab.</p>
-</div>`;
-const idxMap = new Map(lines.map((l, i) => [l, i]));
+// Status bucket for a line (used by status filter + inline dot).
+// 'wip' takes precedence over rate-based status; 'bad'/'warn'/'ok' fall from %.
+function lineStatusBucket(line) {
+if (line.wip) return 'wip';
+const actual = line.effective_rate ?? line.target_rate ?? 0;
+const p = pct(actual, line.target_rate ?? 0);
+return statusClass(p);
+}
+function lineMatchesSearch(line, query) {
+if (!query) return true;
+const q = query.toLowerCase();
+const hay = [
+line.label ?? '',
+label(line.item),
+line.item,
+...(line.cli_result?.production_steps ?? []).map(s => machineLabel(s.machine)),
+...(line.cli_result?.production_steps ?? []).map(s => label(s.recipe)),
+].join('|').toLowerCase();
+return hay.includes(q);
+}
+function lineMatchesStatusFilter(line, filter) {
+if (filter === 'all') return true;
+if (filter === 'attention') return lineStatusBucket(line) === 'bad';
+if (filter === 'warn')      return lineStatusBucket(line) === 'warn';
+if (filter === 'wip')       return !!line.wip;
+if (filter === 'stale')     return lineStaleTechs(line).length > 0;
+if (filter === 'capped')    return line.cli_result?.research_prod_capped === true;
+return true;
+}
+function bucketLines(lines) {
+// Same grouping rule the dashboard always used (Science / Smelting / Circuits / Other).
 const sciLines    = lines.filter(l =>  SCIENCE_ITEM_SET.has(l.item));
 const nonSciLines = lines.filter(l => !SCIENCE_ITEM_SET.has(l.item));
 const groups = [['Science', sciLines], ['Smelting', []], ['Circuits', []], ['Other', []]];
@@ -1240,13 +1319,81 @@ if (machine && SMELTING_MACHINES.has(machine)) groups[1][1].push(line);
 else if (CIRCUIT_ITEMS.has(line.item))          groups[2][1].push(line);
 else                                             groups[3][1].push(line);
 }
-let html = '';
-for (const [name, lines] of groups) {
-if (!lines.length) continue;
-html += `<div class="group-label" style="margin:12px 0 8px">${name}</div>`;
-html += lines.map(l => renderLineCard(l, idxMap.get(l))).join('');
+return groups;
 }
-return html;
+function renderLinesTab() {
+const loc = currentLoc();
+const lines = loc.lines ?? [];
+if (!lines.length) return `
+<div class="empty-state">
+<p>No production lines yet.</p>
+<p>Ask Claude to plan one in the Chat tab.</p>
+</div>`;
+const idxMap = new Map(lines.map((l, i) => [l, i]));
+// Status filter counts (over all lines, ignoring the search box — chips
+// are reset-to-all switches, not search refinements).
+const counts = {
+all:       lines.length,
+attention: lines.filter(l => lineStatusBucket(l) === 'bad').length,
+warn:      lines.filter(l => lineStatusBucket(l) === 'warn').length,
+wip:       lines.filter(l => !!l.wip).length,
+stale:     lines.filter(l => lineStaleTechs(l).length > 0).length,
+capped:    lines.filter(l => l.cli_result?.research_prod_capped === true).length,
+};
+const chip = (key, label) => {
+const n = counts[key];
+if (key !== 'all' && n === 0) return '';
+return `<button class="filter-chip${linesStatusFilter === key ? ' active' : ''}" data-status="${key}">
+${label}<span class="filter-chip-count">${n}</span>
+</button>`;
+};
+// All cards collapsed → button reads "Expand all"; otherwise "Collapse all".
+const anyExpanded = expandedCards.size > 0;
+const toggleAllLabel = anyExpanded ? '▾ Collapse all' : '▸ Expand all';
+const filtered = lines.filter(l =>
+lineMatchesSearch(l, linesSearch) && lineMatchesStatusFilter(l, linesStatusFilter),
+);
+const toolbar = `
+<div class="lines-toolbar">
+<div class="lines-search-wrap">
+<input type="text" class="lines-search" id="lines-search"
+placeholder="Search lines… (press / to focus)"
+value="${esc(linesSearch)}" />
+${linesSearch ? '<button class="lines-search-clear" id="lines-search-clear" title="Clear (Esc)">×</button>' : ''}
+</div>
+<div class="lines-filter-chips">
+${chip('all',       'All')}
+${chip('attention', 'Bad')}
+${chip('warn',      'Warn')}
+${chip('wip',       'WIP')}
+${chip('stale',     'Stale')}
+${chip('capped',    '@300%')}
+</div>
+<button class="btn" id="btn-toggle-all">${toggleAllLabel}</button>
+${linesSearch || linesStatusFilter !== 'all'
+? `<span class="lines-count">${filtered.length} of ${lines.length}</span>`
+: `<span class="lines-count">${lines.length} ${lines.length === 1 ? 'line' : 'lines'}</span>`}
+</div>`;
+if (!filtered.length) {
+return toolbar + `<div class="lines-empty-filter">
+No lines match the current filter${linesSearch ? ` "${esc(linesSearch)}"` : ''}.
+</div>`;
+}
+const groups = bucketLines(filtered);
+const totalsByGroup = bucketLines(lines);
+const totalsMap = Object.fromEntries(totalsByGroup.map(([name, ls]) => [name, ls.length]));
+let body = '';
+for (const [name, groupLines] of groups) {
+if (!groupLines.length) continue;
+const total = totalsMap[name] ?? groupLines.length;
+const countTxt = total === groupLines.length ? `${total}` : `${groupLines.length} / ${total}`;
+body += `<div class="lines-group-header">
+<div class="group-label">${name}</div>
+<span class="lines-group-count">${countTxt}</span>
+</div>`;
+body += groupLines.map(l => renderLineCard(l, idxMap.get(l))).join('');
+}
+return toolbar + body;
 }
 function renderLineCard(line, idx) {
 const actual = line.effective_rate ?? line.target_rate ?? 0;
@@ -1457,14 +1604,23 @@ const chips = [
 stale.length ? `<span class="card-chip stale" title="Research changed since this line was planned: ${stale.map(t => PRODUCTIVITY_RESEARCH[t]?.label ?? t).join(', ')}">⟳ stale</span>` : '',
 cappedHere    ? `<span class="card-chip capped" title="A step on this line is at the +300% prod cap; more research levels won't reduce its machine count.">@300% cap</span>` : '',
 ].filter(Boolean).join(' ');
+// Hide subtitle when label is just the humanized item-id (the common case).
+const titleText   = line.label ?? label(line.item);
+const subtitleTxt = label(line.item);
+const subtitle    = titleText.trim().toLowerCase() === subtitleTxt.trim().toLowerCase()
+? ''
+: `<span class="card-subtitle">${esc(subtitleTxt)}</span>`;
+// Inline status dot — same palette as the left-border, but scannable in a tall list.
+const dotTitle = line.wip ? 'WIP' : cardClass === 'ok' ? 'On target' : cardClass === 'warn' ? 'Below target' : 'Bad';
+const statusDot = `<span class="card-status-dot ${cardClass}" title="${dotTitle}"></span>`;
 return `
 <div class="line-card ${cardClass}">
 <div class="card-header ${cardClass}" data-card="${idx}" aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'}">
 <div class="card-header-left">
 <span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
 <div class="card-title-group">
-<span class="card-title">${esc(line.label ?? label(line.item))}${line.wip ? '<span class="wip-badge">WIP</span>' : ''}${chips ? ` ${chips}` : ''}</span>
-<span class="card-subtitle">${esc(label(line.item))}</span>
+<span class="card-title">${statusDot}${esc(titleText)}${line.wip ? '<span class="wip-badge">WIP</span>' : ''}${chips ? ` ${chips}` : ''}</span>
+${subtitle}
 </div>
 </div>
 <div class="card-header-right">
@@ -1555,6 +1711,47 @@ const idx = +hdr.dataset.card;
 expandedCards.has(idx) ? expandedCards.delete(idx) : expandedCards.add(idx);
 render();
 }));
+// ── Lines tab toolbar ──
+const linesSearchEl = document.getElementById('lines-search');
+if (linesSearchEl) {
+linesSearchEl.addEventListener('input', () => {
+linesSearch = linesSearchEl.value;
+render();
+// After re-render, find the new input and restore focus + caret position.
+const fresh = document.getElementById('lines-search');
+if (fresh) {
+fresh.focus();
+const pos = fresh.value.length;
+fresh.setSelectionRange(pos, pos);
+}
+});
+linesSearchEl.addEventListener('keydown', e => {
+if (e.key === 'Escape') {
+linesSearch = '';
+render();
+}
+});
+}
+document.getElementById('lines-search-clear')?.addEventListener('click', () => {
+linesSearch = '';
+render();
+});
+document.querySelectorAll('.filter-chip[data-status]').forEach(btn =>
+btn.addEventListener('click', () => {
+const key = btn.dataset.status;
+linesStatusFilter = linesStatusFilter === key ? 'all' : key;
+render();
+}));
+document.getElementById('btn-toggle-all')?.addEventListener('click', () => {
+const loc = currentLoc();
+const lines = loc.lines ?? [];
+if (expandedCards.size > 0) {
+expandedCards = new Set();
+} else {
+expandedCards = new Set(lines.map((_, i) => i));
+}
+render();
+});
 document.getElementById('research-toggle')?.addEventListener('click', () => {
 researchOpen = !researchOpen;
 render();
@@ -1712,6 +1909,16 @@ if (tabParam && ['overview','lines','logistics','issues','chat'].includes(tabPar
 if (params.get('expand') === 'all') {
 expandedCards = new Set((currentLoc().lines ?? []).map((_, i) => i));
 }
+// Global `/` to focus the Lines tab search box. Switches to the Lines tab if
+// we're elsewhere. Ignored when typing in another input.
+document.addEventListener('keydown', e => {
+if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+const tag = (e.target?.tagName || '').toLowerCase();
+if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
+e.preventDefault();
+if (activeTab !== 'lines') { activeTab = 'lines'; render(); }
+document.getElementById('lines-search')?.focus();
+});
 render();
 })();
 </script>
