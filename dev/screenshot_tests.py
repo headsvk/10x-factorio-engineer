@@ -568,16 +568,29 @@ def make_state_overview() -> dict:
         {"item": "iron-plate",   "rate": 2400},
         {"item": "copper-plate", "rate": 1800},
     ]
-    line = make_minimal_line(
+
+    def _lp(item, label, target, eff, mw):
+        l = make_minimal_line(item, label, target, eff)
+        l["cli_result"]["total_power_mw"] = mw
+        l["cli_result"]["total_power_mw_ceil"] = mw
+        return l
+
+    circuits = make_minimal_line(
         "electronic-circuit", "Green Circuits", 120, 120,
         bus_inputs={"iron-plate": 720, "copper-plate": 540},
     )
-    # Give the line non-zero power so the ⚡ Power section renders
-    line["cli_result"]["total_power_mw"]      = 2.4
-    line["cli_result"]["total_power_mw_ceil"] = 2.4
+    circuits["cli_result"]["total_power_mw"]      = 2.4
+    circuits["cli_result"]["total_power_mw_ceil"] = 2.4
+
     state["locations"] = [_loc(
         "nauvis", "Nauvis",
-        lines=[line],
+        lines=[
+            circuits,
+            _lp("iron-plate",            "Iron Smelting",   600, 600, 4.8),
+            _lp("copper-plate",          "Copper Smelting", 480, 480, 3.6),
+            _lp("processing-unit",       "Processing Units", 20,  20, 5.7),
+            _lp("steel-plate",           "Steel Smelting",  120, 120, 1.4),
+        ],
         bus_items=bus_items,
     )]
     return state
@@ -767,6 +780,7 @@ SECTION_SCENARIOS = [
     ("light__section-science-vanilla.png",  make_state_science_vanilla,  ".science-section",   "overview", True,   None),
     ("section__lines-toolbar.png",          make_state_lines_statuses,   ".lines-toolbar",     "lines",    False,  None),
     ("tab__lines-filtered.png",             make_state_lines_statuses,   ".tab-panel.active",  "lines",    False,  None, ("#lines-search", "science")),
+    ("section__power-expanded.png",         make_state_overview,         ".power-overview",    "overview", False,  "#power-overview"),
 ]
 
 

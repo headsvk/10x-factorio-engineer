@@ -35,27 +35,31 @@
       font-family: 'Barlow Condensed', system-ui, sans-serif;
     }
 
-    /* ── Light theme ── */
+    /* ── Light theme ──
+     * --warn: amber (d97706), distinct from --accent (b45309). The previous
+     *   shared value made "warning" indistinguishable from brand color.
+     * --bg-input: e6dcc0, darker than before so empty progress tracks
+     *   have visible contrast against --bg (faf9f2). */
     [data-theme="light"] {
       --bg:           #faf9f2;
       --bg-card:      #fffcf0;
-      --bg-input:     #f0e8d5;
-      --border:       #e8dfc5;
-      --border-sub:   #f0e8d5;
+      --bg-input:     #e6dcc0;
+      --border:       #d4c89e;
+      --border-sub:   #ebe2c6;
       --text:         #1c1608;
       --text-muted:   #6b5f42;
       --text-dim:     #7a6d4d;
       --accent:       #b45309;
       --accent-hover: #92400e;
       --ok:           #16a34a;
-      --ok-bg:        rgba(22,163,74,.07);
-      --ok-border:    rgba(22,163,74,.22);
-      --warn:         #b45309;
-      --warn-bg:      rgba(180,83,9,.07);
-      --warn-border:  rgba(180,83,9,.22);
+      --ok-bg:        rgba(22,163,74,.10);
+      --ok-border:    rgba(22,163,74,.30);
+      --warn:         #d97706;
+      --warn-bg:      rgba(217,119,6,.10);
+      --warn-border:  rgba(217,119,6,.30);
       --bad:          #dc2626;
-      --bad-bg:       rgba(220,38,38,.07);
-      --bad-border:   rgba(220,38,38,.2);
+      --bad-bg:       rgba(220,38,38,.10);
+      --bad-border:   rgba(220,38,38,.28);
     }
 
     /* ── Respect OS preference when no manual override ── */
@@ -63,23 +67,23 @@
       :root:not([data-theme]) {
         --bg:           #faf9f2;
         --bg-card:      #fffcf0;
-        --bg-input:     #f0e8d5;
-        --border:       #e8dfc5;
-        --border-sub:   #f0e8d5;
+        --bg-input:     #e6dcc0;
+        --border:       #d4c89e;
+        --border-sub:   #ebe2c6;
         --text:         #1c1608;
         --text-muted:   #6b5f42;
         --text-dim:     #7a6d4d;
         --accent:       #b45309;
         --accent-hover: #92400e;
         --ok:           #16a34a;
-        --ok-bg:        rgba(22,163,74,.07);
-        --ok-border:    rgba(22,163,74,.22);
-        --warn:         #b45309;
-        --warn-bg:      rgba(180,83,9,.07);
-        --warn-border:  rgba(180,83,9,.22);
+        --ok-bg:        rgba(22,163,74,.10);
+        --ok-border:    rgba(22,163,74,.30);
+        --warn:         #d97706;
+        --warn-bg:      rgba(217,119,6,.10);
+        --warn-border:  rgba(217,119,6,.30);
         --bad:          #dc2626;
-        --bad-bg:       rgba(220,38,38,.07);
-        --bad-border:   rgba(220,38,38,.2);
+        --bad-bg:       rgba(220,38,38,.10);
+        --bad-border:   rgba(220,38,38,.28);
       }
     }
 
@@ -280,6 +284,7 @@
     .logi-table th, .logi-table td { padding: 5px 12px 5px 0; }
     .logi-table th:first-child, .logi-table td:first-child { padding-left: 10px; }
     .logi-table tbody tr:hover { background: var(--bg-input); }
+    .logi-table tbody tr.logi-row { cursor: pointer; }
     .empty-state code { font-family: 'JetBrains Mono', monospace; font-size: 11px;
                         background: var(--bg-input); border: 1px solid var(--border-sub);
                         border-radius: 2px; padding: 0 4px; color: var(--text-muted); }
@@ -327,18 +332,33 @@
                   text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
     .power-badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
                    opacity: .7; white-space: nowrap; }
-    .power-overview { display: flex; align-items: center; justify-content: space-between;
-                      background: var(--bg-card); border: 1px solid var(--border-sub);
+    .power-overview { background: var(--bg-card); border: 1px solid var(--border-sub);
                       border-left: 3px solid #c8a840; border-radius: 4px;
                       padding: 10px 14px; margin-bottom: 10px; }
+    .power-overview--clickable { cursor: pointer; user-select: none; }
+    .power-overview--clickable:hover { background: var(--bg-input); }
+    .power-overview-header { display: flex; align-items: center; justify-content: space-between; }
     .power-overview-label { font-family: 'Barlow Condensed', sans-serif; font-size: 13px;
                             font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
                             color: #c8a840; }
+    .power-chev { color: var(--text-dim); font-size: 10px; margin-right: 2px; }
     .power-overview-values { display: flex; align-items: baseline; gap: 6px; }
     .power-exact { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
                    color: var(--text); }
     .power-ceil-note { font-family: 'JetBrains Mono', monospace; font-size: 11px;
                        color: var(--text-dim); }
+    .power-breakdown { margin-top: 10px; padding-top: 10px;
+                       border-top: 1px solid var(--border-sub);
+                       display: flex; flex-direction: column; gap: 4px; }
+    .power-line-row { display: grid; grid-template-columns: 1fr 120px 80px;
+                      align-items: center; gap: 10px; }
+    .power-line-name { font-family: 'Barlow Condensed', sans-serif; font-size: 13px;
+                       color: var(--text); white-space: nowrap; overflow: hidden;
+                       text-overflow: ellipsis; }
+    .power-line-bar { height: var(--bar-unit); background: var(--bg-input); border-radius: 2px; overflow: hidden; }
+    .power-line-bar-fill { height: 100%; background: #c8a840; opacity: .55; transition: width .4s; }
+    .power-line-val { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+                      color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
     .ext-link { color: var(--text-dim); font-size: 11px; text-decoration: none; line-height: 1; }
     .ext-link:hover { color: var(--text-muted); }
 
@@ -843,6 +863,7 @@ let storageMode = 'checking';
 let chatSending = false;
 let linesSearch = '';
 let linesStatusFilter = 'all'; // 'all' | 'attention' | 'warn' | 'wip' | 'stale' | 'capped'
+let powerExpanded = false;
 
 function currentLoc() {
   return STATE.locations?.[activeLocationIdx] ?? STATE.locations?.[0] ?? makeLocation('nauvis', 'planet');
@@ -1323,12 +1344,12 @@ function renderLogisticsTab() {
     const s = supply[item] ?? 0;
     const d = demand[item] ?? 0;
     const net = s - d;
-    const netCol = net >= 0 ? 'var(--ok)' : 'var(--bad)';
+    const netCol = net > 0 ? 'var(--ok)' : net < 0 ? 'var(--bad)' : 'var(--text-muted)';
     const sign = net >= 0 ? '+' : '';
     const tagged = (s > 0 && d === 0) ? '<span style="color:var(--text-dim);font-size:10px;margin-left:4px">supply only</span>'
                   : (d > 0 && s === 0) ? '<span style="color:var(--text-dim);font-size:10px;margin-left:4px">demand only</span>'
                   : '';
-    return `<tr>
+    return `<tr class="logi-row" data-jump="${esc(label(item))}" title="Click to find lines for ${esc(label(item))}">
       <td class="name-col">${esc(label(item))}${tagged}</td>
       <td class="r">${s > 0 ? fmtN(s) : '—'}</td>
       <td class="r">${d > 0 ? fmtN(d) : '—'}</td>
@@ -1358,7 +1379,7 @@ function renderTabs() {
     ['overview',  'Overview'],
     ['lines',     `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
     ['logistics', `Logistics${logiCount ? ` (${logiCount})` : ''}`],
-    ['issues',    `Actions${loc.next_steps?.length ? ` (${loc.next_steps.length})` : ''}`],
+    ['issues',    `Steps${loc.next_steps?.length ? ` (${loc.next_steps.length})` : ''}`],
     ['chat',      'Chat'],
   ];
   return `
@@ -1378,14 +1399,43 @@ function renderOverview() {
   const locLines = loc.lines ?? [];
   const totalPowCeilMw = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
   const totalPowMw     = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
-  const powerSection = totalPowCeilMw > 0 ? `
-    <div class="power-overview">
-      <div class="power-overview-label">⚡ Power</div>
-      <div class="power-overview-values">
-        <span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
-        <span class="power-ceil-note">/ ${fmtPower(totalPowCeilMw * 1000)} (ceil)</span>
-      </div>
-    </div>` : '';
+
+  let powerSection = '';
+  if (totalPowCeilMw > 0) {
+    // Per-line breakdown (descending by ceil power; lines with 0 power skipped).
+    const linesWithPow = locLines
+      .map(l => ({
+        l,
+        mw:     l.cli_result?.total_power_mw ?? 0,
+        mwCeil: l.cli_result?.total_power_mw_ceil ?? 0,
+      }))
+      .filter(x => x.mwCeil > 0)
+      .sort((a, b) => b.mwCeil - a.mwCeil);
+    const canExpand = linesWithPow.length > 0;
+    const chev = powerExpanded ? '▼' : '▶';
+    const breakdown = (powerExpanded && canExpand) ? `
+      <div class="power-breakdown">
+        ${linesWithPow.map(({l, mw, mwCeil}) => {
+          const pctOfCeil = totalPowCeilMw > 0 ? (mwCeil / totalPowCeilMw) * 100 : 0;
+          return `<div class="power-line-row">
+            <span class="power-line-name">${esc(l.label ?? label(l.item))}</span>
+            <div class="power-line-bar"><div class="power-line-bar-fill" style="width:${pctOfCeil}%"></div></div>
+            <span class="power-line-val">${fmtPower(mwCeil * 1000)}</span>
+          </div>`;
+        }).join('')}
+      </div>` : '';
+    powerSection = `
+      <div class="power-overview${canExpand ? ' power-overview--clickable' : ''}" id="power-overview">
+        <div class="power-overview-header">
+          <div class="power-overview-label">${canExpand ? `<span class="power-chev">${chev}</span> ` : ''}⚡ Power</div>
+          <div class="power-overview-values">
+            <span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
+            <span class="power-ceil-note">/ ${fmtPower(totalPowCeilMw * 1000)} (ceil)</span>
+          </div>
+        </div>
+        ${breakdown}
+      </div>`;
+  }
 
   if (!busSection && !powerSection) return `
     <div class="empty-state">
@@ -1916,6 +1966,21 @@ function bindEvents() {
     render();
   });
 
+  // ── Logistics ↔ Lines cross-nav ──
+  document.querySelectorAll('.logi-row[data-jump]').forEach(row =>
+    row.addEventListener('click', () => {
+      linesSearch = row.dataset.jump;
+      linesStatusFilter = 'all';
+      activeTab = 'lines';
+      render();
+    }));
+
+  // ── Power overview expand/collapse ──
+  document.getElementById('power-overview')?.addEventListener('click', () => {
+    powerExpanded = !powerExpanded;
+    render();
+  });
+
   document.getElementById('research-toggle')?.addEventListener('click', () => {
     researchOpen = !researchOpen;
     render();
@@ -2098,15 +2163,37 @@ document.getElementById('import-apply').addEventListener('click', () => {
     expandedCards = new Set((currentLoc().lines ?? []).map((_, i) => i));
   }
 
-  // Global `/` to focus the Lines tab search box. Switches to the Lines tab if
-  // we're elsewhere. Ignored when typing in another input.
+  // Global keyboard shortcuts. Ignored when typing in an input/textarea.
+  //   /      focus the Lines tab search box (switches to Lines if elsewhere)
+  //   n / j  scroll-into-view + highlight next visible card
+  //   p / k  same, previous
   document.addEventListener('keydown', e => {
-    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (e.target?.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
-    e.preventDefault();
-    if (activeTab !== 'lines') { activeTab = 'lines'; render(); }
-    document.getElementById('lines-search')?.focus();
+
+    if (e.key === '/') {
+      e.preventDefault();
+      if (activeTab !== 'lines') { activeTab = 'lines'; render(); }
+      document.getElementById('lines-search')?.focus();
+      return;
+    }
+    if ((e.key === 'n' || e.key === 'j' || e.key === 'p' || e.key === 'k') && activeTab === 'lines') {
+      e.preventDefault();
+      const cards = [...document.querySelectorAll('.card-header[data-card]')];
+      if (!cards.length) return;
+      const dir = (e.key === 'n' || e.key === 'j') ? 1 : -1;
+      const tops = cards.map(c => c.getBoundingClientRect().top + window.scrollY);
+      const cy = window.scrollY + 24; // a few pixels into the viewport
+      // Index of the card that's currently at-or-just-above the viewport top.
+      let cur = -1;
+      for (let i = 0; i < tops.length; i++) {
+        if (tops[i] <= cy + 4) cur = i;
+        else break;
+      }
+      const target = Math.max(0, Math.min(cards.length - 1, cur + dir));
+      cards[target]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   });
 
   render();
