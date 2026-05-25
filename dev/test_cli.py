@@ -3211,6 +3211,21 @@ class TestPlanetMachineUnlocks(unittest.TestCase):
         ec_step = next(st for st in s.steps.values() if st["recipe"] == "electronic-circuit")
         self.assertEqual(ec_step["machine"], "electromagnetic-plant")
 
+    def test_fulgora_sulfuric_acid_from_pumped_heavy_oil(self):
+        # Fulgora has no crude oil; sulfuric-acid needs sulfur -> petroleum-gas,
+        # which must be cracked down from offshore-pumped heavy-oil rather than
+        # produced from crude-oil in a refinery.
+        d = _DATA["fulgora"]
+        s = _solver("fulgora")
+        s.solve("sulfuric-acid", Fraction(60))
+        s.resolve_oil(d["data"])  # must not raise about crude-oil
+        recipes = {st["recipe"] for st in s.steps.values()}
+        self.assertIn("light-oil-cracking", recipes)
+        self.assertIn("heavy-oil-cracking", recipes)
+        self.assertNotIn("advanced-oil-processing", recipes)
+        self.assertGreater(s.raw_resources.get("heavy-oil", Fraction(0)), 0)
+        self.assertNotIn("crude-oil", s.raw_resources)
+
     def test_vulcanus_foundry_still_used(self):
         # tungsten-plate is metallurgy → must stay on foundry
         d = _DATA["vulcanus"]

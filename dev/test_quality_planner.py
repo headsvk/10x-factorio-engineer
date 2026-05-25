@@ -429,10 +429,11 @@ class TestPlanetsFlag(unittest.TestCase):
         out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("plastic-bar", recipes)
-        # Coal comes through mined-recycle, not asteroid.
+        # Coal (the solid ingredient) carries quality, via mined-recycle.
         self.assertIn("Coal", [qp._humanize(k) for k in out["mined_input"]])
-        # Crude-oil is a fluid raw, quality-transparent.
-        self.assertIn("crude-oil", out["fluid_input"])
+        # Petroleum-gas is a quality-irrelevant reagent fluid sourced at normal
+        # quality (its crude-oil sub-chain is a normal-production concern).
+        self.assertIn("petroleum-gas", out["fluid_input"])
 
     def test_vulcanus_unlocks_tungsten_plate(self):
         out = qp.plan("tungsten-plate", 60, _data(), planets=["vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -454,7 +455,9 @@ class TestPlanetsFlag(unittest.TestCase):
         out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("processing-unit", recipes)
-        self.assertIn("sulfuric-acid", recipes)
+        # sulfuric-acid is a quality-irrelevant reagent fluid → sourced at
+        # normal quality (a fluid input), not built as a quality stage.
+        self.assertIn("sulfuric-acid", out["fluid_input"])
 
     def test_artillery_shell_with_nauvis_vulcanus(self):
         out = qp.plan("artillery-shell", 60, _data(), planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -580,11 +583,14 @@ class TestLDSShuffle(unittest.TestCase):
 class TestOtherPlanetUnlocks(unittest.TestCase):
 
     def test_fulgora_unlocks_scrap(self):
-        # electrolyte → stone + holmium-ore + heavy-oil (fulgora offshore).
-        # With --planets fulgora, holmium-ore and stone are unlocked as mined raws.
+        # electrolyte → stone (solid) + heavy-oil + holmium-solution (fluids).
+        # The solid ingredient (stone) carries quality and routes as a mined
+        # raw; the reagent fluids (heavy-oil pumped on Fulgora, holmium-solution)
+        # are sourced at normal quality.
         out = qp.plan("electrolyte", 60, _data(), planets=["fulgora", "nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
-        self.assertIn("holmium-ore", out["mined_input"])
         self.assertIn("stone", out["mined_input"])
+        self.assertIn("heavy-oil", out["fluid_input"])
+        self.assertIn("holmium-solution", out["fluid_input"])
 
     def test_mined_recycle_stage_shape(self):
         out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -2996,6 +3002,282 @@ class TestCoProductDriven(unittest.TestCase):
             planets=["nauvis", "fulgora"], tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertIn("driver_overflow", out)
+
+
+# ---------------------------------------------------------------------------
+# Target-quality tier (sub-legendary goals)
+# ---------------------------------------------------------------------------
+
+class TestTargetQuality(unittest.TestCase):
+    """``target_tier`` lets the quality loops stop at a sub-legendary tier."""
+
+    def test_seed_vector_legendary_default(self):
+        # target_tier=4 (legendary): only V[4] is absorbing.
+        self.assertEqual(qp._seed_value_vector(4), [0.0, 0.0, 0.0, 0.0, 1.0])
+
+    def test_seed_vector_rare(self):
+        # target_tier=2 (rare): rare/epic/legendary all count as success.
+        self.assertEqual(qp._seed_value_vector(2), [0.0, 0.0, 1.0, 1.0, 1.0])
+
+    def test_seed_vector_uncommon(self):
+        self.assertEqual(qp._seed_value_vector(1), [0.0, 1.0, 1.0, 1.0, 1.0])
+
+    def test_lower_target_has_higher_yield(self):
+        # Reaching rare is strictly easier than reaching legendary, so the
+        # per-normal yield must be monotonically higher for lower targets.
+        y_rare, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=2,
+        )
+        y_epic, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=3,
+        )
+        y_leg, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=4,
+        )
+        self.assertGreater(y_rare, y_epic)
+        self.assertGreater(y_epic, y_leg)
+
+    def test_default_target_matches_explicit_legendary(self):
+        # Omitting target_tier must reproduce the legendary result exactly.
+        y_default, _ = qp.solve_mined_raw_self_recycle_loop(
+            "scrap", _data(), "legendary", 3,
+        )
+        y_leg, _ = qp.solve_mined_raw_self_recycle_loop(
+            "scrap", _data(), "legendary", 3, target_tier=4,
+        )
+        self.assertEqual(y_default, y_leg)
+
+    def test_plan_stamps_target_tier(self):
+        out = qp.plan(
+            "iron-plate", 60, _data(),
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertEqual(out["target"]["tier"], "rare")
+
+    def test_plan_rare_cheaper_than_legendary(self):
+        rare = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        leg = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        self.assertLess(rare["total_machine_count"], leg["total_machine_count"])
+
+    def test_self_recycle_target_respects_tier(self):
+        # superconductor self-recycles; rare must be cheaper than legendary.
+        rare = qp.plan(
+            "superconductor", 5, _data(), planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        leg = qp.plan(
+            "superconductor", 5, _data(), planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        self.assertEqual(rare["target"]["tier"], "rare")
+        self.assertLess(rare["total_machine_count"], leg["total_machine_count"])
+
+    def test_self_feed_target_shifts_q_star(self):
+        # pentapod-egg self-feeds; rare picks a lower craft tier than legendary.
+        y_rare, plan_rare = qp.solve_self_feed_target_loop(
+            "pentapod-egg", _data(), machine_slots=4, machine_speed_eff=2.0,
+            inherent_prod=0.5, research_prod=0.0, module_quality="legendary",
+            quality_module_tier=3, target_tier=2,
+        )
+        y_leg, plan_leg = qp.solve_self_feed_target_loop(
+            "pentapod-egg", _data(), machine_slots=4, machine_speed_eff=2.0,
+            inherent_prod=0.5, research_prod=0.0, module_quality="legendary",
+            quality_module_tier=3, target_tier=4,
+        )
+        self.assertLess(plan_rare["q_star"], plan_leg["q_star"])
+        self.assertLessEqual(plan_rare["q_star"], 1)
+
+    def test_fulgora_sulfuric_acid_unlocked(self):
+        # Fulgora pumps heavy-oil offshore → sulfur → sulfuric-acid, so an
+        # accumulator (battery needs sulfuric-acid) must resolve on Fulgora
+        # alone without requiring Nauvis/Vulcanus.
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertEqual(out["target"]["item"], "accumulator")
+        self.assertGreater(out["total_machine_count"], 0.0)
+
+    def test_human_output_uses_target_tier_label(self):
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        text = qp.format_human(out)
+        self.assertIn("at tier rare", text)
+        # Output tier label is rare, never mislabelled legendary.
+        self.assertIn("rare ", text)
+        self.assertNotIn("legendary out", text)
+        self.assertNotIn("at tier legendary", text)
+
+
+# ---------------------------------------------------------------------------
+# Fulgora scrap-recycling quality source
+# ---------------------------------------------------------------------------
+
+class TestScrapSource(unittest.TestCase):
+
+    def test_cascade_reaches_basket_and_cascades(self):
+        casc = qp.build_scrap_cascade(_data())
+        da = casc["depth_amounts"]
+        # Direct basket item.
+        self.assertIn(1, da["battery"])
+        # Cascade item (scrap → iron-gear-wheel → iron-plate).
+        self.assertIn("iron-plate", da)
+        self.assertIn(2, da["iron-plate"])
+
+    def test_cascade_stops_at_ore(self):
+        # Recycling a plate back into ore is a strict downgrade and must not be
+        # treated as a scrap product.
+        casc = qp.build_scrap_cascade(_data())
+        self.assertNotIn("iron-ore", casc["depth_amounts"])
+        self.assertNotIn("copper-ore", casc["depth_amounts"])
+
+    def test_terminals_are_base_materials_not_assembled(self):
+        casc = qp.build_scrap_cascade(_data())
+        reach = set(casc["depth_amounts"])
+        fluids = qp.build_fluid_set(_data())
+        terms = qp.scrap_terminal_set(reach, "accumulator", _data(), fluids)
+        # Plates are ore-derived → scrap terminals.
+        self.assertIn("iron-plate", terms)
+        self.assertIn("copper-plate", terms)
+        # Battery is craftable from scrap plates + sulfuric-acid → not a terminal.
+        self.assertNotIn("battery", terms)
+
+    def test_scrap_yield_monotonic_in_tier(self):
+        casc = qp.build_scrap_cascade(_data())
+        y_rare = qp.scrap_target_yield("iron-plate", casc, 2, 3, "legendary")
+        y_epic = qp.scrap_target_yield("iron-plate", casc, 3, 3, "legendary")
+        y_leg = qp.scrap_target_yield("iron-plate", casc, 4, 3, "legendary")
+        self.assertGreater(y_rare, y_epic)
+        self.assertGreater(y_epic, y_leg)
+
+    def test_plan_auto_routes_scrap_on_fulgora(self):
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertIn("scrap", out["scrap_input"])
+        self.assertGreater(out["scrap_input"]["scrap"], 0.0)
+        # iron-plate is now scrap-sourced, so no iron-ore is imported.
+        self.assertNotIn("iron-ore", out.get("mined_input", {}))
+        scrap_stage = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
+        self.assertIn("iron-plate", scrap_stage["covered"])
+
+    def test_no_scrap_routing_off_fulgora(self):
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["nauvis"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertFalse(out.get("scrap_input"))
+
+
+# ---------------------------------------------------------------------------
+# Wrap-and-recycle shortcut (steel-chest / hazard-concrete trick)
+# ---------------------------------------------------------------------------
+
+class TestRecycleShortcut(unittest.TestCase):
+
+    def test_steel_plate_uses_chest_wrap(self):
+        sc = qp.build_recycle_shortcuts(_data())
+        self.assertIn("steel-plate", sc)
+        d = sc["steel-plate"]
+        self.assertEqual(d["container"], "steel-chest")
+        self.assertAlmostEqual(d["retention"], 0.25, places=3)
+        # Direct steel-plate-recycling is 1.0s; the chest wrap is far faster.
+        self.assertLess(d["recycler_time"], 0.05)
+
+    def test_concrete_only_self_recycles_via_hazard(self):
+        # concrete-recycling decomposes to stone-brick (no self-return), so the
+        # only self-recycle route is the hazard-concrete wrap.
+        sc = qp.build_recycle_shortcuts(_data())
+        self.assertIn("concrete", sc)
+        self.assertEqual(sc["concrete"]["container"], "hazard-concrete")
+        self.assertAlmostEqual(sc["concrete"]["retention"], 0.25, places=3)
+
+    def test_concrete_plan_uses_hazard_wrap(self):
+        out = qp.plan(
+            "concrete", 60, _data(), planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        st = next(s for s in out["stages"] if s["role"] == "self-recycle-target")
+        self.assertEqual(st["container"], "hazard-concrete")
+        # Wrap moves load onto fast assemblers, leaving few recyclers.
+        self.assertGreater(st["container_machines"], 0.0)
+        self.assertLess(st["recycler_machines"], st["craft_machines"])
+
+    def test_wrap_keeps_yield_but_cuts_recycler_time(self):
+        # The chest wrap retention matches the direct steel-plate self-recycle
+        # retention (same quality climb), only the recycler time differs.
+        direct = qp._recipe_result_amount(
+            qp._recipe_by_key(_data(), "steel-plate-recycling"), "steel-plate",
+        )
+        sc = qp.build_recycle_shortcuts(_data())["steel-plate"]
+        self.assertAlmostEqual(sc["retention"], direct, places=3)
+
+
+# ---------------------------------------------------------------------------
+# Reagent fluids are quality-irrelevant (sulfur for sulfuric-acid stays normal)
+# ---------------------------------------------------------------------------
+
+class TestReagentFluidQuality(unittest.TestCase):
+
+    def test_sulfuric_acid_is_normal_fluid_input(self):
+        # battery needs sulfuric-acid (a reagent fluid); its quality comes from
+        # the solid iron/copper plates, so sulfuric-acid (and its sulfur chain)
+        # must be sourced at normal quality — never made rare via asteroids.
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertIn("sulfuric-acid", out["fluid_input"])
+        self.assertNotIn("sulfur", out.get("mined_input", {}))
+        self.assertFalse(out["asteroid_input"])  # no rare-sulfur asteroid step
+
+    def test_reagent_fluid_not_a_quality_stage(self):
+        # processing-unit consumes sulfuric-acid; it should not appear as a
+        # produced quality stage (it is a normal fluid input instead).
+        out = qp.plan(
+            "processing-unit", 60, _data(), planets=["nauvis"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        recipes = [s.get("recipe") for s in out["stages"]]
+        self.assertNotIn("sulfuric-acid", recipes)
+        self.assertIn("sulfuric-acid", out["fluid_input"])
+
+    def test_fluid_only_recipe_fluid_still_carries_quality(self):
+        # holmium-plate's only ingredient is holmium-solution (a fluid), so that
+        # fluid IS the quality carrier and must be walked — its solid raw
+        # (holmium-ore) ends up in the quality raw_demand.  Tested at the walker
+        # level to bypass the self-recycle-target dispatcher.
+        data = _data()
+        fluids = qp.build_fluid_set(data)
+        planets = frozenset(["fulgora", "nauvis"])
+        pp = qp._combined_planet_props(data, planets)
+        _stages, raw = qp.walk_recipe_tree(
+            "holmium-plate", 60, data, {}, 3, fluids, pp, planets,
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertIn("holmium-ore", raw)
+
+    def test_reagent_fluid_subtree_not_walked(self):
+        # Contrast: battery has solid ingredients, so its reagent fluid
+        # sulfuric-acid is NOT walked — sulfur never enters the quality demand.
+        data = _data()
+        fluids = qp.build_fluid_set(data)
+        planets = frozenset(["fulgora", "nauvis"])
+        pp = qp._combined_planet_props(data, planets)
+        _stages, raw = qp.walk_recipe_tree(
+            "battery", 60, data, {}, 3, fluids, pp, planets,
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertNotIn("sulfur", raw)
 
 
 if __name__ == "__main__":
