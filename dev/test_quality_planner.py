@@ -3174,5 +3174,49 @@ class TestScrapSource(unittest.TestCase):
         self.assertFalse(out.get("scrap_input"))
 
 
+# ---------------------------------------------------------------------------
+# Wrap-and-recycle shortcut (steel-chest / hazard-concrete trick)
+# ---------------------------------------------------------------------------
+
+class TestRecycleShortcut(unittest.TestCase):
+
+    def test_steel_plate_uses_chest_wrap(self):
+        sc = qp.build_recycle_shortcuts(_data())
+        self.assertIn("steel-plate", sc)
+        d = sc["steel-plate"]
+        self.assertEqual(d["container"], "steel-chest")
+        self.assertAlmostEqual(d["retention"], 0.25, places=3)
+        # Direct steel-plate-recycling is 1.0s; the chest wrap is far faster.
+        self.assertLess(d["recycler_time"], 0.05)
+
+    def test_concrete_only_self_recycles_via_hazard(self):
+        # concrete-recycling decomposes to stone-brick (no self-return), so the
+        # only self-recycle route is the hazard-concrete wrap.
+        sc = qp.build_recycle_shortcuts(_data())
+        self.assertIn("concrete", sc)
+        self.assertEqual(sc["concrete"]["container"], "hazard-concrete")
+        self.assertAlmostEqual(sc["concrete"]["retention"], 0.25, places=3)
+
+    def test_concrete_plan_uses_hazard_wrap(self):
+        out = qp.plan(
+            "concrete", 60, _data(), planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        st = next(s for s in out["stages"] if s["role"] == "self-recycle-target")
+        self.assertEqual(st["container"], "hazard-concrete")
+        # Wrap moves load onto fast assemblers, leaving few recyclers.
+        self.assertGreater(st["container_machines"], 0.0)
+        self.assertLess(st["recycler_machines"], st["craft_machines"])
+
+    def test_wrap_keeps_yield_but_cuts_recycler_time(self):
+        # The chest wrap retention matches the direct steel-plate self-recycle
+        # retention (same quality climb), only the recycler time differs.
+        direct = qp._recipe_result_amount(
+            qp._recipe_by_key(_data(), "steel-plate-recycling"), "steel-plate",
+        )
+        sc = qp.build_recycle_shortcuts(_data())["steel-plate"]
+        self.assertAlmostEqual(sc["retention"], direct, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

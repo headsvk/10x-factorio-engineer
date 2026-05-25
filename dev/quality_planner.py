@@ -480,6 +480,12 @@ SELF_RECYCLE_TARGETS = frozenset([
     "lithium",
     "biolab",
     "captive-biter-spawner",
+    # Slow-to-recycle items that climb quality cheaply via the wrap-and-recycle
+    # trick (steel-plate → steel-chest, concrete → hazard-concrete).  Not added
+    # to SELF_RECYCLING_BLOCKLIST, so they only take this path as a top-level
+    # target; as ordinary intermediates they are still crafted normally.
+    "steel-plate",
+    "concrete",
 ])
 
 # V3 item 4 (continuation): self-FEED targets — recipes whose ingredient list
@@ -2068,6 +2074,98 @@ def scrap_terminal_set(
 
 
 # ---------------------------------------------------------------------------
+# Fast "wrap-and-recycle" shortcut (steel-chest / hazard-concrete trick)
+# ---------------------------------------------------------------------------
+#
+# Recycler processing time scales with an item's original craft time, so
+# recycling slow-to-craft items (steel-plate 16 s, concrete 10 s) is very slow
+# on the recycler.  The trick: craft the item into a cheap single-ingredient
+# container (steel-plate -> steel-chest, concrete -> hazard-concrete) and
+# recycle the container instead.  The container's craft + recycle times are
+# tiny, and recycling it returns the item at the same retention — so quality
+# climbing keeps the same yield at a fraction of the recycler time (the load
+# shifts to fast assemblers).  Some items (e.g. concrete) only self-recycle at
+# all via such a wrap, since their own recycling decomposes them instead.
+
+_RECYCLE_SHORTCUT_CACHE: dict[int, dict[str, dict]] = {}
+
+
+def build_recycle_shortcuts(data: dict) -> dict[str, dict]:
+    """Fastest self-recycle route per item (cached per dataset).
+
+    Returns ``{item: descriptor}`` for items that can be recycled back into
+    themselves by some route.  Descriptor:
+      ``retention``      — item returned per item processed (≈0.25)
+      ``recycler_time``  — recycler seconds per 1 item processed
+      ``craft_time``     — assembler seconds per 1 item processed (0 if direct)
+      ``craft_category`` — container craft category (None if direct)
+      ``container``      — container item key (None if direct)
+    The chosen route maximises retention, then minimises recycler_time.
+    """
+    cached = _RECYCLE_SHORTCUT_CACHE.get(id(data))
+    if cached is not None:
+        return cached
+
+    fluids = build_fluid_set(data)
+    rk = {r["key"]: r for r in data.get("recipes", [])}
+    cand: dict[str, list[dict]] = defaultdict(list)
+
+    # Direct self-recycle: <item>-recycling returns the item itself.
+    for key, r in rk.items():
+        if not key.endswith("-recycling"):
+            continue
+        item = key[: -len("-recycling")]
+        self_amt = _recipe_result_amount(r, item)
+        if self_amt > 0:
+            cand[item].append({
+                "retention": self_amt,
+                "recycler_time": float(r.get("energy_required", 0.2)),
+                "craft_time": 0.0,
+                "craft_category": None,
+                "container": None,
+            })
+
+    # Container wrap: a recipe whose only solid ingredient is the item, whose
+    # output has a recycling recipe that returns the item.
+    for C in data.get("recipes", []):
+        if C.get("category") in ("recycling", "recycling-or-hand-crafting"):
+            continue
+        if C.get("subgroup") in ("empty-barrel", "fill-barrel"):
+            continue
+        solids = [i for i in C.get("ingredients", []) if i["name"] not in fluids]
+        if len(solids) != 1:
+            continue
+        item = solids[0]["name"]
+        n_in = float(solids[0].get("amount", 0))
+        if n_in <= 0:
+            continue
+        for res in C.get("results", []):
+            container = res.get("name")
+            if not container or container == item:
+                continue
+            crec = rk.get(f"{container}-recycling")
+            if crec is None:
+                continue
+            out_back = _recipe_result_amount(crec, item)
+            o_amt = _recipe_result_amount(C, container)
+            if out_back <= 0 or o_amt <= 0:
+                continue
+            cand[item].append({
+                "retention": o_amt * out_back / n_in,
+                "recycler_time": o_amt * float(crec.get("energy_required", 0.2)) / n_in,
+                "craft_time": float(C.get("energy_required", 0.5)) / n_in,
+                "craft_category": C.get("category", "crafting"),
+                "container": container,
+            })
+
+    out: dict[str, dict] = {}
+    for item, options in cand.items():
+        out[item] = max(options, key=lambda d: (d["retention"], -d["recycler_time"]))
+    _RECYCLE_SHORTCUT_CACHE[id(data)] = out
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Recipe tree walk for planner
 # ---------------------------------------------------------------------------
 
@@ -2831,10 +2929,17 @@ def solve_self_recycle_target_loop(
     craft_recipe = cli.pick_recipe(item_key, cli.build_recipe_index(data))
     if craft_recipe is None:
         return 0.0, {}
-    rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
-    retention = (
-        _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
-    )
+    # Self-recycle retention via the fastest route (direct or wrap-and-recycle).
+    # This also enables items that only self-recycle through a container (e.g.
+    # concrete via hazard-concrete, whose own recycling decomposes it instead).
+    shortcut = build_recycle_shortcuts(data).get(item_key)
+    if shortcut is not None:
+        retention = shortcut["retention"]
+    else:
+        rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
+        retention = (
+            _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
+        )
     if retention <= 0 or retention >= 1.0:
         return 0.0, {}
 
@@ -3381,14 +3486,34 @@ def _plan_self_recycle_target(
     if prod0 > 3.0:
         prod0 = 3.0
     items_per_craft = _recipe_result_amount(craft_recipe, item_key) * (1.0 + prod0)
-    rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
-    retention = (
-        _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
-    )
-    total_recycle_crafts = crafts_per_min * items_per_craft / max(1.0 - retention, 1e-6)
-    rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
     qm_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    # Recycle via the fastest route (direct or the steel-chest / hazard-concrete
+    # wrap-and-recycle trick).  The wrap keeps the same retention but moves most
+    # of the time onto fast container-craft assemblers, slashing recycler count.
+    shortcut = build_recycle_shortcuts(data).get(item_key)
+    if shortcut is not None:
+        retention = shortcut["retention"]
+        rec_time = shortcut["recycler_time"]
+        container = shortcut["container"]
+        craft_time_per_item = shortcut["craft_time"]
+        craft_category = shortcut["craft_category"]
+    else:
+        rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
+        retention = (
+            _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
+        )
+        rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
+        container = None
+        craft_time_per_item = 0.0
+        craft_category = None
+    total_recycle_crafts = crafts_per_min * items_per_craft / max(1.0 - retention, 1e-6)
     recycler_machines = total_recycle_crafts * rec_time / (RECYCLER_SPEED * qm_mult * 60.0)
+    # Container-craft assemblers (only for the wrap route).
+    container_machines = 0.0
+    if container is not None and craft_time_per_item > 0:
+        cm_key, cm_speed = cli.get_machine(craft_category or "crafting", assembler_level, "electric")
+        cm_speed_f = float(cm_speed) * qm_mult
+        container_machines = total_recycle_crafts * craft_time_per_item / (cm_speed_f * 60.0)
 
     # Walk ingredients at NORMAL quality.  Each ingredient's demand =
     # amount × crafts_per_min.  Solid raws + intermediates need normal-quality
@@ -3445,9 +3570,11 @@ def _plan_self_recycle_target(
         "target": item_key,
         "recipe": craft_recipe["key"],
         "machine": machine_key,
-        "machine_count": craft_machines + recycler_machines,
+        "machine_count": craft_machines + recycler_machines + container_machines,
         "craft_machines": craft_machines,
         "recycler_machines": recycler_machines,
+        "container_machines": container_machines,
+        "container": container,
         "yield_per_normal_craft": v,
         "yield_pct": v * 100.0,
         "rate_per_min": rate,
@@ -5112,12 +5239,18 @@ def format_human(out: dict) -> str:
                 f"({st['machine_count']:.2f} crushers)"
             )
         elif role == "self-recycle-target":
+            wrap = ""
+            if st.get("container") and st.get("container_machines"):
+                wrap = (
+                    f" + {st['container_machines']:.2f} × {_humanize(st['container'])} "
+                    f"wrap-craft"
+                )
             L.append(
                 f"  [self-recycle] {_humanize(st['target'])}: "
                 f"{st['crafts_per_min']:.2f} crafts/min -> "
                 f"{st['rate_per_min']:.2f}/min {tier} "
                 f"({st['craft_machines']:.2f} × {_humanize(st['machine'])} + "
-                f"{st['recycler_machines']:.2f} recyclers, "
+                f"{st['recycler_machines']:.2f} recyclers{wrap}, "
                 f"yield {st['yield_pct']:.4f}% per craft)"
             )
         elif role == "self-feed-target":
