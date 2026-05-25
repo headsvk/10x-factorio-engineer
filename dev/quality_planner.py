@@ -3688,17 +3688,6 @@ def _choose_wrap_route(
     if _in_flight - {item_key}:
         return None, None
 
-    # Conservative scope (v1): only consider multi-ingredient wraps for items
-    # the LEGACY ``build_recycle_shortcuts`` couldn't help with — i.e. items
-    # whose only existing path is the slow direct recycle (container=None).
-    # For items like steel-plate / concrete that already have a fast single-
-    # ingredient wrap (steel-chest, hazard-concrete), keep the existing one-
-    # roll cycle to preserve byproduct/incidental accounting and not flip
-    # the Path-A-vs-Path-B comparator.
-    legacy = build_recycle_shortcuts(data).get(item_key)
-    if legacy is not None and legacy.get("container") is not None:
-        return None, None
-
     routes = enumerate_recycle_routes(data).get(item_key, [])
     if not routes:
         return None, None
@@ -3720,25 +3709,36 @@ def _choose_wrap_route(
     module_slots_map = cli.build_machine_module_slots(data)
     rk = {r["key"]: r for r in data.get("recipes", [])}
 
-    best: tuple[float, dict, dict, float] | None = None  # (score, route, mi, v_wrap)
-    for route in routes:
+    # Single-ingredient wraps dominate multi-ingredient ones when available:
+    # they're zero-cost on the co-ingredient side (just the item itself, no
+    # extra upstream chain to build).  Restrict the candidate pool when at
+    # least one single-ingredient wrap is machine-feasible.  Otherwise fall
+    # back to multi-ingredient wraps (the holmium-plate case).
+    def _candidate_filter(prefer_single: bool):
+        for route in routes:
+            wrap_recipe_key = route.get("wrap_recipe")
+            if wrap_recipe_key is None:
+                continue  # direct self-recycle handled by baseline
+            if prefer_single and route.get("co_solids"):
+                continue
+            yield route
+
+    def _evaluate(route: dict) -> tuple[float, dict, dict] | None:
         wrap_recipe_key = route.get("wrap_recipe")
-        if wrap_recipe_key is None:
-            continue  # direct self-recycle — baseline path
         wrap_recipe = rk.get(wrap_recipe_key)
         if wrap_recipe is None:
-            continue
+            return None
         # Planet filter: skip wraps unreachable on the current planet set.
         if planet_props and not cli._recipe_valid_for_planet(wrap_recipe, planet_props):
-            continue
+            return None
         # Machine filter: skip wraps whose machine is tech-locked.
         wmr = _machine_for_recipe(wrap_recipe, assembler_level, locked_machines)
         if wmr is None:
-            continue
+            return None
         wmk, _wms = wmr
         w_slots = int(module_slots_map.get(wmk, 0))
         if w_slots <= 0:
-            continue  # machine accepts no modules — wrap-DP can't roll quality
+            return None  # machine accepts no modules — wrap-DP can't roll quality
         w_inherent = MACHINE_INHERENT_PROD.get(wmk, 0.0)
         w_allow_prod = bool(wrap_recipe.get("allow_productivity", True))
         w_research_prod = _research_prod_for_recipe(wrap_recipe_key, research_levels)
@@ -3761,7 +3761,7 @@ def _choose_wrap_route(
             _cache=_cache,
         )
         if v_wrap <= 0:
-            continue
+            return None
         mi = {
             "machine_key":   wmk,
             "machine_slots": w_slots,
@@ -3769,18 +3769,36 @@ def _choose_wrap_route(
             "inherent_prod": w_inherent,
             "research_prod": w_research_prod,
         }
-        co_count = len(route.get("co_solids", []))
-        # Cost-penalised score: each extra solid co-ingredient adds an
-        # upstream chain.  α = 1/2 means co_count=0 → 1.0×, co_count=2 → 0.5×,
-        # co_count=4 → 0.33×.  Holmium-plate's huge wrap gain (~34×) easily
-        # clears this; concrete's marginal cargo-landing-pad gain does not.
-        score = v_wrap / (1.0 + co_count / 2.0)
-        if best is None or score > best[0]:
-            best = (score, route, mi, v_wrap)
+        return v_wrap, route, mi
 
-    if best is None:
+    def _pick_best(pool) -> tuple[float, dict, dict] | None:
+        best: tuple[float, dict, dict, float] | None = None  # (score, route, mi, v_wrap)
+        for route in pool:
+            ev = _evaluate(route)
+            if ev is None:
+                continue
+            v_wrap, r, mi = ev
+            co_count = len(r.get("co_solids", []))
+            # Cost-penalised score: each extra solid co-ingredient adds an
+            # upstream chain.  α = 1/2 → co_count=0 → 1.0×, co_count=2 → 0.5×.
+            # Within a homogeneous pool (all single or all multi) this picks
+            # the wrap with the highest combined yield + simplicity.
+            score = v_wrap / (1.0 + co_count / 2.0)
+            if best is None or score > best[0]:
+                best = (score, r, mi, v_wrap)
+        if best is None:
+            return None
+        _score, r, mi, v_wrap = best
+        return v_wrap, r, mi
+
+    # First try single-ingredient wraps; only fall back to multi-ingredient
+    # when none exist or none beat the baseline.
+    pick = _pick_best(_candidate_filter(prefer_single=True))
+    if pick is None:
+        pick = _pick_best(_candidate_filter(prefer_single=False))
+    if pick is None:
         return None, None
-    _score, route, mi, v_wrap = best
+    v_wrap, route, mi = pick
     # Require meaningful improvement over baseline.  5 % threshold avoids
     # triggering the wrap path for marginal gains.
     if v_wrap <= v_baseline * 1.05:
