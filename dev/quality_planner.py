@@ -2602,6 +2602,13 @@ def walk_recipe_tree(
     # fully-accumulated demand rather than whatever was visible at first
     # encounter).
     pending_dispatch: set[str] = set()
+    # Non-``molten-*`` fluids consumed in the chain (sulfuric-acid, water,
+    # lubricant, …).  Fluids carry no quality, so a recipe's quality comes from
+    # its SOLID ingredients — these fluids (and their whole production chain)
+    # are sourced at NORMAL quality and must NOT be walked into the legendary
+    # tree (which would, e.g., wrongly demand rare sulfur for sulfuric-acid).
+    # ``molten-*`` fluids are the exception: they carry quality through casting.
+    normal_fluid_leaves: set[str] = set()
 
     # BFS-like accumulation
     pending = [item_key]
@@ -2675,18 +2682,33 @@ def walk_recipe_tree(
             eff_prod = 4.0
         net_demand = max(0.0, demand[current])
         cycles_per_min = net_demand / (per_craft_output * eff_prod)
+        # A fluid ingredient carries this recipe's quality only when it is the
+        # primary material — i.e. the recipe has NO solid ingredient (casting /
+        # holmium-plate) or the fluid is a molten metal.  When the recipe has a
+        # solid ingredient, that solid carries the quality and the fluid is a
+        # quality-irrelevant reagent (sulfuric-acid in battery, water, etc.).
+        recipe_has_solid = any(
+            i["name"] not in fluids for i in recipe.get("ingredients", [])
+        )
         for ing in recipe.get("ingredients", []):
             iname = ing["name"]
             amt = float(ing.get("amount", 0))
             ing_rate = amt * cycles_per_min
             if iname in fluids:
-                # fluid-transparent: still track but don't propagate as legendary
-                # Note: fluids produced by intermediate recipes; for "molten-iron" we
-                # still need to expand to find iron-ore demand upstream.  Walk into fluids.
                 demand[iname] += ing_rate
-                if iname not in seen:
-                    pending.append(iname)
-                    order.append(iname)
+                if iname.startswith("molten-") or not recipe_has_solid:
+                    # Quality-carrying fluid (casting / fluid-only recipe): walk
+                    # into it so the upstream demand (e.g. molten-iron ->
+                    # iron-ore, holmium-solution -> holmium-ore) is produced at
+                    # the target quality.
+                    if iname not in seen:
+                        pending.append(iname)
+                        order.append(iname)
+                else:
+                    # Quality-irrelevant reagent fluid: source at normal quality
+                    # and do NOT expand its sub-tree into the legendary walk (so
+                    # e.g. sulfur for sulfuric-acid stays normal).
+                    normal_fluid_leaves.add(iname)
             else:
                 demand[iname] += ing_rate
                 if iname not in seen and iname not in raw_set:
@@ -2737,6 +2759,10 @@ def walk_recipe_tree(
         if iname in raw_set and iname != item_key:
             if amt > 0:
                 raw_demand[iname] += amt
+        elif iname in normal_fluid_leaves and amt > 0:
+            # Consumable fluid sourced at normal quality; plan() routes fluids
+            # in raw_demand to the (normal) fluid-input bucket.
+            raw_demand[iname] += amt
     # Track items already emitted in Pass 2 so duplicates in ``order`` (which
     # can arise from multiple ingredient encounters in BFS) don't re-emit.
     pass2_emitted: set[str] = set()

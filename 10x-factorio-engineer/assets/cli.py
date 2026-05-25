@@ -1440,6 +1440,40 @@ class Solver:
                     return r
             return None
 
+        # 0. Pumped-heavy-oil locations (e.g. Fulgora): heavy-oil is an offshore
+        #    raw, there is no crude oil, and the oil products are obtained by
+        #    cracking down — heavy-oil-cracking -> light-oil-cracking — rather than
+        #    from a refinery.  Skip refinery selection and crack from pumped
+        #    heavy-oil.  (On Nauvis heavy-oil is NOT a raw, so this is skipped.)
+        if "heavy-oil" in self.raw_set and "crude-oil" not in self.raw_set:
+            hoc = find("heavy-oil-cracking")
+            loc = find("light-oil-cracking")
+            oil_rates: dict[str, dict] = {}
+            if D_petgas > 0:
+                if loc is None:
+                    self.raw_resources["petroleum-gas"] += D_petgas
+                    D_petgas = Fraction(0)
+                else:
+                    loc_in = _recipe_ing(loc, "light-oil")
+                    loc_out = _recipe_yield(loc, "petroleum-gas")
+                    l_cycles = D_petgas / loc_out if loc_out else Fraction(0)
+                    if l_cycles > 0:
+                        oil_rates[loc["key"]] = {"cycles_per_min": l_cycles, "recipe": loc}
+                        D_light += l_cycles * loc_in  # extra light-oil to crack
+            if D_light > 0:
+                if hoc is None:
+                    self.raw_resources["light-oil"] += D_light
+                else:
+                    hoc_out = _recipe_yield(hoc, "light-oil")
+                    h_cycles = D_light / hoc_out if hoc_out else Fraction(0)
+                    if h_cycles > 0:
+                        oil_rates[hoc["key"]] = {"cycles_per_min": h_cycles, "recipe": hoc}
+            # Direct heavy-oil demand is simply pumped.
+            if D_heavy > 0:
+                self.raw_resources["heavy-oil"] += D_heavy
+            self._emit_oil_steps(oil_rates)
+            return
+
         # 1. User-specified refinery recipe override (e.g. coal-liquefaction)
         refinery = None
         for oil_item in OIL_PRODUCTS:
@@ -1464,7 +1498,12 @@ class Solver:
         loc = find("light-oil-cracking")
 
         oil_rates = solve_oil_system(D_heavy, D_light, D_petgas, refinery, hoc, loc)
+        self._emit_oil_steps(oil_rates)
 
+    def _emit_oil_steps(self, oil_rates: dict[str, dict]) -> None:
+        """Materialise refinery/cracking cycle rates into production steps and
+        push their non-oil ingredients (crude-oil, heavy-oil, water, coal, …)
+        into raw resources or the recursive solver."""
         for rkey, info in oil_rates.items():
             rcp    = info["recipe"]
             cycles = info["cycles_per_min"]

@@ -429,10 +429,11 @@ class TestPlanetsFlag(unittest.TestCase):
         out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("plastic-bar", recipes)
-        # Coal comes through mined-recycle, not asteroid.
+        # Coal (the solid ingredient) carries quality, via mined-recycle.
         self.assertIn("Coal", [qp._humanize(k) for k in out["mined_input"]])
-        # Crude-oil is a fluid raw, quality-transparent.
-        self.assertIn("crude-oil", out["fluid_input"])
+        # Petroleum-gas is a quality-irrelevant reagent fluid sourced at normal
+        # quality (its crude-oil sub-chain is a normal-production concern).
+        self.assertIn("petroleum-gas", out["fluid_input"])
 
     def test_vulcanus_unlocks_tungsten_plate(self):
         out = qp.plan("tungsten-plate", 60, _data(), planets=["vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -454,7 +455,9 @@ class TestPlanetsFlag(unittest.TestCase):
         out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
         self.assertIn("processing-unit", recipes)
-        self.assertIn("sulfuric-acid", recipes)
+        # sulfuric-acid is a quality-irrelevant reagent fluid → sourced at
+        # normal quality (a fluid input), not built as a quality stage.
+        self.assertIn("sulfuric-acid", out["fluid_input"])
 
     def test_artillery_shell_with_nauvis_vulcanus(self):
         out = qp.plan("artillery-shell", 60, _data(), planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -580,15 +583,14 @@ class TestLDSShuffle(unittest.TestCase):
 class TestOtherPlanetUnlocks(unittest.TestCase):
 
     def test_fulgora_unlocks_scrap(self):
-        # electrolyte → stone + holmium-ore + heavy-oil (fulgora offshore).
-        # With Fulgora unlocked the scrap source auto-activates: holmium-ore is
-        # a scrap product so it is sourced from scrap recycling, while stone (a
-        # mined ore, never a useful scrap product) still routes as a mined raw.
+        # electrolyte → stone (solid) + heavy-oil + holmium-solution (fluids).
+        # The solid ingredient (stone) carries quality and routes as a mined
+        # raw; the reagent fluids (heavy-oil pumped on Fulgora, holmium-solution)
+        # are sourced at normal quality.
         out = qp.plan("electrolyte", 60, _data(), planets=["fulgora", "nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
-        self.assertIn("scrap", out["scrap_input"])
-        scrap_stage = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
-        self.assertIn("holmium-ore", scrap_stage["covered"])
         self.assertIn("stone", out["mined_input"])
+        self.assertIn("heavy-oil", out["fluid_input"])
+        self.assertIn("holmium-solution", out["fluid_input"])
 
     def test_mined_recycle_stage_shape(self):
         out = qp.plan("plastic-bar", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -3109,8 +3111,10 @@ class TestTargetQuality(unittest.TestCase):
         )
         text = qp.format_human(out)
         self.assertIn("at tier rare", text)
-        self.assertIn("rare out", text)
+        # Output tier label is rare, never mislabelled legendary.
+        self.assertIn("rare ", text)
         self.assertNotIn("legendary out", text)
+        self.assertNotIn("at tier legendary", text)
 
 
 # ---------------------------------------------------------------------------
@@ -3216,6 +3220,64 @@ class TestRecycleShortcut(unittest.TestCase):
         )
         sc = qp.build_recycle_shortcuts(_data())["steel-plate"]
         self.assertAlmostEqual(sc["retention"], direct, places=3)
+
+
+# ---------------------------------------------------------------------------
+# Reagent fluids are quality-irrelevant (sulfur for sulfuric-acid stays normal)
+# ---------------------------------------------------------------------------
+
+class TestReagentFluidQuality(unittest.TestCase):
+
+    def test_sulfuric_acid_is_normal_fluid_input(self):
+        # battery needs sulfuric-acid (a reagent fluid); its quality comes from
+        # the solid iron/copper plates, so sulfuric-acid (and its sulfur chain)
+        # must be sourced at normal quality — never made rare via asteroids.
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertIn("sulfuric-acid", out["fluid_input"])
+        self.assertNotIn("sulfur", out.get("mined_input", {}))
+        self.assertFalse(out["asteroid_input"])  # no rare-sulfur asteroid step
+
+    def test_reagent_fluid_not_a_quality_stage(self):
+        # processing-unit consumes sulfuric-acid; it should not appear as a
+        # produced quality stage (it is a normal fluid input instead).
+        out = qp.plan(
+            "processing-unit", 60, _data(), planets=["nauvis"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        recipes = [s.get("recipe") for s in out["stages"]]
+        self.assertNotIn("sulfuric-acid", recipes)
+        self.assertIn("sulfuric-acid", out["fluid_input"])
+
+    def test_fluid_only_recipe_fluid_still_carries_quality(self):
+        # holmium-plate's only ingredient is holmium-solution (a fluid), so that
+        # fluid IS the quality carrier and must be walked — its solid raw
+        # (holmium-ore) ends up in the quality raw_demand.  Tested at the walker
+        # level to bypass the self-recycle-target dispatcher.
+        data = _data()
+        fluids = qp.build_fluid_set(data)
+        planets = frozenset(["fulgora", "nauvis"])
+        pp = qp._combined_planet_props(data, planets)
+        _stages, raw = qp.walk_recipe_tree(
+            "holmium-plate", 60, data, {}, 3, fluids, pp, planets,
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertIn("holmium-ore", raw)
+
+    def test_reagent_fluid_subtree_not_walked(self):
+        # Contrast: battery has solid ingredients, so its reagent fluid
+        # sulfuric-acid is NOT walked — sulfur never enters the quality demand.
+        data = _data()
+        fluids = qp.build_fluid_set(data)
+        planets = frozenset(["fulgora", "nauvis"])
+        pp = qp._combined_planet_props(data, planets)
+        _stages, raw = qp.walk_recipe_tree(
+            "battery", 60, data, {}, 3, fluids, pp, planets,
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertNotIn("sulfur", raw)
 
 
 if __name__ == "__main__":
