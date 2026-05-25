@@ -1792,6 +1792,282 @@ def solve_mined_raw_self_recycle_loop(
 
 
 # ---------------------------------------------------------------------------
+# Fulgora scrap-recycling quality source (auto-enabled when Fulgora unlocked)
+# ---------------------------------------------------------------------------
+#
+# On Fulgora the plentiful raw is *scrap*, and recycling it (with quality
+# modules in the recyclers) yields a basket of quality intermediates directly —
+# battery, steel-plate, circuits, holmium-ore, plus cascades like
+# iron-gear-wheel → iron-plate.  This is the idiomatic Fulgora quality source
+# and is almost always far cheaper than importing asteroid chunks from orbit.
+#
+# Model (documented assumptions):
+#   * Scrap is a plentiful normal-quality input (mined on Fulgora); we report
+#     the scrap/min the recycler array consumes.
+#   * Every recycler in the scrap → … → item cascade runs RECYCLER_SLOTS
+#     quality modules, so each recycle STEP is one independent quality roll.
+#   * An item reached ``d`` recycle-steps from scrap has had ``d`` quality
+#     rolls, so its target-or-better fraction is P(tier ≥ target after d rolls).
+#   * One scrap produces the whole basket simultaneously, so the binding (most
+#     scrap-hungry) demanded leaf sets the scrap rate; the other outputs are
+#     credited against chain demand or counted as overflow.
+#   * Sub-target items that cannot climb further are part of the overflow.
+
+SCRAP_RECYCLING_RECIPE = "scrap-recycling"
+_SCRAP_CASCADE_CACHE: dict[int, dict] = {}
+
+
+def build_scrap_cascade(data: dict, max_depth: int = 6) -> dict:
+    """Introspect the scrap recycling cascade (quality-independent, cached).
+
+    Returns ``{"depth_amounts", "recycle_amounts", "recycle_time"}``:
+      * ``depth_amounts`` — ``{item: {depth: amount_per_scrap}}`` for every
+        item reachable from scrap via ``<item>-recycling`` recipes.
+      * ``recycle_amounts`` — ``{item: amount_recycled_per_scrap}`` for each
+        item that is itself recycled in the cascade (drives recycler counts).
+      * ``recycle_time`` — ``{item: energy_required of its recycling recipe}``.
+    """
+    cached = _SCRAP_CASCADE_CACHE.get(id(data))
+    if cached is not None:
+        return cached
+    fluids = build_fluid_set(data)
+    recipes_by_key = {r["key"]: r for r in data.get("recipes", [])}
+    # Mined raws (ores) are never a *useful* scrap product — recycling a base
+    # material like iron-plate back to iron-ore is a strict downgrade.  Stop the
+    # cascade at ores so plates/circuits stay the terminals, not the ores below
+    # them.  (Scrap itself is the explicit cascade root, never skipped here.)
+    mined_raws: set[str] = set()
+    for res in data.get("resources", []):
+        for r in res.get("results", []):
+            if r.get("name") and r["name"] != "scrap":
+                mined_raws.add(r["name"])
+
+    def rec_outputs(item: str) -> dict[str, float] | None:
+        r = recipes_by_key.get(f"{item}-recycling")
+        if r is None:
+            return None
+        out: dict[str, float] = {}
+        for res in r.get("results", []):
+            if res.get("name") == item:
+                continue
+            amt = res.get("amount")
+            if amt is None:
+                amt = (res.get("amount_min", 0) + res.get("amount_max", 0)) / 2.0
+            out[res["name"]] = out.get(res["name"], 0.0) + (
+                float(amt) * float(res.get("probability", 1.0))
+            )
+        return out
+
+    depth_amounts: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    recycle_amounts: dict[str, float] = defaultdict(float)
+    recycle_time: dict[str, float] = {}
+
+    cur = {"scrap": 1.0}
+    for depth in range(max_depth):
+        nxt: dict[str, float] = defaultdict(float)
+        for item, amt in cur.items():
+            outs = rec_outputs(item)
+            if outs is None:
+                continue
+            recycle_amounts[item] += amt
+            if item not in recycle_time:
+                r = recipes_by_key.get(f"{item}-recycling")
+                recycle_time[item] = float(r.get("energy_required", 0.2)) if r else 0.2
+            for k, v in outs.items():
+                if k in mined_raws:
+                    continue  # don't degrade a base material back into ore
+                produced = amt * v
+                depth_amounts[k][depth + 1] += produced
+                if k not in fluids:
+                    nxt[k] += produced
+        cur = dict(nxt)
+        if not cur:
+            break
+
+    result = {
+        "depth_amounts": {k: dict(v) for k, v in depth_amounts.items()},
+        "recycle_amounts": dict(recycle_amounts),
+        "recycle_time": recycle_time,
+    }
+    _SCRAP_CASCADE_CACHE[id(data)] = result
+    return result
+
+
+def _compose_quality_rolls(q_chance: float, d: int) -> list[float]:
+    """Tier distribution (len 5) after ``d`` independent quality rolls starting
+    from normal (tier 0).  Each roll uses the game's tier-skip spread."""
+    dist = [1.0, 0.0, 0.0, 0.0, 0.0]
+    for _ in range(max(0, d)):
+        nxt = [0.0] * 5
+        for t in range(5):
+            if dist[t] <= 0.0:
+                continue
+            probs = _tier_skip_probs(q_chance, t)
+            for k, p in enumerate(probs):
+                nxt[t + k] += dist[t] * p
+        dist = nxt
+    return dist
+
+
+def scrap_target_yield(
+    item: str,
+    cascade: dict,
+    target_tier: int,
+    quality_module_tier: int,
+    module_quality: str,
+) -> float:
+    """Target-tier ``item`` produced per 1 scrap recycled.
+
+    Sums, over every cascade depth at which ``item`` appears, the amount made
+    at that depth times P(tier ≥ target after that many quality rolls).
+    """
+    q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
+    total = 0.0
+    for d, amt in cascade["depth_amounts"].get(item, {}).items():
+        if d <= 0:
+            continue
+        dist = _compose_quality_rolls(q, d)
+        total += amt * sum(dist[target_tier:])
+    return total
+
+
+def compute_scrap_source(
+    demanded_leaves: dict[str, float],
+    data: dict,
+    *,
+    target_tier: int,
+    quality_module_tier: int,
+    module_quality: str,
+    machine_quality: str = "normal",
+) -> dict | None:
+    """Size a Fulgora scrap-recycling quality source for ``demanded_leaves``.
+
+    ``demanded_leaves`` maps scrap-reachable solid item -> target-tier rate/min.
+    One scrap stream feeds the whole basket, so the binding leaf sets the scrap
+    rate and the rest is overflow.  Returns ``None`` if no leaf is reachable.
+
+    Result dict:
+      ``scrap_per_min``    — normal scrap the recycler array consumes.
+      ``machine_count``    — recyclers (scrap-recycling + cascade steps).
+      ``covered``          — {item: rate} satisfied at the target tier.
+      ``overflow``         — {item: surplus rate at target tier} (unused).
+      ``binding_leaf``     — the leaf that set the scrap rate.
+      ``stage``            — a stage dict for the plan's stage list.
+    """
+    cascade = build_scrap_cascade(data)
+    yields = {
+        leaf: scrap_target_yield(
+            leaf, cascade, target_tier, quality_module_tier, module_quality,
+        )
+        for leaf in demanded_leaves
+    }
+    usable = {leaf: y for leaf, y in yields.items() if y > 0 and demanded_leaves[leaf] > 0}
+    if not usable:
+        return None
+
+    scrap_per_min = 0.0
+    binding_leaf = None
+    for leaf, y in usable.items():
+        need = demanded_leaves[leaf] / y
+        if need > scrap_per_min:
+            scrap_per_min = need
+            binding_leaf = leaf
+    if scrap_per_min <= 0:
+        return None
+
+    covered: dict[str, float] = {}
+    overflow: dict[str, float] = {}
+    for leaf, y in yields.items():
+        produced = scrap_per_min * y
+        demand = demanded_leaves[leaf]
+        covered[leaf] = min(produced, demand)
+        surplus = produced - demand
+        if surplus > 1e-9:
+            overflow[leaf] = surplus
+
+    qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    recycle_load = sum(
+        cascade["recycle_amounts"].get(it, 0.0) * cascade["recycle_time"].get(it, 0.2)
+        for it in cascade["recycle_amounts"]
+    )
+    machine_count = scrap_per_min * recycle_load / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+
+    q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
+    stage = {
+        "role": "scrap-quality-source",
+        "recipe": SCRAP_RECYCLING_RECIPE,
+        "machine": "recycler",
+        "machine_count": machine_count,
+        "scrap_per_min": scrap_per_min,
+        "binding_leaf": binding_leaf,
+        "covered": covered,
+        "overflow": overflow,
+        "recycler_quality_chance": q,
+    }
+    return {
+        "scrap_per_min": scrap_per_min,
+        "machine_count": machine_count,
+        "covered": covered,
+        "overflow": overflow,
+        "binding_leaf": binding_leaf,
+        "stage": stage,
+    }
+
+
+def scrap_terminal_set(
+    scrap_reachable: set[str],
+    item_key: str,
+    data: dict,
+    fluids: frozenset[str],
+) -> frozenset[str]:
+    """Which scrap-reachable items should be sourced *directly* from scrap.
+
+    An item is a scrap terminal when it cannot be crafted from cheaper scrap
+    materials — i.e. *no* recipe for it has all solid ingredients scrap-
+    reachable while avoiding ore-derived fluids.  Concretely it is a terminal
+    when every recipe would pull in a non-scrap-reachable solid (e.g. iron-plate
+    needs iron-ore, or its casting variant needs molten-iron which decomposes to
+    ore), or it has no craft recipe at all (e.g. holmium-ore).  Items craftable
+    from scrap materials plus genuinely local fluids (e.g. battery → iron-plate
+    + copper-plate + sulfuric-acid) are left to be crafted.  ``item_key`` is
+    never a terminal — the plan must still produce it.
+
+    ``molten-*`` fluids are treated as ore-equivalent (their production consumes
+    a mined ore), so a casting recipe does not count as scrap-craftable.
+    """
+    # Map every craftable output -> list of its recipes (skip recycling/barrels).
+    recipes_by_output: dict[str, list[dict]] = defaultdict(list)
+    for r in data.get("recipes", []):
+        if r.get("category") in ("recycling", "recycling-or-hand-crafting"):
+            continue
+        if r.get("subgroup") in ("empty-barrel", "fill-barrel"):
+            continue
+        for res in r.get("results", []):
+            if res.get("name"):
+                recipes_by_output[res["name"]].append(r)
+
+    def _scrap_craftable(recipe: dict) -> bool:
+        for ing in recipe.get("ingredients", []):
+            name = ing["name"]
+            if name in fluids:
+                if name.startswith("molten-"):
+                    return False  # ore-derived fluid — not locally free
+                continue          # other fluids assumed locally available
+            if name not in scrap_reachable:
+                return False
+        return True
+
+    terminals: set[str] = set()
+    for it in scrap_reachable:
+        if it == item_key or it in fluids:
+            continue
+        recipes = recipes_by_output.get(it, [])
+        if not recipes or not any(_scrap_craftable(r) for r in recipes):
+            terminals.add(it)
+    return frozenset(terminals)
+
+
+# ---------------------------------------------------------------------------
 # Recipe tree walk for planner
 # ---------------------------------------------------------------------------
 
@@ -3713,6 +3989,7 @@ def plan(
     tech_state: dict[str, int],
     target_tier: int = 4,
     _force_tree_walk: bool = False,
+    _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
     _in_flight: frozenset[str] = frozenset(),
     _force_tree_walk_for: frozenset[str] = frozenset(),
@@ -3837,6 +4114,18 @@ def plan(
         "active_shuffles": frozenset(active_shuffles) if active_shuffles else None,
         "target_tier": target_tier,
     }
+    # ---- Fulgora scrap-recycling quality source (auto when Fulgora unlocked) ----
+    # On Fulgora the cheap quality source is scrap recycling, not imported
+    # asteroid chunks.  We mark scrap-reachable "base materials" (iron-plate,
+    # copper-plate, holmium-ore, …) as walk terminals so the chain stops there
+    # and they are sourced from a scrap-recycling stage below; everything that
+    # can be crafted from those (battery, gears, …) is still crafted normally.
+    scrap_active = "fulgora" in planets_fs and not _scrap_disabled
+    scrap_terminals: frozenset[str] = frozenset()
+    if scrap_active:
+        scrap_reachable = set(build_scrap_cascade(data)["depth_amounts"])
+        scrap_terminals = scrap_terminal_set(scrap_reachable, item_key, data, fluids)
+
     # Track intermediates dispatched directly by this plan() level's walker
     # call(s) so we can aggregate their normal-quality inputs without
     # double-counting entries that recursive Path B plan() calls already
@@ -3844,6 +4133,7 @@ def plan(
     direct_dispatches: set[str] = set()
     stages, raw_demand = walk_recipe_tree(
         item_key, rate, data, research_levels, assembler_level, fluids, planet_props, planets_fs,
+        extra_raws=scrap_terminals or None,
         assembly_modules=assembly_modules,
         assembly_module_quality=module_quality,
         prod_module_tier=prod_module_tier,
@@ -3937,7 +4227,7 @@ def plan(
             stages, raw_demand = walk_recipe_tree(
                 item_key, rate, data, research_levels, assembler_level,
                 fluids, planet_props, planets_fs,
-                extra_raws=primaries,
+                extra_raws=(primaries | scrap_terminals) or None,
                 assembly_modules=assembly_modules,
                 assembly_module_quality=module_quality,
                 prod_module_tier=prod_module_tier,
@@ -3973,7 +4263,7 @@ def plan(
                 stages, raw_demand = walk_recipe_tree(
                     item_key, rate, data, research_levels, assembler_level,
                     fluids, planet_props, planets_fs,
-                    extra_raws=primaries,
+                    extra_raws=(primaries | scrap_terminals) or None,
                     byproduct_credits=capped_credits,
                     assembly_modules=assembly_modules,
                     assembly_module_quality=module_quality,
@@ -4084,7 +4374,7 @@ def plan(
             stages, raw_demand = walk_recipe_tree(
                 item_key, rate, data, research_levels, assembler_level,
                 fluids, planet_props, planets_fs,
-                extra_raws=shuffle_primaries,
+                extra_raws=((shuffle_primaries or frozenset()) | scrap_terminals) or None,
                 byproduct_credits=merged_credits,
                 assembly_modules=assembly_modules,
                 assembly_module_quality=module_quality,
@@ -4264,6 +4554,37 @@ def plan(
                 "machine_quality": machine_quality,
                 "prod_capped": capped_drv,
             })
+
+    # ---- Scrap source extraction (Fulgora) ----
+    # Pull the scrap-reachable base materials out of raw_demand and source them
+    # from one scrap-recycling array; the rest of raw_demand keeps its normal
+    # asteroid / mined routing below.
+    scrap_stages: list[dict] = []
+    scrap_input: dict[str, float] = {}
+    scrap_overflow: dict[str, float] = {}
+    if scrap_active and scrap_terminals:
+        scrap_demanded = {
+            it: raw_demand[it]
+            for it in scrap_terminals
+            if raw_demand.get(it, 0.0) > 0
+        }
+        if scrap_demanded:
+            src = compute_scrap_source(
+                scrap_demanded, data,
+                target_tier=target_tier,
+                quality_module_tier=quality_module_tier,
+                module_quality=module_quality,
+                machine_quality=machine_quality,
+            )
+            if src is not None:
+                scrap_stages.append(src["stage"])
+                scrap_input["scrap"] = scrap_input.get("scrap", 0.0) + src["scrap_per_min"]
+                for it, surplus in src["overflow"].items():
+                    scrap_overflow[it] = scrap_overflow.get(it, 0.0) + surplus
+                # These leaves are now scrap-sourced — drop them from raw_demand
+                # so they don't also get asteroid / mined routing below.
+                for it in scrap_demanded:
+                    raw_demand.pop(it, None)
 
     # Group raw demand by chunk type.  Each chunk is produced by one crushing recipe
     # (e.g. metallic-asteroid-crushing -> iron-ore+copper-ore).  We scale to satisfy
@@ -4471,6 +4792,7 @@ def plan(
         + sum(s["machine_count"] for s in shuffle_stages)
         + sum(s["machine_count"] for s in normal_chain_stages)
         + sum(s["machine_count"] for s in driver_stages)
+        + sum(s["machine_count"] for s in scrap_stages)
     )
 
     # Annotate per-stage power and total (V3 power accounting).
@@ -4478,7 +4800,7 @@ def plan(
     all_stages_for_power = (
         stages + crushing_stages + reprocessing_stages
         + mined_recycle_stages + shuffle_stages + normal_chain_stages
-        + driver_stages
+        + driver_stages + scrap_stages
     )
     for st in all_stages_for_power:
         st["power_kw"] = _stage_power_kw(st, machine_power_w)
@@ -4582,8 +4904,11 @@ def plan(
         "incidental_byproduct_credited": dict(incidental_credited),
         "incidental_byproduct_overflow": dict(incidental_overflow),
         "driver_overflow": dict(driver_primary_overflow),
+        "scrap_input": scrap_input,
+        "scrap_overflow": scrap_overflow,
         "stages": (
-            reprocessing_stages
+            scrap_stages
+            + reprocessing_stages
             + crushing_stages
             + mined_recycle_stages
             + driver_stages
@@ -4600,6 +4925,19 @@ def plan(
         "planets": sorted(planets_fs),
         "notes": notes,
     }
+
+    # Note (not a cost gate): scrap recycling is auto-preferred on Fulgora per
+    # design — it is surface-based and scrap is effectively free, whereas the
+    # asteroid path needs an orbital platform.  Machine count alone therefore
+    # under-counts the asteroid alternative, so we deliberately do NOT fall back
+    # to it.  Legendary via pure scrap is expensive (plates cannot climb tiers
+    # by recycling); flag it so the cost isn't surprising.
+    if scrap_active and scrap_stages and target_tier >= QUALITY_INDEX["legendary"]:
+        notes.append(
+            "legendary via scrap is recycler-heavy (scrap-derived plates roll "
+            "quality only during the cascade and cannot self-climb) — consider "
+            "a lower --target-quality, or the asteroid/foundry-casting path."
+        )
 
     # Cost gate for `--enable-shuffles all`: when the planner is auto-
     # selecting shuffles, compare against the no-shuffle baseline and pick
@@ -4677,6 +5015,15 @@ def format_human(out: dict) -> str:
     if out.get("research_levels"):
         L.append(f"Research: {out['research_levels']}")
     L.append("")
+    if out.get("scrap_input"):
+        L.append("=== Scrap Input (normal scrap/min, mined on Fulgora) ===")
+        for it, amt in sorted(out["scrap_input"].items()):
+            L.append(f"  {_humanize(it)}: {amt:.2f}")
+        if out.get("scrap_overflow"):
+            L.append("  overflow (surplus quality co-products, /min):")
+            for it, amt in sorted(out["scrap_overflow"].items(), key=lambda x: -x[1]):
+                L.append(f"    {_humanize(it)}: {amt:.2f}")
+        L.append("")
     L.append("=== Asteroid Input (normal chunks/min) ===")
     if out["asteroid_input"]:
         for chunk, amt in sorted(out["asteroid_input"].items()):
@@ -4738,7 +5085,18 @@ def format_human(out: dict) -> str:
     L.append("=== Production Stages ===")
     for st in out["stages"]:
         role = st["role"]
-        if role == "asteroid-reprocessing":
+        if role == "scrap-quality-source":
+            covered = ", ".join(
+                f"{_humanize(k)}={v:.1f}/min"
+                for k, v in sorted(st.get("covered", {}).items(), key=lambda x: -x[1])
+            )
+            L.append(
+                f"  [scrap]        {st['scrap_per_min']:.1f} scrap/min -> "
+                f"{tier} {covered} "
+                f"({st['machine_count']:.2f} recyclers, "
+                f"binding leaf {_humanize(st.get('binding_leaf', '?'))})"
+            )
+        elif role == "asteroid-reprocessing":
             L.append(
                 f"  [reprocessing] {_humanize(st['chunk'])}: "
                 f"{st['normal_chunks_input_per_min']:.2f} normal in -> "

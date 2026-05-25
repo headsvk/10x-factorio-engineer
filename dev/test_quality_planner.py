@@ -581,9 +581,13 @@ class TestOtherPlanetUnlocks(unittest.TestCase):
 
     def test_fulgora_unlocks_scrap(self):
         # electrolyte → stone + holmium-ore + heavy-oil (fulgora offshore).
-        # With --planets fulgora, holmium-ore and stone are unlocked as mined raws.
+        # With Fulgora unlocked the scrap source auto-activates: holmium-ore is
+        # a scrap product so it is sourced from scrap recycling, while stone (a
+        # mined ore, never a useful scrap product) still routes as a mined raw.
         out = qp.plan("electrolyte", 60, _data(), planets=["fulgora", "nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
-        self.assertIn("holmium-ore", out["mined_input"])
+        self.assertIn("scrap", out["scrap_input"])
+        scrap_stage = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
+        self.assertIn("holmium-ore", scrap_stage["covered"])
         self.assertIn("stone", out["mined_input"])
 
     def test_mined_recycle_stage_shape(self):
@@ -3107,6 +3111,67 @@ class TestTargetQuality(unittest.TestCase):
         self.assertIn("at tier rare", text)
         self.assertIn("rare out", text)
         self.assertNotIn("legendary out", text)
+
+
+# ---------------------------------------------------------------------------
+# Fulgora scrap-recycling quality source
+# ---------------------------------------------------------------------------
+
+class TestScrapSource(unittest.TestCase):
+
+    def test_cascade_reaches_basket_and_cascades(self):
+        casc = qp.build_scrap_cascade(_data())
+        da = casc["depth_amounts"]
+        # Direct basket item.
+        self.assertIn(1, da["battery"])
+        # Cascade item (scrap → iron-gear-wheel → iron-plate).
+        self.assertIn("iron-plate", da)
+        self.assertIn(2, da["iron-plate"])
+
+    def test_cascade_stops_at_ore(self):
+        # Recycling a plate back into ore is a strict downgrade and must not be
+        # treated as a scrap product.
+        casc = qp.build_scrap_cascade(_data())
+        self.assertNotIn("iron-ore", casc["depth_amounts"])
+        self.assertNotIn("copper-ore", casc["depth_amounts"])
+
+    def test_terminals_are_base_materials_not_assembled(self):
+        casc = qp.build_scrap_cascade(_data())
+        reach = set(casc["depth_amounts"])
+        fluids = qp.build_fluid_set(_data())
+        terms = qp.scrap_terminal_set(reach, "accumulator", _data(), fluids)
+        # Plates are ore-derived → scrap terminals.
+        self.assertIn("iron-plate", terms)
+        self.assertIn("copper-plate", terms)
+        # Battery is craftable from scrap plates + sulfuric-acid → not a terminal.
+        self.assertNotIn("battery", terms)
+
+    def test_scrap_yield_monotonic_in_tier(self):
+        casc = qp.build_scrap_cascade(_data())
+        y_rare = qp.scrap_target_yield("iron-plate", casc, 2, 3, "legendary")
+        y_epic = qp.scrap_target_yield("iron-plate", casc, 3, 3, "legendary")
+        y_leg = qp.scrap_target_yield("iron-plate", casc, 4, 3, "legendary")
+        self.assertGreater(y_rare, y_epic)
+        self.assertGreater(y_epic, y_leg)
+
+    def test_plan_auto_routes_scrap_on_fulgora(self):
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertIn("scrap", out["scrap_input"])
+        self.assertGreater(out["scrap_input"]["scrap"], 0.0)
+        # iron-plate is now scrap-sourced, so no iron-ore is imported.
+        self.assertNotIn("iron-ore", out.get("mined_input", {}))
+        scrap_stage = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
+        self.assertIn("iron-plate", scrap_stage["covered"])
+
+    def test_no_scrap_routing_off_fulgora(self):
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["nauvis"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertFalse(out.get("scrap_input"))
 
 
 if __name__ == "__main__":
