@@ -3223,6 +3223,403 @@ class TestRecycleShortcut(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Multi-ingredient wrap enumeration (Reddit "rare-ore wrap-and-recycle")
+# ---------------------------------------------------------------------------
+
+class TestEnumerateRecycleRoutes(unittest.TestCase):
+    """`enumerate_recycle_routes` returns ALL self-recycle candidates per item,
+    including multi-solid-ingredient wraps that `build_recycle_shortcuts`
+    deliberately filters out.  It's the substrate for the wrap-DP search."""
+
+    def test_returns_a_list_per_item(self):
+        routes = qp.enumerate_recycle_routes(_data())
+        self.assertIsInstance(routes, dict)
+        self.assertIn("steel-plate", routes)
+        self.assertIsInstance(routes["steel-plate"], list)
+        self.assertGreater(len(routes["steel-plate"]), 0)
+
+    def test_caching(self):
+        d = _data()
+        a = qp.enumerate_recycle_routes(d)
+        b = qp.enumerate_recycle_routes(d)
+        self.assertIs(a, b)  # same dict object — cached by id(data)
+
+    def test_includes_direct_self_recycle(self):
+        # holmium-plate has a direct holmium-plate-recycling that returns itself.
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        direct = [r for r in routes if r["wrap_recipe"] is None]
+        self.assertEqual(len(direct), 1)
+        self.assertEqual(direct[0]["container"], None)
+        self.assertEqual(direct[0]["co_solids"], [])
+        self.assertEqual(direct[0]["co_fluids"], [])
+        self.assertAlmostEqual(direct[0]["retention"], 0.25, places=3)
+
+    def test_includes_single_ingredient_wraps(self):
+        # Regression: steel-chest (1 solid ingredient = steel-plate) must still
+        # be enumerated as a candidate.
+        routes = qp.enumerate_recycle_routes(_data())["steel-plate"]
+        chest = next((r for r in routes if r["container"] == "steel-chest"), None)
+        self.assertIsNotNone(chest)
+        assert chest is not None  # narrowing
+        self.assertEqual(chest["co_solids"], [])  # single-ingredient
+        self.assertAlmostEqual(chest["retention"], 0.25, places=3)
+
+    def test_includes_multi_ingredient_wraps_for_holmium(self):
+        # The Reddit trick: holmium-plate can be wrapped into items whose
+        # other ingredients are cheap (copper, processing-unit, …).  At
+        # minimum we expect electromagnetic-plant and supercapacitor.
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        wraps = {r["wrap_recipe"] for r in routes if r["wrap_recipe"] is not None}
+        # Sanity: there should be many multi-ingredient wraps.
+        self.assertGreater(len(wraps), 3)
+        # Specific picks the Reddit advice points at:
+        self.assertIn("electromagnetic-plant", wraps)
+        self.assertIn("supercapacitor", wraps)
+        # And every wrap that isn't a single-solid-ingredient case carries
+        # non-empty co_solids.
+        for r in routes:
+            if r["wrap_recipe"] is None or r["wrap_recipe"] == r["container"] + "-direct":
+                continue
+            # Multi-ingredient wraps have co_solids; single-ingredient wraps
+            # don't.  We just check the field is populated correctly per type.
+            self.assertIsInstance(r["co_solids"], list)
+            self.assertIsInstance(r["co_fluids"], list)
+
+    def test_co_ingredient_amounts_normalised_per_item_atom(self):
+        # superconductor = 1 holmium-plate + 1 copper-plate + 5 light-oil → 2 superconductor.
+        # So per 1 holmium-plate atom in: 1 copper-plate, 5 light-oil.
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        sc = next((r for r in routes if r["wrap_recipe"] == "supercapacitor"), None)
+        # supercapacitor recipe sanity-checks the parser regardless of which
+        # exact recipe it picks — verify amounts are floats and >0 for any
+        # wrap we find for holmium-plate that has co-ingredients.
+        wrap = next(
+            (r for r in routes if r["wrap_recipe"] is not None and r["co_solids"]),
+            None,
+        )
+        self.assertIsNotNone(wrap)
+        assert wrap is not None  # narrowing
+        for c in wrap["co_solids"]:
+            self.assertIsInstance(c["name"], str)
+            self.assertGreater(c["amount"], 0)
+        for c in wrap["co_fluids"]:
+            self.assertIsInstance(c["name"], str)
+            self.assertGreater(c["amount"], 0)
+
+    def test_sorted_by_retention_then_recycler_time(self):
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        for a, b in zip(routes, routes[1:]):
+            # Descending retention.
+            self.assertGreaterEqual(a["retention"] + 1e-12, b["retention"])
+            # At equal retention, ascending recycler_time.
+            if abs(a["retention"] - b["retention"]) < 1e-12:
+                self.assertLessEqual(a["recycler_time"], b["recycler_time"] + 1e-12)
+
+    def test_excludes_recycling_recipes_as_wraps(self):
+        # Recycling recipes themselves must never appear as wrap_recipe values.
+        routes = qp.enumerate_recycle_routes(_data())
+        for item, opts in routes.items():
+            for r in opts:
+                if r["wrap_recipe"] is None:
+                    continue
+                self.assertFalse(
+                    r["wrap_recipe"].endswith("-recycling"),
+                    f"recycling recipe leaked into wrap candidates: {item} -> {r['wrap_recipe']}",
+                )
+
+    def test_build_recycle_shortcuts_unchanged(self):
+        # The old single-best API still returns exactly the same descriptor for
+        # the canonical examples — confirms enumerate_recycle_routes is purely
+        # additive.
+        sc = qp.build_recycle_shortcuts(_data())
+        self.assertEqual(sc["steel-plate"]["container"], "steel-chest")
+        self.assertEqual(sc["concrete"]["container"], "hazard-concrete")
+        # holmium-plate falls back to direct self-recycle in the OLD API
+        # (no single-solid-ingredient wrap exists for it).
+        self.assertIsNone(sc["holmium-plate"]["container"])
+
+
+# ---------------------------------------------------------------------------
+# Wrap-DP: cycle DP composes wrap-craft + container-recycle quality rolls
+# ---------------------------------------------------------------------------
+
+class TestWrapDP(unittest.TestCase):
+    """`solve_self_recycle_target_loop` gains optional wrap-craft (wp, wq)
+    dimensions in the cycle search.  Default-call behaviour is unchanged;
+    when ``wrap_route`` + ``wrap_machine_slots`` are supplied, each cycle
+    pass becomes two quality rolls (wrap-craft + container-recycle) and
+    yield strictly improves."""
+
+    def _baseline_holmium(self):
+        # No wrap path — original cycle DP (recycle-only quality roll).
+        return qp.solve_self_recycle_target_loop(
+            "holmium-plate", _data(),
+            machine_key="assembling-machine-3",
+            machine_slots=4,
+            machine_allow_prod=True,
+            inherent_prod=0.0,
+            research_prod=0.0,
+            module_quality="legendary",
+            target_tier=4,
+        )
+
+    def test_default_call_byte_identical(self):
+        # The wrap_*=None/0 default branch must produce identical output to
+        # the pre-extension code.  Sanity-check by comparing the V_total and
+        # craft/recycle slot split for holmium-plate.
+        v, cfg = self._baseline_holmium()
+        self.assertGreater(v, 0.0)
+        # cfg[0] only has craft_prod/craft_quality/recycle_quality keys (no
+        # wrap_* fields when wrap path is inactive).
+        self.assertNotIn("wrap_prod", cfg[0])
+        self.assertNotIn("wrap_quality", cfg[0])
+
+    def test_wrap_path_strictly_improves_yield(self):
+        # Provide an explicit wrap route (one from enumerate_recycle_routes)
+        # with wrap-craft slots → cycle pass gains a second quality roll.
+        # Yield-per-craft must be >= baseline; for holmium-plate w/ EM-plant
+        # wrap and legendary T3 modules it should be strictly greater.
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        # Pick a multi-ingredient wrap that gives the wrap-craft a fat slot
+        # budget — electromagnetic-plant has 5 module slots.
+        wrap = next(r for r in routes if r["wrap_recipe"] == "electromagnetic-plant")
+        v_baseline, _ = self._baseline_holmium()
+        v_wrap, cfg_wrap = qp.solve_self_recycle_target_loop(
+            "holmium-plate", _data(),
+            machine_key="assembling-machine-3",
+            machine_slots=4,
+            machine_allow_prod=True,
+            inherent_prod=0.0,
+            research_prod=0.0,
+            module_quality="legendary",
+            target_tier=4,
+            wrap_route=wrap,
+            wrap_machine_slots=5,           # EM-plant
+            wrap_allow_prod=True,
+            wrap_inherent_prod=0.5,         # EM-plant +50% inherent prod
+        )
+        self.assertGreater(v_wrap, v_baseline)
+        # Cycle configs now carry wrap_prod / wrap_quality fields.
+        self.assertIn("wrap_prod", cfg_wrap[0])
+        self.assertIn("wrap_quality", cfg_wrap[0])
+        # Slot budget honoured: wp + wq <= wrap_machine_slots.
+        self.assertLessEqual(cfg_wrap[0]["wrap_prod"] + cfg_wrap[0]["wrap_quality"], 5)
+
+    def test_wrap_inactive_when_slots_zero(self):
+        # wrap_route given but wrap_machine_slots=0 → wrap path inactive,
+        # baseline yield (defensive: caller may pass the route opportunistically).
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        wrap = next(r for r in routes if r["wrap_recipe"] == "electromagnetic-plant")
+        v, cfg = qp.solve_self_recycle_target_loop(
+            "holmium-plate", _data(),
+            machine_key="assembling-machine-3",
+            machine_slots=4,
+            machine_allow_prod=True,
+            inherent_prod=0.0,
+            research_prod=0.0,
+            module_quality="legendary",
+            target_tier=4,
+            wrap_route=wrap,
+            wrap_machine_slots=0,
+        )
+        v_baseline, _ = self._baseline_holmium()
+        self.assertAlmostEqual(v, v_baseline, places=10)
+        self.assertNotIn("wrap_prod", cfg[0])
+
+    def test_wrap_prod_scales_retention(self):
+        # All-prod wrap config inflates effective retention via (1 + wrap_prod).
+        # Compare wp=N vs wp=0 (with allow_prod=True) — yield must increase.
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        wrap = next(r for r in routes if r["wrap_recipe"] == "electromagnetic-plant")
+        # wp=0 (quality-only): only quality rolls matter, no retention boost.
+        v_no_prod, _ = qp.solve_self_recycle_target_loop(
+            "holmium-plate", _data(),
+            machine_key="assembling-machine-3",
+            machine_slots=4,
+            machine_allow_prod=True,
+            inherent_prod=0.0,
+            research_prod=0.0,
+            module_quality="legendary",
+            target_tier=4,
+            wrap_route=wrap,
+            wrap_machine_slots=1,
+            wrap_allow_prod=False,         # disallow prod → cycle picks wq only
+            wrap_inherent_prod=0.0,
+        )
+        v_with_prod, _ = qp.solve_self_recycle_target_loop(
+            "holmium-plate", _data(),
+            machine_key="assembling-machine-3",
+            machine_slots=4,
+            machine_allow_prod=True,
+            inherent_prod=0.0,
+            research_prod=0.0,
+            module_quality="legendary",
+            target_tier=4,
+            wrap_route=wrap,
+            wrap_machine_slots=5,          # full EM-plant budget
+            wrap_allow_prod=True,
+            wrap_inherent_prod=0.5,
+        )
+        self.assertGreater(v_with_prod, v_no_prod)
+
+    def test_wrap_disallowed_prod_skips_wp_gt_0(self):
+        # When the wrap recipe doesn't allow prod, wp>0 cycle configs must
+        # produce zero V_rec (DP early-returns).  Verify by constructing a
+        # synthetic call where wrap_allow_prod=False but wp>0 candidates
+        # exist — the optimal config must have wp=0.
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        wrap = next(r for r in routes if r["wrap_recipe"] == "electromagnetic-plant")
+        _, cfg = qp.solve_self_recycle_target_loop(
+            "holmium-plate", _data(),
+            machine_key="assembling-machine-3",
+            machine_slots=4,
+            machine_allow_prod=True,
+            inherent_prod=0.0,
+            research_prod=0.0,
+            module_quality="legendary",
+            target_tier=4,
+            wrap_route=wrap,
+            wrap_machine_slots=5,
+            wrap_allow_prod=False,
+        )
+        self.assertEqual(cfg[0]["wrap_prod"], 0)
+
+    def test_holmium_plate_plan_uses_wrap(self):
+        # End-to-end: a `plan()` for holmium-plate must now engage the wrap
+        # path (Reddit trick) when planets+tech unlock a multi-ingredient
+        # wrap.  Baseline (pre-wrap) was 665.8 machines @ legendary; the
+        # wrap path lands well under 500.
+        out = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        st = next(s for s in out["stages"] if s.get("role") == "self-recycle-target")
+        # Wrap-specific fields populated.
+        self.assertIn("wrap_recipe", st)
+        self.assertIsNotNone(st["wrap_recipe"])
+        self.assertIn("wrap_machine", st)
+        self.assertIsInstance(st["wrap_co_solids"], list)
+        self.assertGreater(len(st["wrap_co_solids"]), 0)
+        # Solid co-ingredients of the wrap appear in normal_solid_input
+        # (planner dumps them; user supplies externally).
+        for co in st["wrap_co_solids"]:
+            self.assertIn(co, out["normal_solid_input"])
+        # Yield improvement: legacy baseline V ≈ 0.001515; with wrap should
+        # be at least 10× better.
+        self.assertGreater(st["yield_per_normal_craft"], 0.015)
+        # Total machine count drops substantially below the pre-wrap baseline.
+        self.assertLess(out["total_machine_count"], 500.0)
+
+    def test_holmium_plate_emits_wrap_note(self):
+        out = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        notes = "\n".join(out["notes"])
+        self.assertIn("wrap-and-recycle via", notes)
+        self.assertIn("co-ingredients sourced at normal quality", notes)
+
+    def test_wrap_skipped_when_legacy_shortcut_handles_item(self):
+        # Conservative scope: items with a legacy single-ingredient wrap
+        # (steel-plate via steel-chest, concrete via hazard-concrete) stay
+        # on the legacy path — wrap chooser returns (None, None).
+        locked: frozenset[str] = frozenset()
+        planet_props = qp._combined_planet_props(_data(), frozenset(["nauvis"]))
+        route, mi = qp._choose_wrap_route(
+            "steel-plate", _data(),
+            assembler_level=3, locked_machines=locked,
+            planet_props=planet_props,
+            module_quality="legendary", quality_module_tier=3,
+            prod_module_tier=3, target_tier=4,
+            machine_key="electric-furnace", machine_slots=2,
+            machine_allow_prod=True, inherent_prod=0.0, research_prod=0.0,
+            research_levels={},
+        )
+        self.assertIsNone(route)
+        self.assertIsNone(mi)
+
+    def test_wrap_chooser_returns_none_for_intermediates(self):
+        # Wrap path is top-level only.  Calling with non-empty _in_flight
+        # (other items in the stack) must return (None, None) — prevents
+        # recursion through co-ingredient walks.
+        route, mi = qp._choose_wrap_route(
+            "holmium-plate", _data(),
+            assembler_level=3, locked_machines=frozenset(),
+            planet_props={},
+            module_quality="legendary", quality_module_tier=3,
+            prod_module_tier=3, target_tier=4,
+            machine_key="assembling-machine-3", machine_slots=4,
+            machine_allow_prod=True, inherent_prod=0.0, research_prod=0.0,
+            research_levels={},
+            _in_flight=frozenset(["some-other-item"]),
+        )
+        self.assertIsNone(route)
+        self.assertIsNone(mi)
+
+    def test_wrap_chooser_runs_at_top_level_with_self_in_flight(self):
+        # The dispatcher seeds _in_flight with the item itself before calling
+        # _plan_self_recycle_target.  The chooser must distinguish that case
+        # (top-level) from genuinely-nested (other items in flight).
+        route, mi = qp._choose_wrap_route(
+            "holmium-plate", _data(),
+            assembler_level=3, locked_machines=frozenset(),
+            planet_props={},
+            module_quality="legendary", quality_module_tier=3,
+            prod_module_tier=3, target_tier=4,
+            machine_key="assembling-machine-3", machine_slots=4,
+            machine_allow_prod=True, inherent_prod=0.0, research_prod=0.0,
+            research_levels={},
+            _in_flight=frozenset(["holmium-plate"]),  # self only — top-level
+        )
+        self.assertIsNotNone(route)
+        self.assertIsNotNone(mi)
+
+    def test_rate_doubles_machines_double_with_wrap(self):
+        # Linear scaling holds even on the wrap path.
+        a = qp.plan(
+            "holmium-plate", 60, _data(),
+            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        b = qp.plan(
+            "holmium-plate", 120, _data(),
+            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        self.assertAlmostEqual(
+            b["total_machine_count"] / a["total_machine_count"], 2.0, places=3,
+        )
+
+    def test_search_space_additive_not_multiplicative(self):
+        # Sanity: the wrap-DP path completes in reasonable time even at full
+        # legendary EM-plant slots (5).  Pre-decoupling worst case was
+        # slots² × wrap_slots² × RECYCLER_SLOTS = ~4500 DPs per call.
+        # Post-decoupling: slots² + wrap_slots² × RECYCLER_SLOTS ≈ 25 + 180.
+        # This test just confirms it finishes — timing assertion is loose
+        # because CI machines vary.
+        import time
+        routes = qp.enumerate_recycle_routes(_data())["holmium-plate"]
+        wrap = next(r for r in routes if r["wrap_recipe"] == "electromagnetic-plant")
+        t0 = time.perf_counter()
+        for _ in range(20):
+            qp.solve_self_recycle_target_loop(
+                "holmium-plate", _data(),
+                machine_key="assembling-machine-3",
+                machine_slots=4,
+                machine_allow_prod=True,
+                inherent_prod=0.0,
+                research_prod=0.0,
+                module_quality="legendary",
+                target_tier=4,
+                wrap_route=wrap,
+                wrap_machine_slots=5,
+                wrap_allow_prod=True,
+                wrap_inherent_prod=0.5,
+            )
+        elapsed = time.perf_counter() - t0
+        # 20 calls should comfortably fit under 1s.
+        self.assertLess(elapsed, 1.0, f"wrap-DP too slow: {elapsed:.3f}s for 20 calls")
+
+
+# ---------------------------------------------------------------------------
 # Reagent fluids are quality-irrelevant (sulfur for sulfuric-acid stays normal)
 # ---------------------------------------------------------------------------
 

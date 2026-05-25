@@ -1,10 +1,11 @@
 # 10x Factorio Engineer
 
-A Factorio factory co-pilot built on two components:
+A Factorio factory co-pilot built on three components:
 
 | Component | What it does |
 |-----------|-------------|
 | **CLI Calculator** (`assets/cli.py`) | Zero-dependency Python CLI — resolves full production chains and emits clean JSON |
+| **Legendary Planner** (`dev/quality_planner.py`) | Separate stdlib-only tool — solves the DP/LP for legendary-quality production, including asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, and self-recycle targets with multi-ingredient wraps |
 | **Claude Skill** (`10x-factorio-engineer/`) | System-prompt + published web artifact that turns Claude into an active planning assistant |
 
 ---
@@ -28,9 +29,9 @@ dev/
   sample/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
-  test_cli.py               # unittest suite (233 tests, stdlib only)
+  test_cli.py               # unittest suite (234 tests, stdlib only)
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
-  test_quality_planner.py   # unittest suite (250 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (296 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -153,7 +154,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-233 CLI tests + 250 quality-planner tests, stdlib only.
+234 CLI tests + 296 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner
 

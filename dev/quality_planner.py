@@ -2166,6 +2166,154 @@ def build_recycle_shortcuts(data: dict) -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Multi-ingredient wrap enumeration (Reddit "rare-ore wrap-and-recycle" trick)
+# ---------------------------------------------------------------------------
+#
+# The fast-recycle shortcut above only considers wraps with a single solid
+# ingredient (steel-chest, hazard-concrete).  But the same trick generalises:
+# any recipe with the item as a solid ingredient — even alongside other solids
+# — can be used as a wrap, provided the wrap's output recycles back to the
+# item.  Examples for holmium-plate: superconductor (needs copper-plate +
+# light-oil), processing-unit (needs copper-cable + advanced-circuit + sulfuric
+# acid), electromagnetic-plant (heavy stack).  Each extra craft step is an
+# extra quality roll, which is the Reddit insight.
+#
+# The single-best selection criterion used by `build_recycle_shortcuts` doesn't
+# work for multi-ingredient wraps because co-ingredient cost can dwarf the
+# retention/recycler-time win.  So we expose the full candidate list and let
+# the solver pick after computing yields.
+
+_RECYCLE_ROUTES_CACHE: dict[int, dict[str, list[dict]]] = {}
+
+
+def enumerate_recycle_routes(data: dict) -> dict[str, list[dict]]:
+    """Enumerate every self-recycle route per item (cached per dataset).
+
+    Returns ``{item: [descriptor, ...]}`` covering:
+      * direct self-recycle (``<item>-recycling`` returns ``item``),
+      * single-solid-ingredient wraps (steel-plate via steel-chest, …),
+      * multi-solid-ingredient wraps (holmium-plate via superconductor, …).
+
+    Descriptor fields:
+      ``retention``      — item atoms returned per item atom processed
+      ``recycler_time``  — recycler seconds per 1 item-atom processed
+      ``craft_time``     — wrap-craft seconds per 1 item-atom processed (0 if direct)
+      ``craft_category`` — wrap-craft recipe category (None if direct)
+      ``container``      — wrap output item (None if direct)
+      ``wrap_recipe``    — wrap recipe key (None if direct)
+      ``co_solids``      — list of ``{name, amount}`` per 1 item-atom processed;
+                           solid co-ingredients of the wrap recipe
+      ``co_fluids``      — list of ``{name, amount}`` per 1 item-atom processed;
+                           fluid ingredients of the wrap recipe
+      ``co_byproducts``  — list of ``{name, amount}`` per 1 item-atom processed;
+                           additional solid outputs of the wrap recipe (besides
+                           the container itself) — useful for credit accounting
+
+    Returned lists are sorted by descending retention then ascending recycler_time
+    so callers can prune to a top-K cheaply.
+    """
+    cached = _RECYCLE_ROUTES_CACHE.get(id(data))
+    if cached is not None:
+        return cached
+
+    fluids = build_fluid_set(data)
+    rk = {r["key"]: r for r in data.get("recipes", [])}
+    cand: dict[str, list[dict]] = defaultdict(list)
+
+    # Direct self-recycle: <item>-recycling returns the item itself.
+    for key, r in rk.items():
+        if not key.endswith("-recycling"):
+            continue
+        item = key[: -len("-recycling")]
+        self_amt = _recipe_result_amount(r, item)
+        if self_amt > 0:
+            cand[item].append({
+                "retention":      self_amt,
+                "recycler_time":  float(r.get("energy_required", 0.2)),
+                "craft_time":     0.0,
+                "craft_category": None,
+                "container":      None,
+                "wrap_recipe":    None,
+                "co_solids":      [],
+                "co_fluids":      [],
+                "co_byproducts":  [],
+            })
+
+    # Wraps: any non-recycling recipe whose ingredients include ``item`` as a
+    # solid, and whose output recycles back into ``item``.  Multi-ingredient
+    # wraps are kept; the single-ingredient case is a strict sub-case.
+    for C in data.get("recipes", []):
+        if C.get("category") in ("recycling", "recycling-or-hand-crafting"):
+            continue
+        if C.get("subgroup") in ("empty-barrel", "fill-barrel"):
+            continue
+        all_ings = C.get("ingredients", [])
+        solids = [i for i in all_ings if i["name"] not in fluids]
+        flu = [i for i in all_ings if i["name"] in fluids]
+        # For each solid ingredient that could be the "wrapped" item, build a
+        # candidate per (item, container).  Recipes never list the same
+        # ingredient twice, so each solid yields one inner iteration.
+        for self_ing in solids:
+            item = self_ing["name"]
+            n_in = float(self_ing.get("amount", 0))
+            if n_in <= 0:
+                continue
+            # Normalised co-ingredient amounts (per 1 item-atom in).
+            co_solids = [
+                {"name": s["name"], "amount": float(s.get("amount", 0)) / n_in}
+                for s in solids if s["name"] != item
+            ]
+            co_fluids = [
+                {"name": f["name"], "amount": float(f.get("amount", 0)) / n_in}
+                for f in flu
+            ]
+            for res in C.get("results", []):
+                container = res.get("name")
+                if not container or container == item:
+                    continue
+                crec = rk.get(f"{container}-recycling")
+                if crec is None:
+                    continue
+                out_back = _recipe_result_amount(crec, item)
+                o_amt = _recipe_result_amount(C, container)
+                if out_back <= 0 or o_amt <= 0:
+                    continue
+                # Additional solid outputs of the wrap recipe (besides the
+                # container).  Probability-weighted via _recipe_result_amount.
+                co_byproducts: list[dict] = []
+                for r2 in C.get("results", []):
+                    bp_name = r2.get("name")
+                    if not bp_name or bp_name == container or bp_name in fluids:
+                        continue
+                    bp_amt = _recipe_result_amount(C, bp_name)
+                    if bp_amt > 0:
+                        co_byproducts.append({"name": bp_name, "amount": bp_amt / n_in})
+                cand[item].append({
+                    "retention":      o_amt * out_back / n_in,
+                    "recycler_time":  o_amt * float(crec.get("energy_required", 0.2)) / n_in,
+                    "craft_time":     float(C.get("energy_required", 0.5)) / n_in,
+                    "craft_category": C.get("category", "crafting"),
+                    "container":      container,
+                    "wrap_recipe":    C["key"],
+                    "co_solids":      co_solids,
+                    "co_fluids":      co_fluids,
+                    "co_byproducts":  co_byproducts,
+                })
+
+    out: dict[str, list[dict]] = {}
+    for item, options in cand.items():
+        # Sort by descending retention, then ascending recycler_time, then
+        # ascending number of co-solids (single-ingredient wraps preferred at
+        # equal retention/time — usually cheaper to source).
+        options.sort(key=lambda d: (
+            -d["retention"], d["recycler_time"], len(d["co_solids"]),
+        ))
+        out[item] = options
+    _RECYCLE_ROUTES_CACHE[id(data)] = out
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Recipe tree walk for planner
 # ---------------------------------------------------------------------------
 
@@ -2927,6 +3075,12 @@ def solve_self_recycle_target_loop(
     prod_module_tier: int = 3,
     quality_module_tier: int = 3,
     target_tier: int = 4,
+    *,
+    wrap_route: dict | None = None,
+    wrap_machine_slots: int = 0,
+    wrap_allow_prod: bool = False,
+    wrap_inherent_prod: float = 0.0,
+    wrap_research_prod: float = 0.0,
 ) -> tuple[float, dict]:
     """DP for legendary yield per ONE craft of a self-recycling target item.
 
@@ -2947,26 +3101,45 @@ def solve_self_recycle_target_loop(
         the recycler chain.
       * V_total = items_per_craft × Σ_{s} craft_probs[s] × V_rec[s].
 
+    Wrap-craft extension (Reddit "rare-ore wrap-and-recycle"):  When
+    ``wrap_route`` is supplied and ``wrap_machine_slots > 0``, each cycle pass
+    becomes a composite of **wrap-craft (quality roll) → container-recycle
+    (quality roll)** — two rolls per pass instead of one.  The composite
+    transition probability is the convolution of the two per-step distributions.
+    ``wrap_route`` provides the base retention; wrap-craft prod modules scale
+    it via ``(1 + wrap_prod)``.  Per-tier configs gain ``wrap_prod`` /
+    ``wrap_quality`` fields when this path is taken.  Co-ingredient sourcing
+    is the caller's responsibility — this solver only models the cycle.
+
     Returns ``(V_total, configs_per_tier)`` — legendary items per fresh craft.
-    Configs map ``{0,1,2,3} → {craft_prod, craft_quality, recycle_quality}``
-    where the keys 0-3 store the per-tier optimal recycler config (craft side
-    is global, optimised once for tier 0 since all crafts start at normal).
+    Configs map ``{0,1,2,3} → {craft_prod, craft_quality, recycle_quality,
+    [wrap_prod, wrap_quality]}`` (wrap_* present only when wrap path active).
     """
     craft_recipe = cli.pick_recipe(item_key, cli.build_recipe_index(data))
     if craft_recipe is None:
         return 0.0, {}
-    # Self-recycle retention via the fastest route (direct or wrap-and-recycle).
-    # This also enables items that only self-recycle through a container (e.g.
-    # concrete via hazard-concrete, whose own recycling decomposes it instead).
-    shortcut = build_recycle_shortcuts(data).get(item_key)
-    if shortcut is not None:
-        retention = shortcut["retention"]
+
+    # --- Retention selection ---
+    # Wrap-DP path: explicit route from enumerate_recycle_routes; use its
+    # retention as base, scaled by wrap-craft prod inside the cycle DP.
+    # Default path: legacy build_recycle_shortcuts (single-best descriptor)
+    # for backwards-compat — no wrap quality/prod rolls.
+    wrap_active = wrap_route is not None and wrap_machine_slots > 0
+    if wrap_active:
+        assert wrap_route is not None  # narrowing for type checkers
+        base_retention = float(wrap_route["retention"])
+        wrap_recipe_allow_prod = bool(wrap_allow_prod)
     else:
-        rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
-        retention = (
-            _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
-        )
-    if retention <= 0 or retention >= 1.0:
+        shortcut = build_recycle_shortcuts(data).get(item_key)
+        if shortcut is not None:
+            base_retention = float(shortcut["retention"])
+        else:
+            rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
+            base_retention = (
+                _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
+            )
+        wrap_recipe_allow_prod = False
+    if base_retention <= 0 or base_retention >= 1.0:
         return 0.0, {}
 
     craft_output = _recipe_result_amount(craft_recipe, item_key)
@@ -2976,25 +3149,76 @@ def solve_self_recycle_target_loop(
         craft_recipe.get("allow_productivity", True) and machine_allow_prod
     )
 
-    # --- Inner DP: V_rec[t] for a single item at tier t entering recycler ---
-    def v_rec_for_q(rq: int) -> list[float]:
+    # --- Inner DP: V_rec[t] for one item-atom at tier t entering the cycle ---
+    #
+    # Without wrap: single recycle pass — composite_up[k] == rec_probs[k].
+    # With wrap:    two-roll composite — convolve wrap_probs ⊗ rec_probs.
+    def v_rec_for_cycle(wp: int, wq: int, rq: int) -> list[float]:
+        if wrap_active:
+            if wp > 0 and not wrap_recipe_allow_prod:
+                # Caller asked for prod the wrap recipe doesn't allow — skip.
+                return [0.0] * 5
+            wrap_prod = (
+                wrap_inherent_prod + wrap_research_prod
+                + _prod_bonus(wp, prod_module_tier, module_quality)
+            )
+            if wrap_prod > 3.0:
+                wrap_prod = 3.0
+            retention = base_retention * (1.0 + wrap_prod)
+            q_wrap = _quality_chance(wq, quality_module_tier, module_quality)
+        else:
+            retention = base_retention
+            q_wrap = 0.0
         q_rec = _quality_chance(rq, quality_module_tier, module_quality)
         V = _seed_value_vector(target_tier)
         for t in range(target_tier - 1, -1, -1):
-            rec_probs = _tier_skip_probs(q_rec, t)  # len 5-t
-            # Probability item stays at tier t after one recycle pass:
-            stay = retention * rec_probs[0]
-            # Probability item escapes UP to tier t+k for k>=1:
-            up = [retention * rec_probs[k] for k in range(1, len(rec_probs))]
-            # Remainder (1 - retention) is item lost.
+            wrap_probs = _tier_skip_probs(q_wrap, t)  # len target_tier - t + 1
+            # Convolve wrap-tier transition with recycle-tier transition.
+            #   composite_up[k] = Σ_i wrap_probs[i] × rec_probs_at(t+i)[k-i]
+            composite_up = [0.0] * len(wrap_probs)
+            for i, pwi in enumerate(wrap_probs):
+                if pwi == 0.0:
+                    continue
+                rec_probs = _tier_skip_probs(q_rec, t + i)  # len target_tier - (t+i) + 1
+                for j, prj in enumerate(rec_probs):
+                    composite_up[i + j] += pwi * prj
+            stay = retention * composite_up[0]
             if stay >= 1.0 - 1e-15:
                 V[t] = 0.0
             else:
-                numer = sum(up[k - 1] * V[t + k] for k in range(1, len(rec_probs)))
+                numer = sum(
+                    retention * composite_up[k] * V[t + k]
+                    for k in range(1, len(composite_up))
+                )
                 V[t] = numer / (1.0 - stay)
         return V
 
-    # --- Outer search: pick (craft_prod, craft_quality, recycle_quality) ---
+    # --- Decoupled two-pass search ---
+    #
+    # The canonical-craft step (cp, cq) is taken ONCE per atom at the entry
+    # point.  Its output distribution feeds the wrap-recycle cycle whose value
+    # vector V_rec[t] depends purely on (wp, wq, rq) — NOT on (cp, cq).  Hoist
+    # the cycle DP outside the canonical search:
+    #
+    #   Pass 1: build {(wp, wq, rq): V_rec[t]} once.  O(wrap_slots² × RECYCLER_SLOTS) DPs.
+    #   Pass 2: canonical (cp, cq) optimization        O(slots²) cheap lookups.
+    #
+    # Total work is ADDITIVE in slots², not multiplicative.  For wrap_slots=0
+    # the cycle dim collapses to {(0, 0, rq)} and the result matches the
+    # pre-wrap-extension code exactly.
+
+    # Pass 1: cycle table.
+    if wrap_active:
+        wp_max = wrap_machine_slots
+    else:
+        wp_max = 0
+    v_rec_table: dict[tuple[int, int, int], list[float]] = {}
+    for wp in range(wp_max + 1):
+        for wq in range(wp_max - wp + 1):
+            for rq in range(RECYCLER_SLOTS + 1):
+                v_rec_table[(wp, wq, rq)] = v_rec_for_cycle(wp, wq, rq)
+
+    # Pass 2: canonical-side optimization via lookup.
     best_total = -1.0
     best_cfg: dict | None = None
     best_v_rec: list[float] = [0.0] * 5
@@ -3012,25 +3236,27 @@ def solve_self_recycle_target_loop(
             q_craft = _quality_chance(cq, quality_module_tier, module_quality)
             craft_probs = _tier_skip_probs(q_craft, 0)  # len 5
 
-            for rq in range(RECYCLER_SLOTS + 1):
-                v_rec = v_rec_for_q(rq)
+            for (wp, wq, rq), v_rec in v_rec_table.items():
                 total = items_per_craft * sum(
                     craft_probs[s] * v_rec[s] for s in range(5)
                 )
                 if total > best_total:
                     best_total = total
                     best_cfg = {
-                        "craft_prod": cp,
-                        "craft_quality": cq,
+                        "craft_prod":     cp,
+                        "craft_quality":  cq,
                         "recycle_quality": rq,
                     }
+                    if wrap_active:
+                        best_cfg["wrap_prod"]    = wp
+                        best_cfg["wrap_quality"] = wq
                     best_v_rec = v_rec
 
     if best_cfg is None:
         return 0.0, {}
-    # Per-tier configs: in this loop the recycle_quality is global (single
-    # config wins).  We expose it for each below-target tier for symmetry with
-    # other loops.
+    # Per-tier configs: in this loop the cycle config is global (single config
+    # wins).  We expose it for each below-target tier for symmetry with other
+    # loops.
     configs = {t: dict(best_cfg) for t in range(target_tier)}
     # Annotate per-tier V_rec for downstream display.
     for t in range(target_tier):
@@ -3325,6 +3551,11 @@ def solve_self_recycle_target_loop_memoized(
     quality_module_tier: int = 3,
     target_tier: int = 4,
     *,
+    wrap_route: dict | None = None,
+    wrap_machine_slots: int = 0,
+    wrap_allow_prod: bool = False,
+    wrap_inherent_prod: float = 0.0,
+    wrap_research_prod: float = 0.0,
     _cache: _DispatchCache | None = None,
 ) -> tuple[float, dict]:
     """Cached wrapper around :func:`solve_self_recycle_target_loop`.
@@ -3332,7 +3563,8 @@ def solve_self_recycle_target_loop_memoized(
     Result is rate-independent (yield-per-craft + per-tier configs), so the
     cache key omits rate.  Floats are rounded to 6 decimals to avoid spurious
     cache misses from FP noise; the rounding precision matches game-relevant
-    granularity (>1e-6).
+    granularity (>1e-6).  When ``wrap_route`` is provided, its identity
+    (recipe key + retention) plus the wrap-machine params join the cache key.
     """
     if _cache is None:
         return solve_self_recycle_target_loop(
@@ -3346,7 +3578,22 @@ def solve_self_recycle_target_loop_memoized(
             prod_module_tier=prod_module_tier,
             quality_module_tier=quality_module_tier,
             target_tier=target_tier,
+            wrap_route=wrap_route,
+            wrap_machine_slots=wrap_machine_slots,
+            wrap_allow_prod=wrap_allow_prod,
+            wrap_inherent_prod=wrap_inherent_prod,
+            wrap_research_prod=wrap_research_prod,
         )
+    # Wrap descriptor identity: recipe key + retention is enough — the rest of
+    # the descriptor is derived from those plus the dataset (which is itself
+    # part of the cache scope via `_cache`'s lifetime).
+    if wrap_route is not None:
+        wrap_key = (
+            wrap_route.get("wrap_recipe"),
+            round(float(wrap_route.get("retention", 0.0)), 6),
+        )
+    else:
+        wrap_key = (None, 0.0)
     key = (
         item_key,
         machine_key,
@@ -3358,6 +3605,11 @@ def solve_self_recycle_target_loop_memoized(
         int(prod_module_tier),
         int(quality_module_tier),
         int(target_tier),
+        wrap_key,
+        int(wrap_machine_slots),
+        bool(wrap_allow_prod),
+        round(float(wrap_inherent_prod), 6),
+        round(float(wrap_research_prod), 6),
     )
     hit = _cache.solver.get(key)
     if hit is not None:
@@ -3374,9 +3626,166 @@ def solve_self_recycle_target_loop_memoized(
         prod_module_tier=prod_module_tier,
         quality_module_tier=quality_module_tier,
         target_tier=target_tier,
+        wrap_route=wrap_route,
+        wrap_machine_slots=wrap_machine_slots,
+        wrap_allow_prod=wrap_allow_prod,
+        wrap_inherent_prod=wrap_inherent_prod,
+        wrap_research_prod=wrap_research_prod,
     )
     _cache.solver[key] = result
     return result
+
+
+def _choose_wrap_route(
+    item_key: str,
+    data: dict,
+    *,
+    assembler_level: int,
+    locked_machines: frozenset[str],
+    planet_props: dict,
+    module_quality: str,
+    quality_module_tier: int,
+    prod_module_tier: int,
+    target_tier: int,
+    machine_key: str,
+    machine_slots: int,
+    machine_allow_prod: bool,
+    inherent_prod: float,
+    research_prod: float,
+    research_levels: dict[str, int],
+    _cache: _DispatchCache | None = None,
+    _in_flight: frozenset[str] = frozenset(),
+) -> tuple[dict | None, dict | None]:
+    """Pick the best wrap route for ``item_key`` if one beats the baseline.
+
+    Algorithm:
+      1. Skip the wrap path entirely for intermediates (``_in_flight`` non-empty).
+         Walking wrap co-ingredients here would deepen recursion through
+         self-recycle dispatchers; restrict to top-level targets for v1.
+      2. Enumerate routes via :func:`enumerate_recycle_routes`.
+      3. Filter to wraps that are reachable: wrap recipe satisfies current
+         planet ``surface_conditions``, and the wrap recipe's machine is
+         unlocked under the current tech state.  Co-ingredients themselves
+         are not pre-filtered — the planner handles planet-gated co-ingredients
+         downstream via the soft-fallback path.
+      4. Compute baseline V (no wrap).
+      5. For each candidate, compute V via the wrap-DP solver (memoized).
+      6. Score by ``V_wrap / (1 + co_count / 2)`` — penalises wraps with more
+         solid co-ingredients, since each adds an upstream sub-chain.  This
+         lets single-ingredient wraps (steel-chest, hazard-concrete) win
+         against marginally-better multi-ingredient wraps but doesn't block
+         the big wins (holmium-plate via EM-plant is ~34× baseline).
+      7. If best-scored wrap doesn't beat baseline by ≥ 5 %, return ``(None, None)``.
+
+    Returns ``(descriptor, machine_info)`` where ``machine_info`` has
+    ``machine_key``, ``machine_slots``, ``allow_prod``, ``inherent_prod``.
+    """
+    # Intermediates use the simple direct/legacy path — avoid deepening
+    # recursion through co-ingredient walks.  Top-level targets get the
+    # full Reddit treatment.  Note: the dispatcher seeds ``_in_flight`` with
+    # ``item_key`` itself before calling, so the guard subtracts ``{item_key}``
+    # to check whether any OTHER item is in flight (= we're nested).
+    if _in_flight - {item_key}:
+        return None, None
+
+    # Conservative scope (v1): only consider multi-ingredient wraps for items
+    # the LEGACY ``build_recycle_shortcuts`` couldn't help with — i.e. items
+    # whose only existing path is the slow direct recycle (container=None).
+    # For items like steel-plate / concrete that already have a fast single-
+    # ingredient wrap (steel-chest, hazard-concrete), keep the existing one-
+    # roll cycle to preserve byproduct/incidental accounting and not flip
+    # the Path-A-vs-Path-B comparator.
+    legacy = build_recycle_shortcuts(data).get(item_key)
+    if legacy is not None and legacy.get("container") is not None:
+        return None, None
+
+    routes = enumerate_recycle_routes(data).get(item_key, [])
+    if not routes:
+        return None, None
+    # Baseline: no-wrap V (used as the comparison floor).
+    v_baseline, _ = solve_self_recycle_target_loop_memoized(
+        item_key, data,
+        machine_key=machine_key,
+        machine_slots=machine_slots,
+        machine_allow_prod=machine_allow_prod,
+        inherent_prod=inherent_prod,
+        research_prod=research_prod,
+        module_quality=module_quality,
+        prod_module_tier=prod_module_tier,
+        quality_module_tier=quality_module_tier,
+        target_tier=target_tier,
+        _cache=_cache,
+    )
+
+    module_slots_map = cli.build_machine_module_slots(data)
+    rk = {r["key"]: r for r in data.get("recipes", [])}
+
+    best: tuple[float, dict, dict, float] | None = None  # (score, route, mi, v_wrap)
+    for route in routes:
+        wrap_recipe_key = route.get("wrap_recipe")
+        if wrap_recipe_key is None:
+            continue  # direct self-recycle — baseline path
+        wrap_recipe = rk.get(wrap_recipe_key)
+        if wrap_recipe is None:
+            continue
+        # Planet filter: skip wraps unreachable on the current planet set.
+        if planet_props and not cli._recipe_valid_for_planet(wrap_recipe, planet_props):
+            continue
+        # Machine filter: skip wraps whose machine is tech-locked.
+        wmr = _machine_for_recipe(wrap_recipe, assembler_level, locked_machines)
+        if wmr is None:
+            continue
+        wmk, _wms = wmr
+        w_slots = int(module_slots_map.get(wmk, 0))
+        if w_slots <= 0:
+            continue  # machine accepts no modules — wrap-DP can't roll quality
+        w_inherent = MACHINE_INHERENT_PROD.get(wmk, 0.0)
+        w_allow_prod = bool(wrap_recipe.get("allow_productivity", True))
+        w_research_prod = _research_prod_for_recipe(wrap_recipe_key, research_levels)
+        v_wrap, _ = solve_self_recycle_target_loop_memoized(
+            item_key, data,
+            machine_key=machine_key,
+            machine_slots=machine_slots,
+            machine_allow_prod=machine_allow_prod,
+            inherent_prod=inherent_prod,
+            research_prod=research_prod,
+            module_quality=module_quality,
+            prod_module_tier=prod_module_tier,
+            quality_module_tier=quality_module_tier,
+            target_tier=target_tier,
+            wrap_route=route,
+            wrap_machine_slots=w_slots,
+            wrap_allow_prod=w_allow_prod,
+            wrap_inherent_prod=w_inherent,
+            wrap_research_prod=w_research_prod,
+            _cache=_cache,
+        )
+        if v_wrap <= 0:
+            continue
+        mi = {
+            "machine_key":   wmk,
+            "machine_slots": w_slots,
+            "allow_prod":    w_allow_prod,
+            "inherent_prod": w_inherent,
+            "research_prod": w_research_prod,
+        }
+        co_count = len(route.get("co_solids", []))
+        # Cost-penalised score: each extra solid co-ingredient adds an
+        # upstream chain.  α = 1/2 means co_count=0 → 1.0×, co_count=2 → 0.5×,
+        # co_count=4 → 0.33×.  Holmium-plate's huge wrap gain (~34×) easily
+        # clears this; concrete's marginal cargo-landing-pad gain does not.
+        score = v_wrap / (1.0 + co_count / 2.0)
+        if best is None or score > best[0]:
+            best = (score, route, mi, v_wrap)
+
+    if best is None:
+        return None, None
+    _score, route, mi, v_wrap = best
+    # Require meaningful improvement over baseline.  5 % threshold avoids
+    # triggering the wrap path for marginal gains.
+    if v_wrap <= v_baseline * 1.05:
+        return None, None
+    return route, mi
 
 
 def _env_signature(
@@ -3437,6 +3846,7 @@ def _plan_self_recycle_target(
     target_tier: int = 4,
     _cache: "_DispatchCache | None" = None,
     _in_flight: frozenset[str] = frozenset(),
+    _force_no_wrap: bool = False,
 ) -> dict:
     """Plan a chain whose target self-recycles (e.g. superconductor).
 
@@ -3479,6 +3889,48 @@ def _plan_self_recycle_target(
     inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
     research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels)
 
+    # Pick the best wrap route (Reddit "rare-ore wrap-and-recycle") if one
+    # beats the no-wrap baseline by >5 %.  Returns (None, None) for items
+    # where the direct/single-ingredient path is good enough, AND for any
+    # intermediate self-recycle target (top-level only, gated by _in_flight).
+    # ``_force_no_wrap`` is set by the dispatcher's cycle guard — when we got
+    # here because a higher frame already routed through this item, the wrap
+    # path's co-ingredient walks would loop back to the same item.
+    if _force_no_wrap:
+        wrap_route, wrap_machine_info = None, None
+    else:
+        wrap_route, wrap_machine_info = _choose_wrap_route(
+            item_key, data,
+            assembler_level=assembler_level,
+            locked_machines=locked_machines,
+            planet_props=planet_props,
+            module_quality=module_quality,
+            quality_module_tier=quality_module_tier,
+            prod_module_tier=prod_module_tier,
+            target_tier=target_tier,
+            machine_key=machine_key,
+            machine_slots=machine_slots,
+            machine_allow_prod=machine_allow_prod,
+            inherent_prod=inherent_prod,
+            research_prod=research_prod,
+            research_levels=research_levels,
+            _cache=_cache,
+            _in_flight=_in_flight,
+        )
+    wrap_active = wrap_route is not None and wrap_machine_info is not None
+
+    if wrap_active:
+        assert wrap_route is not None and wrap_machine_info is not None
+        wrap_machine_slots = int(wrap_machine_info["machine_slots"])
+        wrap_allow_prod    = bool(wrap_machine_info["allow_prod"])
+        wrap_inherent_prod = float(wrap_machine_info["inherent_prod"])
+        wrap_research_prod = float(wrap_machine_info["research_prod"])
+    else:
+        wrap_machine_slots = 0
+        wrap_allow_prod    = False
+        wrap_inherent_prod = 0.0
+        wrap_research_prod = 0.0
+
     v, configs = solve_self_recycle_target_loop_memoized(
         item_key, data,
         machine_key=machine_key,
@@ -3490,6 +3942,11 @@ def _plan_self_recycle_target(
         prod_module_tier=3,
         quality_module_tier=quality_module_tier,
         target_tier=target_tier,
+        wrap_route=wrap_route,
+        wrap_machine_slots=wrap_machine_slots,
+        wrap_allow_prod=wrap_allow_prod,
+        wrap_inherent_prod=wrap_inherent_prod,
+        wrap_research_prod=wrap_research_prod,
         _cache=_cache,
     )
     if v <= 0:
@@ -3513,30 +3970,67 @@ def _plan_self_recycle_target(
         prod0 = 3.0
     items_per_craft = _recipe_result_amount(craft_recipe, item_key) * (1.0 + prod0)
     qm_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
-    # Recycle via the fastest route (direct or the steel-chest / hazard-concrete
-    # wrap-and-recycle trick).  The wrap keeps the same retention but moves most
-    # of the time onto fast container-craft assemblers, slashing recycler count.
-    shortcut = build_recycle_shortcuts(data).get(item_key)
-    if shortcut is not None:
-        retention = shortcut["retention"]
-        rec_time = shortcut["recycler_time"]
-        container = shortcut["container"]
-        craft_time_per_item = shortcut["craft_time"]
-        craft_category = shortcut["craft_category"]
-    else:
-        rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
-        retention = (
-            _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
+    # Recycle route selection:
+    #   * wrap_active  → use the multi-ingredient wrap chosen by _choose_wrap_route.
+    #   * otherwise    → legacy build_recycle_shortcuts (direct or
+    #                    steel-chest / hazard-concrete single-ingredient wrap).
+    if wrap_active:
+        assert wrap_route is not None and wrap_machine_info is not None
+        retention           = float(wrap_route["retention"])
+        rec_time            = float(wrap_route["recycler_time"])
+        container           = wrap_route["container"]
+        craft_time_per_item = float(wrap_route["craft_time"])
+        wrap_machine_key    = str(wrap_machine_info["machine_key"])
+        # Scale retention by wrap-craft prod selected by the DP (configs[0]).
+        wp0 = int(configs.get(0, {}).get("wrap_prod", 0))
+        wrap_prod0 = wrap_inherent_prod + wrap_research_prod + _prod_bonus(
+            wp0, prod_module_tier, module_quality,
         )
-        rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-        container = None
-        craft_time_per_item = 0.0
-        craft_category = None
+        if wrap_prod0 > 3.0:
+            wrap_prod0 = 3.0
+        retention = retention * (1.0 + wrap_prod0)
+    else:
+        shortcut = build_recycle_shortcuts(data).get(item_key)
+        if shortcut is not None:
+            retention = shortcut["retention"]
+            rec_time = shortcut["recycler_time"]
+            container = shortcut["container"]
+            craft_time_per_item = shortcut["craft_time"]
+            craft_category = shortcut["craft_category"]
+        else:
+            rec_recipe = _recipe_by_key(data, f"{item_key}-recycling")
+            retention = (
+                _recipe_result_amount(rec_recipe, item_key) if rec_recipe else RECYCLER_RETENTION
+            )
+            rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
+            container = None
+            craft_time_per_item = 0.0
+            craft_category = None
+        wrap_machine_key = ""
+
     total_recycle_crafts = crafts_per_min * items_per_craft / max(1.0 - retention, 1e-6)
     recycler_machines = total_recycle_crafts * rec_time / (RECYCLER_SPEED * qm_mult * 60.0)
-    # Container-craft assemblers (only for the wrap route).
+    # Container-craft assemblers.  Two source paths:
+    #   wrap_active → wrap recipe's resolved machine.
+    #   legacy     → cli.get_machine on craft_category.
     container_machines = 0.0
-    if container is not None and craft_time_per_item > 0:
+    if wrap_active and craft_time_per_item > 0:
+        cm_speed = float(cli.MACHINE_SPEED.get(wrap_machine_key, 1.0)) if hasattr(cli, "MACHINE_SPEED") else 1.0
+        # Resolve via cli.get_machine for the wrap recipe's category to stay
+        # consistent with the rest of the planner.
+        assert wrap_route is not None
+        wrap_recipe = next(
+            (r for r in data.get("recipes", []) if r.get("key") == wrap_route["wrap_recipe"]),
+            None,
+        )
+        if wrap_recipe is not None:
+            _wmk2, wm_speed = cli.get_machine(
+                wrap_recipe.get("category", "crafting"), assembler_level, "electric",
+            )
+            cm_speed = float(wm_speed)
+        cm_speed_f = cm_speed * qm_mult
+        container_machines = total_recycle_crafts * craft_time_per_item / (cm_speed_f * 60.0)
+    elif container is not None and craft_time_per_item > 0:
         cm_key, cm_speed = cli.get_machine(craft_category or "crafting", assembler_level, "electric")
         cm_speed_f = float(cm_speed) * qm_mult
         container_machines = total_recycle_crafts * craft_time_per_item / (cm_speed_f * 60.0)
@@ -3544,13 +4038,37 @@ def _plan_self_recycle_target(
     # Walk ingredients at NORMAL quality.  Each ingredient's demand =
     # amount × crafts_per_min.  Solid raws + intermediates need normal-quality
     # production; fluids are quality-transparent.
+    #
+    # Two ingredient sources when wrap_active:
+    #   (1) canonical craft recipe's ingredients (e.g. holmium-solution) —
+    #       walked via the quality dispatcher (existing behaviour).
+    #   (2) wrap recipe's co-ingredients (e.g. copper-plate for superconductor
+    #       wrap) — registered as ``normal_solid_input`` / ``normal_fluid_input``
+    #       directly, NOT walked.  Why: blocklisted co-ingredients
+    #       (superconductor, processing-unit) would route through the quality
+    #       dispatcher, which produces a legendary chain — wrong for "normal-
+    #       quality matched co-ingredient" semantics, and prone to recursion
+    #       back to the wrapped item itself.  The user sources these via the
+    #       regular CLI calculator.
     normal_stages: list[dict] = []
     normal_solid_input: dict[str, float] = {}
     normal_fluid_input: dict[str, float] = {}
+
+    # (1) Canonical recipe ingredients — walked at normal quality.
+    ingredient_demands: list[tuple[str, float]] = []
     for ing in craft_recipe.get("ingredients", []):
-        iname = ing["name"]
-        amt = float(ing.get("amount", 0))
-        ing_rate = amt * crafts_per_min
+        ingredient_demands.append((ing["name"], float(ing.get("amount", 0)) * crafts_per_min))
+    # (2) Wrap co-ingredients — registered as normal inputs (no walk).
+    if wrap_active:
+        assert wrap_route is not None
+        for c in wrap_route.get("co_solids", []):
+            rate_per_min = float(c["amount"]) * total_recycle_crafts
+            normal_solid_input[c["name"]] = normal_solid_input.get(c["name"], 0.0) + rate_per_min
+        for c in wrap_route.get("co_fluids", []):
+            rate_per_min = float(c["amount"]) * total_recycle_crafts
+            normal_fluid_input[c["name"]] = normal_fluid_input.get(c["name"], 0.0) + rate_per_min
+
+    for iname, ing_rate in ingredient_demands:
         if iname in fluids:
             normal_fluid_input[iname] = normal_fluid_input.get(iname, 0.0) + ing_rate
         else:
@@ -3616,10 +4134,23 @@ def _plan_self_recycle_target(
                     f"{configs[t].get('recycle_quality',0)}q "
                     f"(t{quality_module_tier} {module_quality})"
                 ),
+                **({
+                    "wrap": (
+                        f"{configs[t].get('wrap_prod',0)}p+"
+                        f"{configs[t].get('wrap_quality',0)}q "
+                        f"(t{quality_module_tier} {module_quality})"
+                    ),
+                } if wrap_active else {}),
             }
             for t in range(target_tier)
         },
     }
+    if wrap_active:
+        assert wrap_route is not None and wrap_machine_info is not None
+        self_stage["wrap_recipe"]  = wrap_route["wrap_recipe"]
+        self_stage["wrap_machine"] = wrap_machine_info["machine_key"]
+        self_stage["wrap_co_solids"] = [c["name"] for c in wrap_route.get("co_solids", [])]
+        self_stage["wrap_co_fluids"] = [c["name"] for c in wrap_route.get("co_fluids", [])]
 
     total_machines = (
         self_stage["machine_count"]
@@ -3630,6 +4161,16 @@ def _plan_self_recycle_target(
         f"self-recycle target '{item_key}' uses {machine_key} (slots={machine_slots}, "
         f"inherent prod={inherent_prod:.2f}); ingredients consumed at normal quality"
     ]
+    if wrap_active:
+        assert wrap_route is not None and wrap_machine_info is not None
+        co_names = [c["name"] for c in wrap_route.get("co_solids", [])]
+        notes.append(
+            f"wrap-and-recycle via '{wrap_route['wrap_recipe']}' on "
+            f"{wrap_machine_info['machine_key']} "
+            f"(slots={wrap_machine_info['machine_slots']}, "
+            f"inherent prod={wrap_machine_info['inherent_prod']:.2f}); "
+            f"co-ingredients sourced at normal quality: {co_names or '(none)'}"
+        )
 
     # Per-stage power + total (V3 power accounting).
     machine_power_w = cli.build_machine_power_w(data)
@@ -3747,7 +4288,7 @@ def choose_path_self_recycle(
     )
     decision_key = (item_key, env)
 
-    def _run_path_a() -> dict | None:
+    def _run_path_a(force_no_wrap: bool = False) -> dict | None:
         try:
             return _plan_self_recycle_target(
                 item_key, rate, data,
@@ -3765,6 +4306,7 @@ def choose_path_self_recycle(
                 target_tier=target_tier,
                 _cache=_cache,
                 _in_flight=_in_flight | {item_key},
+                _force_no_wrap=force_no_wrap,
             )
         except ValueError:
             return None
@@ -3795,7 +4337,9 @@ def choose_path_self_recycle(
 
     # --- Cycle guard ---
     if item_key in _in_flight:
-        path_a = _run_path_a()
+        # Force-disable the wrap path: a higher frame is already resolving
+        # this item, so walking wrap co-ingredients would loop back here.
+        path_a = _run_path_a(force_no_wrap=True)
         if path_a is None:
             raise ValueError(
                 f"ERROR: cycle detected for '{item_key}' through {sorted(_in_flight)} "
