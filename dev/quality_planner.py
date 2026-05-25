@@ -168,7 +168,7 @@ PLANET_UNLOCKS: dict[str, tuple[str, ...]] = {
     "tungsten-ore":         ("vulcanus",),
     "tungsten-carbide":     ("vulcanus",),
     "lava":                 ("vulcanus",),
-    "sulfuric-acid":        ("nauvis", "vulcanus"),  # Nauvis chem-plant OR Vulcanus geyser
+    "sulfuric-acid":        ("nauvis", "vulcanus", "fulgora"),  # Nauvis/Fulgora chem-plant (sulfur via oil) OR Vulcanus geyser
     # Fulgora raws
     "holmium-ore":          ("fulgora",),
     "holmium-solution":     ("fulgora",),
@@ -722,6 +722,25 @@ def _prod_bonus(num_p_slots: int, prod_module_tier: int, module_quality: str) ->
     return num_p_slots * base * mult
 
 
+def _seed_value_vector(target_tier: int) -> list[float]:
+    """Seed the per-tier value vector for a quality-loop DP.
+
+    ``V[t]`` is the expected number of items at tier ≥ ``target_tier`` produced
+    per one item entering the loop at tier ``t``.  Every tier at or above the
+    target is absorbing with value 1.0 (reaching the target tier *or better*
+    counts as success — overshooting rolls land on a still-usable item and are
+    pulled out of the loop).  Tiers below the target are filled in by backward
+    induction in the caller.
+
+    With ``target_tier == 4`` (legendary) this collapses to the original
+    behaviour: only ``V[4] == 1.0``.
+    """
+    V = [0.0] * 5
+    for t in range(target_tier, 5):
+        V[t] = 1.0
+    return V
+
+
 def _unused_solve_loop_reference(
     craft_recipe: dict | None,
     craft_machine_key: str,
@@ -892,6 +911,7 @@ def solve_recycle_loop(
     module_quality: str,
     prod_module_tier: int = 3,
     quality_module_tier: int = 3,
+    target_tier: int = 4,
 ) -> tuple[float, dict]:
     """Simplified DP for the recycle-only loop on an item.
 
@@ -909,8 +929,7 @@ def solve_recycle_loop(
     recycle_recipe_key = f"{item_key}-recycling"
     recycle_recipe = _recipe_by_key(data, recycle_recipe_key)
 
-    V = [0.0] * 5
-    V[4] = 1.0
+    V = _seed_value_vector(target_tier)
     configs: dict[int, dict] = {}
 
     recipe_allow_prod = craft_recipe.get("allow_productivity", True) and machine_allow_prod
@@ -934,7 +953,7 @@ def solve_recycle_loop(
     # Craft output amount of item per cycle
     craft_output = _recipe_result_amount(craft_recipe, item_key)
 
-    for t in range(3, -1, -1):
+    for t in range(target_tier - 1, -1, -1):
         best_v = -1.0
         best_cfg = None
         for cp, cq in craft_configs:
@@ -977,6 +996,7 @@ def solve_asteroid_reprocessing_loop(
     data: dict,
     module_quality: str,
     quality_module_tier: int = 3,
+    target_tier: int = 4,
 ) -> tuple[float, dict]:
     """DP for legendary-chunk per normal-chunk via reprocessing.
 
@@ -1008,11 +1028,10 @@ def solve_asteroid_reprocessing_loop(
     if retention > 1.0:
         retention = 1.0
 
-    V = [0.0] * 5
-    V[4] = 1.0
+    V = _seed_value_vector(target_tier)
     configs: dict[int, dict] = {}
 
-    for t in range(3, -1, -1):
+    for t in range(target_tier - 1, -1, -1):
         best_v = -1.0
         best_cfg = None
         for q in range(CRUSHER_SLOTS + 1):
@@ -1044,6 +1063,7 @@ def solve_shuffle_loop(
     research_prod: float = 0.0,
     inherent_prod: float | None = None,
     cast_slots: int | None = None,
+    target_tier: int = 4,
 ) -> tuple[float, dict]:
     """Generic cross-item shuffle DP.
 
@@ -1096,12 +1116,11 @@ def solve_shuffle_loop(
     if output_per_cast <= 0:
         return 0.0, {}
 
-    V = [0.0] * 5
-    V[4] = 1.0
+    V = _seed_value_vector(target_tier)
     configs: dict[int, dict] = {}
 
     cast_allow_prod = bool(cast_recipe.get("allow_productivity", False))
-    for t in range(3, -1, -1):
+    for t in range(target_tier - 1, -1, -1):
         best_v = -1.0
         best_cfg = None
         for cp in range(cast_slots + 1):
@@ -1178,6 +1197,7 @@ def solve_lds_shuffle_loop(
     prod_module_tier: int = 3,
     research_prod: float = 0.0,
     foundry_inherent_prod: float = 0.5,
+    target_tier: int = 4,
 ) -> tuple[float, dict]:
     """DP for legendary-plastic-bar per normal-plastic-bar via the LDS shuffle.
 
@@ -1222,6 +1242,7 @@ def solve_lds_shuffle_loop(
         research_prod=research_prod,
         inherent_prod=foundry_inherent_prod,
         cast_slots=4,
+        target_tier=target_tier,
     )
 
 
@@ -1240,6 +1261,7 @@ def compute_shuffle_stage(
     cast_speed: float | None = None,
     recycler_speed: float = RECYCLER_SPEED,
     machine_quality: str = "normal",
+    target_tier: int = 4,
 ) -> dict | None:
     """Size a generic cross-item shuffle stage producing ``legendary_primary_per_min``.
 
@@ -1298,6 +1320,7 @@ def compute_shuffle_stage(
         research_prod=research_prod,
         inherent_prod=inherent_prod,
         cast_slots=cast_slots,
+        target_tier=target_tier,
     )
     if v <= 0:
         return None
@@ -1386,6 +1409,7 @@ def _baseline_cost_for_leaf(
     quality_module_tier: int = 3,
     machine_quality: str = "normal",
     chain_stages: list[dict] | None = None,
+    target_tier: int = 4,
 ) -> float:
     """Estimate machines needed to produce ``demand`` legendary ``leaf`` per
     minute via the default (non-shuffle) path.
@@ -1410,7 +1434,7 @@ def _baseline_cost_for_leaf(
     if leaf in RAW_TO_CHUNK:
         chunk = RAW_TO_CHUNK[leaf]
         v, _ = solve_asteroid_reprocessing_loop(
-            chunk, data, module_quality, quality_module_tier,
+            chunk, data, module_quality, quality_module_tier, target_tier,
         )
         if v <= 0:
             return float("inf")
@@ -1426,7 +1450,7 @@ def _baseline_cost_for_leaf(
     # Mined raw: recycler self-loop
     if leaf in MINED_RAW_PLANETS:
         v, _ = solve_mined_raw_self_recycle_loop(
-            leaf, data, module_quality, quality_module_tier,
+            leaf, data, module_quality, quality_module_tier, target_tier,
         )
         if v <= 0:
             return float("inf")
@@ -1464,6 +1488,7 @@ def select_shuffles_greedy(
     prod_module_tier: int = 3,
     research_levels: dict[str, int] | None = None,
     machine_quality: str = "normal",
+    target_tier: int = 4,
 ) -> list[dict]:
     """Per-leaf greedy: activate shuffles that produce the chain's legendary leaves.
 
@@ -1535,6 +1560,7 @@ def select_shuffles_greedy(
                     prod_module_tier=prod_module_tier,
                     research_prod=research_prod,
                     machine_quality=machine_quality,
+                    target_tier=target_tier,
                 )
                 if stage is None:
                     continue
@@ -1586,6 +1612,7 @@ def select_shuffles_greedy(
                     prod_module_tier=prod_module_tier,
                     research_prod=research_prod,
                     machine_quality=machine_quality,
+                    target_tier=target_tier,
                 )
                 if stage is None:
                     continue
@@ -1619,6 +1646,7 @@ def select_shuffles_greedy(
             prod_module_tier=prod_module_tier,
             research_prod=research_prod,
             machine_quality=machine_quality,
+            target_tier=target_tier,
         )
         if stage is not None:
             chosen.append(stage)
@@ -1635,6 +1663,7 @@ def compute_lds_shuffle_stage(
     foundry_inherent_prod: float = 0.5,
     foundry_speed: float = 4.0,
     recycler_speed: float = RECYCLER_SPEED,
+    target_tier: int = 4,
 ) -> dict | None:
     """Size an LDS-shuffle stage that produces ``legendary_plastic_per_min``.
 
@@ -1675,6 +1704,7 @@ def compute_lds_shuffle_stage(
         cast_slots=4,
         cast_speed=foundry_speed,
         recycler_speed=recycler_speed,
+        target_tier=target_tier,
     )
     if g is None:
         return None
@@ -1698,6 +1728,7 @@ def solve_mined_raw_self_recycle_loop(
     data: dict,
     module_quality: str,
     quality_module_tier: int = 3,
+    target_tier: int = 4,
 ) -> tuple[float, dict]:
     """DP for legendary-raw per normal-raw via the recycler self-loop.
 
@@ -1728,11 +1759,10 @@ def solve_mined_raw_self_recycle_loop(
     # recycler outputs are terminal (one-shot) and we model with retention=0.
     retention = _recipe_result_amount(rec, raw_key)
 
-    V = [0.0] * 5
-    V[4] = 1.0
+    V = _seed_value_vector(target_tier)
     configs: dict[int, dict] = {}
 
-    for t in range(3, -1, -1):
+    for t in range(target_tier - 1, -1, -1):
         best_v = -1.0
         best_cfg = None
         for q in range(RECYCLER_SLOTS + 1):
@@ -2318,6 +2348,7 @@ def walk_recipe_tree(
                 machine_quality=machine_quality,
                 active_shuffles=_dispatch_env.get("active_shuffles"),
                 no_asteroids=no_asteroids,
+                target_tier=_dispatch_env.get("target_tier", 4),
                 _cache=_cache,
                 _in_flight=_in_flight | {inter},
             )
@@ -2495,6 +2526,7 @@ def solve_self_recycle_target_loop(
     module_quality: str,
     prod_module_tier: int = 3,
     quality_module_tier: int = 3,
+    target_tier: int = 4,
 ) -> tuple[float, dict]:
     """DP for legendary yield per ONE craft of a self-recycling target item.
 
@@ -2540,9 +2572,8 @@ def solve_self_recycle_target_loop(
     # --- Inner DP: V_rec[t] for a single item at tier t entering recycler ---
     def v_rec_for_q(rq: int) -> list[float]:
         q_rec = _quality_chance(rq, quality_module_tier, module_quality)
-        V = [0.0] * 5
-        V[4] = 1.0
-        for t in range(3, -1, -1):
+        V = _seed_value_vector(target_tier)
+        for t in range(target_tier - 1, -1, -1):
             rec_probs = _tier_skip_probs(q_rec, t)  # len 5-t
             # Probability item stays at tier t after one recycle pass:
             stay = retention * rec_probs[0]
@@ -2591,10 +2622,11 @@ def solve_self_recycle_target_loop(
     if best_cfg is None:
         return 0.0, {}
     # Per-tier configs: in this loop the recycle_quality is global (single
-    # config wins).  We expose it in all 4 tiers for symmetry with other loops.
-    configs = {t: dict(best_cfg) for t in (0, 1, 2, 3)}
+    # config wins).  We expose it for each below-target tier for symmetry with
+    # other loops.
+    configs = {t: dict(best_cfg) for t in range(target_tier)}
     # Annotate per-tier V_rec for downstream display.
-    for t in (0, 1, 2, 3):
+    for t in range(target_tier):
         configs[t]["v_rec"] = best_v_rec[t]
     return max(best_total, 0.0), configs
 
@@ -2614,6 +2646,7 @@ def solve_self_feed_target_loop(
     machine_quality: str = "normal",
     prod_module_tier: int = 3,
     quality_module_tier: int = 3,
+    target_tier: int = 4,
 ) -> tuple[float, dict]:
     """LP-based steady-state solver for self-feed target items.
 
@@ -2706,14 +2739,15 @@ def solve_self_feed_target_loop(
     # In each LP corner only x_{q*} > 0; tiers q < q* have zero flow (their
     # configs are irrelevant), and tiers q > q* run only y_q (recycler) so
     # only their rq matters.  This collapses the search drastically.
-    for q_star in (0, 1, 2, 3):
+    for q_star in range(target_tier):
         # Enumerate configs at q_star (full craft+recycle config), and rq
         # only at q > q_star (no crafts there).  Use placeholder zeros for
-        # q < q_star — those tiers are inert.
+        # q < q_star and tiers at/above the target — those tiers carry no flow
+        # (items reaching the target tier or better drain immediately).
         # Build per-tier choices as lists of (cp, cq, rq) tuples.
         choices_per_tier: list[list[tuple[int, int, int]]] = []
         for q in (0, 1, 2, 3):
-            if q < q_star:
+            if q < q_star or q >= target_tier:
                 choices_per_tier.append([(0, 0, 0)])  # inert; values unused
             elif q == q_star:
                 choices_per_tier.append([
@@ -2749,9 +2783,9 @@ def solve_self_feed_target_loop(
                 if A_qstar >= -1e-12:
                     continue
                 # B_q must be > 0 at every tier where y_q may be positive
-                # (q_star and above).
+                # (q_star up to — but not including — the target tier).
                 bad_B = False
-                for q in range(q_star, 4):
+                for q in range(q_star, target_tier):
                     if 1.0 - retention * rp_dist[q][0] <= 1e-12:
                         bad_B = True
                         break
@@ -2775,19 +2809,23 @@ def solve_self_feed_target_loop(
                         break
                     if y_unit[q] < 0:
                         y_unit[q] = 0.0
-                    # Cascade outputs to higher processing tiers q+1..3.
-                    for s in range(q + 1, 4):
+                    # Cascade outputs to higher processing tiers (below the
+                    # target).  Rolls that overshoot to the target tier or
+                    # better are counted as drain, not cascaded.
+                    for s in range(q + 1, target_tier):
                         c_o = output[q] * cp_dist[q][s - q]
                         c_r = retention * rp_dist[q][s - q]
                         I[s] += x_unit[q] * c_o + y_unit[q] * c_r
                 if not feasible:
                     continue
-                # Drain at legendary (q=4).
+                # Drain: every roll that lands at the target tier or better.
                 drain_per_unit = 0.0
-                for q in (0, 1, 2, 3):
+                for q in range(target_tier):
+                    cp_drain = sum(cp_dist[q][s - q] for s in range(target_tier, 5))
+                    rp_drain = sum(rp_dist[q][s - q] for s in range(target_tier, 5))
                     drain_per_unit += (
-                        x_unit[q] * output[q] * cp_dist[q][4 - q]
-                        + y_unit[q] * retention * rp_dist[q][4 - q]
+                        x_unit[q] * output[q] * cp_drain
+                        + y_unit[q] * retention * rp_drain
                     )
                 if drain_per_unit <= 1e-12:
                     continue
@@ -2878,6 +2916,7 @@ def solve_self_recycle_target_loop_memoized(
     module_quality: str,
     prod_module_tier: int = 3,
     quality_module_tier: int = 3,
+    target_tier: int = 4,
     *,
     _cache: _DispatchCache | None = None,
 ) -> tuple[float, dict]:
@@ -2899,6 +2938,7 @@ def solve_self_recycle_target_loop_memoized(
             module_quality=module_quality,
             prod_module_tier=prod_module_tier,
             quality_module_tier=quality_module_tier,
+            target_tier=target_tier,
         )
     key = (
         item_key,
@@ -2910,6 +2950,7 @@ def solve_self_recycle_target_loop_memoized(
         module_quality,
         int(prod_module_tier),
         int(quality_module_tier),
+        int(target_tier),
     )
     hit = _cache.solver.get(key)
     if hit is not None:
@@ -2925,6 +2966,7 @@ def solve_self_recycle_target_loop_memoized(
         module_quality=module_quality,
         prod_module_tier=prod_module_tier,
         quality_module_tier=quality_module_tier,
+        target_tier=target_tier,
     )
     _cache.solver[key] = result
     return result
@@ -2943,6 +2985,7 @@ def _env_signature(
     machine_quality: str,
     no_asteroids: bool,
     active_shuffles: frozenset[str] | None = None,
+    target_tier: int = 4,
 ) -> tuple:
     """Tuple of all kwargs that affect the Path A vs Path B winner.
 
@@ -2964,6 +3007,7 @@ def _env_signature(
         machine_quality,
         bool(no_asteroids),
         sh,
+        int(target_tier),
     )
 
 
@@ -2983,6 +3027,7 @@ def _plan_self_recycle_target(
     machine_quality: str = "normal",
     active_shuffles: frozenset[str] | None = None,
     no_asteroids: bool = False,
+    target_tier: int = 4,
     _cache: "_DispatchCache | None" = None,
     _in_flight: frozenset[str] = frozenset(),
 ) -> dict:
@@ -3037,6 +3082,7 @@ def _plan_self_recycle_target(
         module_quality=module_quality,
         prod_module_tier=3,
         quality_module_tier=quality_module_tier,
+        target_tier=target_tier,
         _cache=_cache,
     )
     if v <= 0:
@@ -3142,7 +3188,7 @@ def _plan_self_recycle_target(
                     f"(t{quality_module_tier} {module_quality})"
                 ),
             }
-            for t in (0, 1, 2, 3)
+            for t in range(target_tier)
         },
     }
 
@@ -3195,7 +3241,7 @@ def _plan_self_recycle_target(
     ))
 
     return {
-        "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
+        "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
         "asteroid_input": {},
         "mined_input": {},
         "fluid_input": {},
@@ -3236,6 +3282,7 @@ def choose_path_self_recycle(
     machine_quality: str = "normal",
     active_shuffles: frozenset[str] | None = None,
     no_asteroids: bool = False,
+    target_tier: int = 4,
     _cache: _DispatchCache,
     _in_flight: frozenset[str] = frozenset(),
 ) -> dict:
@@ -3267,6 +3314,7 @@ def choose_path_self_recycle(
         machine_quality=machine_quality,
         no_asteroids=no_asteroids,
         active_shuffles=active_shuffles,
+        target_tier=target_tier,
     )
     decision_key = (item_key, env)
 
@@ -3285,6 +3333,7 @@ def choose_path_self_recycle(
                 machine_quality=machine_quality,
                 active_shuffles=active_shuffles,
                 no_asteroids=no_asteroids,
+                target_tier=target_tier,
                 _cache=_cache,
                 _in_flight=_in_flight | {item_key},
             )
@@ -3306,6 +3355,7 @@ def choose_path_self_recycle(
                 machine_quality=machine_quality,
                 no_asteroids=no_asteroids,
                 tech_state=tech_state,
+                target_tier=target_tier,
                 _force_tree_walk=True,
                 _cache=_cache,
                 _in_flight=_in_flight | {item_key},
@@ -3417,6 +3467,7 @@ def _plan_self_feed_target(
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
+    target_tier: int = 4,
 ) -> dict:
     """Plan a chain whose target is a self-FEED recipe (ingredient = output).
 
@@ -3465,6 +3516,7 @@ def _plan_self_feed_target(
         machine_quality=machine_quality,
         prod_module_tier=prod_module_tier,
         quality_module_tier=quality_module_tier,
+        target_tier=target_tier,
     )
     if not plan_data:
         raise ValueError(
@@ -3480,8 +3532,8 @@ def _plan_self_feed_target(
     y = [float(v) * scale for v in plan_data["y_unit"]]
     kc = float(plan_data["kc"])
     kr = float(plan_data["kr"])
-    craft_machines_per_tier = [x[q] * kc for q in (0, 1, 2, 3)]
-    recycler_machines_per_tier = [y[q] * kr for q in (0, 1, 2, 3)]
+    craft_machines_per_tier = [x[q] * kc for q in range(target_tier)]
+    recycler_machines_per_tier = [y[q] * kr for q in range(target_tier)]
     craft_machines_total = sum(craft_machines_per_tier)
     recycler_machines_total = sum(recycler_machines_per_tier)
     crafts_per_min_total = sum(x)
@@ -3546,7 +3598,7 @@ def _plan_self_feed_target(
                 "craft_machines": craft_machines_per_tier[q],
                 "recycler_machines": recycler_machines_per_tier[q],
             }
-            for q in (0, 1, 2, 3)
+            for q in range(target_tier)
         },
         "module_config_per_tier": {
             QUALITY_TIERS[q]: {
@@ -3559,7 +3611,7 @@ def _plan_self_feed_target(
                     f"(t{quality_module_tier} {module_quality})"
                 ),
             }
-            for q in (0, 1, 2, 3)
+            for q in range(target_tier)
         },
     }
 
@@ -3613,7 +3665,7 @@ def _plan_self_feed_target(
     ))
 
     return {
-        "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
+        "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
         "asteroid_input": {},
         "mined_input": {},
         "fluid_input": {},
@@ -3659,6 +3711,7 @@ def plan(
     machine_quality: str = "normal",
     no_asteroids: bool = False,
     tech_state: dict[str, int],
+    target_tier: int = 4,
     _force_tree_walk: bool = False,
     _cache: _DispatchCache | None = None,
     _in_flight: frozenset[str] = frozenset(),
@@ -3736,6 +3789,7 @@ def plan(
             assembly_modules=assembly_modules,
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
+            target_tier=target_tier,
         )
 
     # V3: dedicated self-recycle target path.  Post-2026-05-08-audit, this
@@ -3757,6 +3811,7 @@ def plan(
             machine_quality=machine_quality,
             active_shuffles=frozenset(active_shuffles) if active_shuffles else None,
             no_asteroids=no_asteroids,
+            target_tier=target_tier,
             _cache=_cache,
             _in_flight=_in_flight,
         )
@@ -3780,6 +3835,7 @@ def plan(
         "assembler_level": assembler_level,
         "quality_module_tier": quality_module_tier,
         "active_shuffles": frozenset(active_shuffles) if active_shuffles else None,
+        "target_tier": target_tier,
     }
     # Track intermediates dispatched directly by this plan() level's walker
     # call(s) so we can aggregate their normal-quality inputs without
@@ -3864,6 +3920,7 @@ def plan(
             prod_module_tier=prod_module_tier,
             research_levels=research_levels,
             machine_quality=machine_quality,
+            target_tier=target_tier,
         )
 
         if chosen_stages:
@@ -4285,7 +4342,7 @@ def plan(
     asteroid_input: dict[str, float] = {}
     for chunk, demanded_legendary_per_min in chunk_demand.items():
         v, configs = solve_asteroid_reprocessing_loop(
-            chunk, data, module_quality, quality_module_tier,
+            chunk, data, module_quality, quality_module_tier, target_tier,
         )
         if v <= 0:
             raise ValueError(
@@ -4318,7 +4375,7 @@ def plan(
                     "craft": "n/a",
                     "recycle": f"{configs[t]['recycle_quality']}x quality-{quality_module_tier}-{module_quality}",
                 }
-                for t in (0, 1, 2, 3)
+                for t in range(target_tier)
             },
         })
 
@@ -4359,7 +4416,7 @@ def plan(
                     f"{list(needed)} — add --planets {','.join(needed)}"
                 )
             v, configs = solve_mined_raw_self_recycle_loop(
-                raw_key, data, module_quality, quality_module_tier,
+                raw_key, data, module_quality, quality_module_tier, target_tier,
             )
             if v <= 0:
                 raise ValueError(
@@ -4386,7 +4443,7 @@ def plan(
                         "craft": "n/a",
                         "recycle": f"{configs[t]['recycle_quality']}x quality-{quality_module_tier}-{module_quality}",
                     }
-                    for t in (0, 1, 2, 3)
+                    for t in range(target_tier)
                 },
             })
 
@@ -4512,7 +4569,7 @@ def plan(
         )
 
     out = {
-        "target": {"item": item_key, "rate_per_min": rate, "tier": "legendary"},
+        "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
         "asteroid_input": asteroid_input,
         "mined_input": mined_input,
         "fluid_input": fluid_raws_demand,
@@ -4611,7 +4668,8 @@ def plan(
 def format_human(out: dict) -> str:
     L: list[str] = []
     tgt = out["target"]
-    L.append(f"Target: {tgt['rate_per_min']}/min of {tgt['item']} at tier {tgt['tier']}")
+    tier = tgt.get("tier", "legendary")  # output quality tier (label only)
+    L.append(f"Target: {tgt['rate_per_min']}/min of {tgt['item']} at tier {tier}")
     L.append(f"Module quality: {out.get('module_quality', 'legendary')}, "
              f"assembler level: {out.get('assembler_level')}")
     if out.get("planets"):
@@ -4647,7 +4705,7 @@ def format_human(out: dict) -> str:
             L.append(f"  {_humanize(raw)}: {amt:.2f}")
     if out.get("shuffle_byproduct_legendary"):
         L.append("")
-        L.append("=== Shuffle Byproducts (legendary/min) ===")
+        L.append(f"=== Shuffle Byproducts ({tier}/min) ===")
         emitted = out["shuffle_byproduct_legendary"]
         credited = out.get("shuffle_byproduct_credited", {})
         overflow = out.get("shuffle_byproduct_overflow", {})
@@ -4660,7 +4718,7 @@ def format_human(out: dict) -> str:
             )
     if out.get("incidental_byproduct_legendary"):
         L.append("")
-        L.append("=== Incidental Co-Products (legendary/min) ===")
+        L.append(f"=== Incidental Co-Products ({tier}/min) ===")
         emitted = out["incidental_byproduct_legendary"]
         credited = out.get("incidental_byproduct_credited", {})
         overflow = out.get("incidental_byproduct_overflow", {})
@@ -4684,12 +4742,12 @@ def format_human(out: dict) -> str:
             L.append(
                 f"  [reprocessing] {_humanize(st['chunk'])}: "
                 f"{st['normal_chunks_input_per_min']:.2f} normal in -> "
-                f"{st['legendary_chunks_per_min']:.2f} legendary out "
+                f"{st['legendary_chunks_per_min']:.2f} {tier} out "
                 f"({st['machine_count']:.2f} crushers, "
                 f"yield {st['yield_pct']:.3f}%)"
             )
         elif role == "raw-crushing":
-            outs = ", ".join(f"{_humanize(k)}@leg={v:.1f}/min" for k, v in st["outputs"].items())
+            outs = ", ".join(f"{_humanize(k)}@{tier}={v:.1f}/min" for k, v in st["outputs"].items())
             L.append(
                 f"  [crushing]      {st['recipe']}: "
                 f"{st['crafts_per_min']:.2f} crafts/min -> {outs} "
@@ -4699,7 +4757,7 @@ def format_human(out: dict) -> str:
             L.append(
                 f"  [self-recycle] {_humanize(st['target'])}: "
                 f"{st['crafts_per_min']:.2f} crafts/min -> "
-                f"{st['rate_per_min']:.2f}/min legendary "
+                f"{st['rate_per_min']:.2f}/min {tier} "
                 f"({st['craft_machines']:.2f} × {_humanize(st['machine'])} + "
                 f"{st['recycler_machines']:.2f} recyclers, "
                 f"yield {st['yield_pct']:.4f}% per craft)"
@@ -4709,7 +4767,7 @@ def format_human(out: dict) -> str:
                 f"  [self-feed]    {_humanize(st['target'])}: "
                 f"{st['crafts_per_min']:.2f} crafts/min + "
                 f"{st['recycles_per_min']:.2f} recycles/min -> "
-                f"{st['rate_per_min']:.2f}/min legendary "
+                f"{st['rate_per_min']:.2f}/min {tier} "
                 f"({st['craft_machines']:.2f} × {_humanize(st['machine'])} + "
                 f"{st['recycler_machines']:.2f} recyclers, "
                 f"q*={st['q_star']})"
@@ -4751,7 +4809,7 @@ def format_human(out: dict) -> str:
             L.append(
                 f"  [shuffle]      {st.get('shuffle','?')}: "
                 f"{normal_in:.2f} normal {_humanize(primary)} in -> "
-                f"{legendary_out:.2f} legendary {_humanize(primary)} out + "
+                f"{legendary_out:.2f} {tier} {_humanize(primary)} out + "
                 f"byproducts [{byp}] "
                 f"({cast_machines:.1f} {cast_machine_label} + "
                 f"{st.get('recycler_machines', 0.0):.1f} recyclers, "
@@ -4761,7 +4819,7 @@ def format_human(out: dict) -> str:
             L.append(
                 f"  [mined-recycle] {_humanize(st['raw'])}: "
                 f"{st['normal_mined_per_min']:.2f} normal mined -> "
-                f"{st['legendary_per_min']:.2f} legendary out "
+                f"{st['legendary_per_min']:.2f} {tier} out "
                 f"({st['machine_count']:.2f} recyclers, "
                 f"yield {st['yield_pct']:.4f}%)"
             )
@@ -4773,7 +4831,7 @@ def format_human(out: dict) -> str:
             L.append(
                 f"  [driver]       {st['recipe']}: "
                 f"{st['crafts_per_min']:.2f} crafts/min -> "
-                f"{st['co_product_per_min']:.2f} legendary {_humanize(st['target'])}/min "
+                f"{st['co_product_per_min']:.2f} {tier} {_humanize(st['target'])}/min "
                 f"({st['machine_count']:.2f} × {_humanize(st['machine'])}, "
                 f"overflow [{ofs}])"
             )
@@ -4889,7 +4947,17 @@ def _parse_tech_state(raw_list: list[str]) -> dict[str, int]:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Legendary production planner (V2)")
     p.add_argument("--item", required=True)
-    p.add_argument("--rate", required=True, type=float, help="target legendary items per minute")
+    p.add_argument("--rate", required=True, type=float, help="target items per minute (at --target-quality)")
+    p.add_argument(
+        "--target-quality", default="legendary",
+        choices=["uncommon", "rare", "epic", "legendary"],
+        help=(
+            "Quality tier to produce (the goal tier).  The quality loops stop "
+            "at this tier instead of pushing all the way to legendary — e.g. "
+            "--target-quality rare plans for rare output, treating rare-or-"
+            "better as success.  Default legendary."
+        ),
+    )
     p.add_argument("--module-quality", default="legendary", choices=list(QUALITY_TIERS))
     p.add_argument("--quality-module-tier", default=3, type=int, choices=[1, 2, 3])
     p.add_argument("--assembler-level", default=3, type=int, choices=[2, 3])
@@ -5002,6 +5070,7 @@ def main() -> None:
     research = _parse_research(args.research)
     tech_state = _parse_tech_state(args.tech)
     planets_list = [p.strip() for p in args.planets.split(",") if p.strip()]
+    target_tier = QUALITY_INDEX[args.target_quality]
 
     # Build the active_shuffles set: explicit names + (optional) "all" sentinel.
     active_shuffles: set[str] | None = None
@@ -5042,6 +5111,7 @@ def main() -> None:
             machine_quality=args.machine_quality,
             no_asteroids=args.no_asteroids,
             tech_state=tech_state,
+            target_tier=target_tier,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)

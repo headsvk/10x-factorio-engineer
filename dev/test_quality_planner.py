@@ -2998,5 +2998,116 @@ class TestCoProductDriven(unittest.TestCase):
         self.assertIn("driver_overflow", out)
 
 
+# ---------------------------------------------------------------------------
+# Target-quality tier (sub-legendary goals)
+# ---------------------------------------------------------------------------
+
+class TestTargetQuality(unittest.TestCase):
+    """``target_tier`` lets the quality loops stop at a sub-legendary tier."""
+
+    def test_seed_vector_legendary_default(self):
+        # target_tier=4 (legendary): only V[4] is absorbing.
+        self.assertEqual(qp._seed_value_vector(4), [0.0, 0.0, 0.0, 0.0, 1.0])
+
+    def test_seed_vector_rare(self):
+        # target_tier=2 (rare): rare/epic/legendary all count as success.
+        self.assertEqual(qp._seed_value_vector(2), [0.0, 0.0, 1.0, 1.0, 1.0])
+
+    def test_seed_vector_uncommon(self):
+        self.assertEqual(qp._seed_value_vector(1), [0.0, 1.0, 1.0, 1.0, 1.0])
+
+    def test_lower_target_has_higher_yield(self):
+        # Reaching rare is strictly easier than reaching legendary, so the
+        # per-normal yield must be monotonically higher for lower targets.
+        y_rare, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=2,
+        )
+        y_epic, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=3,
+        )
+        y_leg, _ = qp.solve_asteroid_reprocessing_loop(
+            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=4,
+        )
+        self.assertGreater(y_rare, y_epic)
+        self.assertGreater(y_epic, y_leg)
+
+    def test_default_target_matches_explicit_legendary(self):
+        # Omitting target_tier must reproduce the legendary result exactly.
+        y_default, _ = qp.solve_mined_raw_self_recycle_loop(
+            "scrap", _data(), "legendary", 3,
+        )
+        y_leg, _ = qp.solve_mined_raw_self_recycle_loop(
+            "scrap", _data(), "legendary", 3, target_tier=4,
+        )
+        self.assertEqual(y_default, y_leg)
+
+    def test_plan_stamps_target_tier(self):
+        out = qp.plan(
+            "iron-plate", 60, _data(),
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertEqual(out["target"]["tier"], "rare")
+
+    def test_plan_rare_cheaper_than_legendary(self):
+        rare = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        leg = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        self.assertLess(rare["total_machine_count"], leg["total_machine_count"])
+
+    def test_self_recycle_target_respects_tier(self):
+        # superconductor self-recycles; rare must be cheaper than legendary.
+        rare = qp.plan(
+            "superconductor", 5, _data(), planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        leg = qp.plan(
+            "superconductor", 5, _data(), planets=["nauvis", "fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+        )
+        self.assertEqual(rare["target"]["tier"], "rare")
+        self.assertLess(rare["total_machine_count"], leg["total_machine_count"])
+
+    def test_self_feed_target_shifts_q_star(self):
+        # pentapod-egg self-feeds; rare picks a lower craft tier than legendary.
+        y_rare, plan_rare = qp.solve_self_feed_target_loop(
+            "pentapod-egg", _data(), machine_slots=4, machine_speed_eff=2.0,
+            inherent_prod=0.5, research_prod=0.0, module_quality="legendary",
+            quality_module_tier=3, target_tier=2,
+        )
+        y_leg, plan_leg = qp.solve_self_feed_target_loop(
+            "pentapod-egg", _data(), machine_slots=4, machine_speed_eff=2.0,
+            inherent_prod=0.5, research_prod=0.0, module_quality="legendary",
+            quality_module_tier=3, target_tier=4,
+        )
+        self.assertLess(plan_rare["q_star"], plan_leg["q_star"])
+        self.assertLessEqual(plan_rare["q_star"], 1)
+
+    def test_fulgora_sulfuric_acid_unlocked(self):
+        # Fulgora pumps heavy-oil offshore → sulfur → sulfuric-acid, so an
+        # accumulator (battery needs sulfuric-acid) must resolve on Fulgora
+        # alone without requiring Nauvis/Vulcanus.
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertEqual(out["target"]["item"], "accumulator")
+        self.assertGreater(out["total_machine_count"], 0.0)
+
+    def test_human_output_uses_target_tier_label(self):
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        text = qp.format_human(out)
+        self.assertIn("at tier rare", text)
+        self.assertIn("rare out", text)
+        self.assertNotIn("legendary out", text)
+
+
 if __name__ == "__main__":
     unittest.main()
