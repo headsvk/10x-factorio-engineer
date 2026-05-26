@@ -122,7 +122,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
-| `dev/test_cli.py` | `unittest` suite (237 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (239 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (310 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
@@ -467,7 +467,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 237 tests covering:
+`dev/test_cli.py` contains 239 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -479,7 +479,7 @@ python -m unittest dev.test_cli -v
 | `TestSpaceAgeMachineRouting` | superconductor routes to electromagnetic-plant + foundry + cryogenic-plant |
 | `TestBigMiningDrill` | 4 big drills for tungsten-ore at 60/min; electric drill for vanilla iron |
 | `TestMachineCategoryVanilla` | assembler-3 default; electric/stone furnace; chemical-plant; oil-refinery |
-| `TestModuleConfig` | `--modules MACHINE=...` reduces machine count (prod); speed modules reduce count; mixed prod+speed; zero-slot machine ignores prod/speed; module quality multiplier scales bonus; per-recipe override via `--recipe-modules` |
+| `TestModuleConfig` | `--modules MACHINE=...` reduces machine count (prod); speed modules reduce count; mixed prod+speed; zero-slot machine ignores prod/speed; module quality multiplier scales bonus; per-recipe override via `--recipe-modules`; quality modules impose a flat −5%/module speed penalty (raises machine_count, not quality-scaled; output quality not modelled) |
 | `TestFractionArithmetic` | All `raw_resources` and `machine_count` values remain `Fraction` in beacon-free runs |
 | `TestCoalLiquefaction` | `coal-liquefaction` via `--recipe heavy-oil=coal-liquefaction`; net heavy-oil math (65/cycle); coal+steam in raw; AOP not used; cracking engaged for petgas demand |
 | `TestSimpleCoalLiquefaction` | `simple-coal-liquefaction` (Space Age); coal+calcite+sulfuric-acid in raw; no crude-oil; cracking for petgas |

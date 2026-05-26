@@ -62,7 +62,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --s
 
 **Machine built-in productivity:** the foundry, electromagnetic-plant, and biochamber each have a **+50 % built-in productivity** that the CLI applies automatically to *every* recipe they craft — including recipes flagged `allow_productivity: false` (e.g. `accumulator`, `solar-panel`). That flag only blocks productivity *modules*/beacons, not the machine's intrinsic bonus. So expect those machines' counts (and their upstream raw demand) to be ~1/1.5 of a naive no-prod estimate even with no modules.
 
-**Module TYPE values (machine modules):** `prod` / `speed` / `efficiency`
+**Module TYPE values (machine modules):** `prod` / `speed` / `efficiency` / `quality`. `quality` modules impose a flat −5 % speed penalty per module (so they raise machine_count) but their output-quality effect is **not** modelled — the CLI computes throughput only, so a step with quality modules reports the same item rates, just with more (slower) machines.
 **Module TYPE values (beacon modules):** `speed` / `efficiency` only — `prod` not allowed in beacons. Efficiency modules in beacons transmit a reduced energy bonus to nearby machines, lowering their power draw.
 
 **Quality enum:** `normal` / `uncommon` / `rare` / `epic` / `legendary` (applies to `--machine-quality`, `--beacon-quality`, pump quality, and the QUALITY field in module specs)

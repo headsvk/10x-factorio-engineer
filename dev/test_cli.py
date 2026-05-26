@@ -849,6 +849,35 @@ class TestModuleConfig(unittest.TestCase):
             Fraction(5, 7),
         )
 
+    def test_quality_module_speed_penalty(self):
+        # Quality modules impose a flat -5%/module speed penalty (output quality
+        # is not modelled here). 4× quality-3 = -20% speed → 1/0.8 = 1.25x machines.
+        no_mod = _solver_new()
+        no_mod.solve("electronic-circuit", Fraction(60))
+        q = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "quality", 3)]
+        })
+        q.solve("electronic-circuit", Fraction(60))
+        self.assertEqual(
+            q.steps["electronic-circuit"]["machine_count"],
+            no_mod.steps["electronic-circuit"]["machine_count"] * Fraction(5, 4),
+        )
+
+    def test_quality_module_penalty_not_quality_scaled(self):
+        # The -5% penalty is flat — module quality does not change it.
+        normal_q = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "quality", 3, "normal")]
+        })
+        normal_q.solve("electronic-circuit", Fraction(60))
+        leg_q = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "quality", 3, "legendary")]
+        })
+        leg_q.solve("electronic-circuit", Fraction(60))
+        self.assertEqual(
+            normal_q.steps["electronic-circuit"]["machine_count"],
+            leg_q.steps["electronic-circuit"]["machine_count"],
+        )
+
     def test_speed_reduces_machine_count(self):
         # 4× speed-3-normal: speed_bonus = 4×50% = 200%
         # effective_speed = 5/4 × 3 = 15/4  →  fewer machines

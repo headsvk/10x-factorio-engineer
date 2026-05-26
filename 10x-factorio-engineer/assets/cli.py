@@ -398,6 +398,14 @@ PROD_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
     3: Fraction(-3, 20),   # -15%
 }
 
+# Speed PENALTY per quality module slot (negative; flat -5% all tiers,
+# NOT quality-scaled — only positive module effects scale with module quality)
+QUALITY_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
+    1: Fraction(-1, 20),   # -5%
+    2: Fraction(-1, 20),   # -5%
+    3: Fraction(-1, 20),   # -5%
+}
+
 # Number of module slots in a standard beacon (quality-invariant)
 BEACON_SLOTS: int = 2
 
@@ -1187,6 +1195,10 @@ class Solver:
                             module_prod += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
                     elif spec["type"] == "speed":
                         speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
+                    elif spec["type"] == "quality":
+                        # Quality modules slow the machine (-5 % each, flat); no
+                        # effect on output count (quality rolls are not modelled here).
+                        speed_bonus += eff_count * QUALITY_MODULE_SPEED_PENALTY[spec["tier"]]
                     # efficiency: no effect on production count
 
         research_prod = Fraction(0)
@@ -1684,6 +1696,10 @@ def compute_miners(
                         elif spec["type"] == "speed":
                             speed_bonus  += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
                             energy_bonus += eff_count * MODULE_CONSUMPTION_PENALTY["speed"][spec["tier"]]
+                        elif spec["type"] == "quality":
+                            # Quality modules in drills slow them (-5 % each, flat);
+                            # no consumption effect.
+                            speed_bonus  += eff_count * QUALITY_MODULE_SPEED_PENALTY[spec["tier"]]
                         elif spec["type"] == "efficiency":
                             energy_bonus -= eff_count * MODULE_EFFICIENCY_REDUCTION[spec["tier"]] * qual_mult
             energy_bonus = max(energy_bonus, Fraction(-4, 5))
