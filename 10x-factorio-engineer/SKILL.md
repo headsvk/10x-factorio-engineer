@@ -812,6 +812,14 @@ the raw cost.  Confirm at minimum: `--target-quality`, `--module-quality`,
 `--assembly-modules`, and `--machine-quality`.  Only fall back to the
 documented defaults for arguments the player explicitly leaves unspecified.
 
+When gathering `--tech`, treat each target planet's native machine as already
+unlocked (per `PLANET_MACHINE_UNLOCKS`: Vulcanus→foundry, Fulgora→
+electromagnetic-plant, Gleba→biochamber, Aquilo→all four) plus the recycler —
+the player can't be operating on that planet otherwise — and only ask them to
+confirm or add *cross-planet* tech.  (Quality-module tech is implied by
+`--quality-module-tier`: tier 2 ⇒ `quality-module-2=1`, tier 3 ⇒
+`quality-module-3=1`.)
+
 ### When to call it
 
 Invoke `quality_planner.py` when the player asks for:
