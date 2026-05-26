@@ -800,6 +800,18 @@ stops the quality loops at any tier (rare-or-better counts as success for
 full legendary, so when the player asks for "rare/epic &lt;item&gt;" pass the
 matching `--target-quality` rather than defaulting to legendary.
 
+**No dashboard — gather the player's setup before running.**  Unlike the
+calculator, the planner has no dashboard or saved state and cannot infer the
+player's modules, tech, or planets.  Ask the player for every argument that
+materially changes the plan instead of silently assuming defaults.  In
+particular, **do not assume legendary `--module-quality` (or any max-tier
+default) for a sub-legendary `--target-quality`** — someone making rare items
+is usually running rare/epic modules, and guessing wrong can halve or double
+the raw cost.  Confirm at minimum: `--target-quality`, `--module-quality`,
+`--quality-module-tier`, `--tech` (what's researched), `--planets`,
+`--assembly-modules`, and `--machine-quality`.  Only fall back to the
+documented defaults for arguments the player explicitly leaves unspecified.
+
 ### When to call it
 
 Invoke `quality_planner.py` when the player asks for:
