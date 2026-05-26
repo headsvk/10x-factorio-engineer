@@ -2503,21 +2503,23 @@ def _assembly_prod_bonus(
     module_quality: str,
     prod_module_tier: int,
 ) -> tuple[float, int]:
-    """Prod bonus from inherent machine prod + N prod modules filling all slots.
+    """Prod bonus = machine inherent prod (always) + N prod modules.
 
-    Returns ``(prod_fraction, slots_filled)``.  Slots_filled is the number of
-    module slots actually filled with prod modules — 0 if the recipe disallows
-    productivity OR ``assembly_modules`` is False.
+    The machine's built-in productivity (foundry / EM-plant / biochamber +50%)
+    applies to EVERY recipe the machine crafts — it is NOT gated by the recipe's
+    ``allow_productivity`` flag (that flag only restricts productivity MODULES /
+    beacons) nor by ``--assembly-modules`` (which only adds module slots on top).
+    Wiki-confirmed for the EM plant (accumulator, solar-panel, etc.); same
+    underlying mechanic for foundry / biochamber.
 
-    Quality of the modules is ``module_quality`` (matches the planner's quality
-    config so the user gets internally-consistent module choices).  Tier is
-    ``prod_module_tier`` (default 3).
+    Prod MODULES are added only when ``assembly_modules`` is set, the recipe
+    allows productivity, and the machine has free slots.
+
+    Returns ``(prod_fraction, slots_filled)``.
     """
-    if not assembly_modules:
-        return 0.0, 0
-    if not recipe.get("allow_productivity", True):
-        return 0.0, 0
     inherent = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+    if not assembly_modules or not recipe.get("allow_productivity", True):
+        return inherent, 0
     slots = int(slots_map.get(machine_key, 0))
     if slots <= 0:
         return inherent, 0
@@ -2994,6 +2996,7 @@ def walk_recipe_tree(
             "research_prod": research_prod,
             "module_prod": module_prod,
             "prod_modules": prod_slots_filled,
+            "allow_productivity": bool(recipe.get("allow_productivity", False)),
             "prod_module_tier": prod_module_tier if prod_slots_filled > 0 else 0,
             "prod_module_quality": assembly_module_quality if prod_slots_filled > 0 else "normal",
             "machine_quality": machine_quality,
@@ -5953,14 +5956,19 @@ def format_human(out: dict) -> str:
             capped = " [PROD-CAPPED]" if st.get("prod_capped") else ""
             tag = " [NORMAL]" if st.get("normal_quality_chain") else ""
             n_prod = int(st.get("prod_modules", 0))
+            mprod = float(st.get("module_prod", 0.0))
             if n_prod > 0:
                 mods = (
                     f", {n_prod}x prod-{st.get('prod_module_tier', 3)}-"
                     f"{st.get('prod_module_quality', 'normal')} "
-                    f"(+{st.get('module_prod', 0.0) * 100.0:.0f}%)"
+                    f"(+{mprod * 100.0:.0f}%)"
                 )
+            elif mprod > 1e-9:
+                # Machine's built-in productivity (foundry/EM-plant/biochamber);
+                # applies even when the recipe disallows prod modules.
+                mods = f", inherent +{mprod * 100.0:.0f}% prod"
             else:
-                mods = ""
+                mods = ", no prod modules"
             L.append(
                 f"  [{role:10s}] {st['recipe']}: "
                 f"{st['rate_per_min']:.2f}/min "

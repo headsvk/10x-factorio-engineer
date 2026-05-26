@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **306 tests, all passing, ~2.4 s.**
+**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **310 tests, all passing, ~2.4 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -30,6 +30,7 @@ Currently shipped:
 - **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`. Quality-module *tier* is not gated by `--tech` — `--quality-module-tier` is self-declaring (you'd only request a tier you have).
 - **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge recipes give the other uranium isotope.  Surplus surfaces as `incidental_byproduct_overflow`.
 - **Driven co-product activation (`--enable-driver RECIPE_KEY` / `--enable-drivers all`, 2026-05-14)** — for any leaf raw R demanded via mined-recycle, the planner can activate a recipe that produces R as a non-primary solid (e.g. `molten-iron-from-lava` for stone) purely to harvest R, accepting the recipe's primary as overflow.  Driver ingredients are walked through the standard legendary chain (asteroid → calcite, etc.).  `--enable-drivers all` is cost-gated against the no-driver baseline.  Headline impact: `stone-wall @ 60/min --planets nauvis,vulcanus --enable-drivers all` drops from 2244 to ~65 machines (35× reduction).
+- **Inherent-prod fix (2026-05-26)** — a machine's built-in productivity (foundry / EM-plant / biochamber +50%) now applies to **every** recipe it crafts, regardless of the recipe's `allow_productivity` flag (which only gates prod *modules*/beacons) and regardless of `--assembly-modules`.  Wiki-confirmed for the EM plant (e.g. `accumulator`, `solar-panel`).  Previously `_assembly_prod_bonus` zeroed inherent prod when the recipe disallowed productivity OR when `--assembly-modules` was off, under-crediting productivity and over-sizing chains.  Shifted the regression anchors (e.g. accumulator @ 5/min rare on Fulgora: scrap ~6 800 → ~4 530).
 
 
 ---
@@ -87,15 +88,15 @@ python dev/quality_planner.py --item stone-wall --rate 60 \
 
 ## Regression anchors
 
-Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`):
+Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-05-26 after the inherent-prod fix (machine built-in +50% now always applies — see changelog):
 
 | target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
 |---|---|---|---|---|---|
-| `iron-plate` | — | 18.3 | metallic 281, oxide 28 | — | — |
-| `processing-unit` | nauvis | 614.2 | metallic 1406, carbonic 703, oxide 59 | coal 321 874 | crude-oil 5 333 |
-| `artillery-shell` | nauvis,vulcanus | ~5 000 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.5M | lava 9 300 |
+| `iron-plate` | — | 18.1 | metallic 281, oxide 28 | — | — |
+| `processing-unit` | nauvis | ~904 | metallic 6750, oxide 731 | coal 321 874 | petroleum-gas 2 400, sulfuric-acid 300 |
+| `artillery-shell` | nauvis,vulcanus | ~4 940 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.57M | lava 9 300 |
 
-With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from 620 machines to **~12.6 machines** (50× drop) — modules off is the conservative baseline.
+With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from ~904 machines to **~12.9 machines** — modules off is the conservative baseline (but inherent machine prod still applies even there).
 
 These are sanity checks, not committed expectations. If a refactor moves them, investigate the cause rather than rubber-stamping.
 
@@ -188,7 +189,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 
 | Role | Emitted by | Machine | Notes |
 |---|---|---|---|
-| `assembly` | walker | per recipe | Standard craft step. Has `inputs`, `fluid_inputs`, `solid_inputs`, `module_prod`, `prod_modules`, `machine_quality`, `prod_capped` |
+| `assembly` | walker | per recipe | Standard craft step. Has `inputs`, `fluid_inputs`, `solid_inputs`, `module_prod` (inherent + modules), `prod_modules`, `allow_productivity`, `machine_quality`, `prod_capped`. `format_human` shows the prod modules, "inherent +X% prod" when only the machine's built-in bonus applies (e.g. accumulator on the EM plant, or any foundry/EM/biochamber recipe with modules off), or "no prod modules" otherwise |
 | `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots). Has `module_config_per_tier` (crusher quality slots per tier) |
 | `raw-crushing` | plan() | crusher | Legendary chunk → legendary ore (advanced crushing, 2 outputs per recipe) |
 | `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite. Has `module_config_per_tier` (recycler quality slots per tier) |
@@ -519,7 +520,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **306 tests**, 42 classes.
+`dev/test_quality_planner.py` — **310 tests**, 42 classes.
 
 | Class | Coverage |
 |---|---|

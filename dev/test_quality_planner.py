@@ -1058,11 +1058,13 @@ class TestAssemblyModules(unittest.TestCase):
 
     def test_default_off(self):
         out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
-        # Without flag, stages have no prod modules.
+        # Without the flag, no prod MODULE slots are filled — but the machine's
+        # built-in productivity still applies (foundry/EM-plant/biochamber +50%).
         for st in out["stages"]:
             if st.get("role") == "assembly":
                 self.assertEqual(st.get("prod_modules", 0), 0)
-                self.assertEqual(st.get("module_prod", 0.0), 0.0)
+                inherent = qp.MACHINE_INHERENT_PROD.get(st.get("machine"), 0.0)
+                self.assertAlmostEqual(st.get("module_prod", 0.0), inherent)
 
     def test_flag_reduces_total_machines(self):
         out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -1123,15 +1125,30 @@ class TestAssemblyModules(unittest.TestCase):
         # Capped flag set (eff_prod hit the 4.0 cap).
         self.assertTrue(any(s.get("prod_capped") for s in plastic_stages))
 
-    def test_recipe_disallowing_prod_skipped(self):
-        # casting-iron / casting-copper-cable typically allow_productivity=true,
-        # but recipes flagged allow_productivity=false (e.g. *-recycling) get 0.
-        # We use the helper directly to verify the gate.
+    def test_recipe_disallowing_prod_gets_inherent_only(self):
+        # allow_productivity=false blocks prod MODULES, but the machine's
+        # built-in productivity still applies (foundry/EM-plant/biochamber +50%).
         recipe = {"allow_productivity": False}
         prod, slots = qp._assembly_prod_bonus(
             "foundry", recipe, {"foundry": 4}, True, "legendary", 3,
         )
-        self.assertEqual(prod, 0.0)
+        self.assertEqual(prod, 0.5)   # inherent still applies
+        self.assertEqual(slots, 0)    # no prod modules
+        # A machine with no inherent prod (assembler) gets nothing.
+        prod2, slots2 = qp._assembly_prod_bonus(
+            "assembling-machine-3", recipe, {"assembling-machine-3": 4},
+            True, "legendary", 3,
+        )
+        self.assertEqual(prod2, 0.0)
+        self.assertEqual(slots2, 0)
+
+    def test_inherent_applies_when_modules_off(self):
+        # Inherent machine prod applies even without --assembly-modules.
+        recipe = {"allow_productivity": True}
+        prod, slots = qp._assembly_prod_bonus(
+            "foundry", recipe, {"foundry": 4}, False, "legendary", 3,
+        )
+        self.assertEqual(prod, 0.5)
         self.assertEqual(slots, 0)
 
     def test_helper_returns_inherent_when_no_slots(self):
@@ -3766,6 +3783,30 @@ class TestModuleConfigSurface(unittest.TestCase):
             ),
             "no modules",
         )
+
+    def test_assembly_stage_carries_allow_productivity(self):
+        out = self._scrap_plan()
+        acc = next(s for s in out["stages"] if s.get("product") == "accumulator")
+        bat = next(s for s in out["stages"] if s.get("product") == "battery")
+        self.assertFalse(acc["allow_productivity"])  # accumulator disallows prod
+        self.assertTrue(bat["allow_productivity"])
+
+    def test_human_shows_inherent_prod_on_disallowed_recipe(self):
+        # accumulator disallows prod MODULES, but the EM plant's built-in +50%
+        # still applies — surfaced as "inherent +50% prod", not a blank.
+        out = qp.plan(
+            "accumulator", 5, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+            module_quality="rare", quality_module_tier=2,
+            assembly_modules=True, prod_module_tier=2,
+        )
+        text = qp.format_human(out)
+        self.assertIn("inherent +50% prod", text)
+
+    def test_human_shows_inherent_prod_when_modules_off(self):
+        # Modules off: foundry casting still shows its built-in +50%.
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        self.assertIn("inherent +50% prod", qp.format_human(out))
 
 
 if __name__ == "__main__":
