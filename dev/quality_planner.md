@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **300 tests, all passing, ~1.7 s.**
+**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **306 tests, all passing, ~2.4 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -189,9 +189,10 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | Role | Emitted by | Machine | Notes |
 |---|---|---|---|
 | `assembly` | walker | per recipe | Standard craft step. Has `inputs`, `fluid_inputs`, `solid_inputs`, `module_prod`, `prod_modules`, `machine_quality`, `prod_capped` |
-| `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots) |
+| `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots). Has `module_config_per_tier` (crusher quality slots per tier) |
 | `raw-crushing` | plan() | crusher | Legendary chunk → legendary ore (advanced crushing, 2 outputs per recipe) |
-| `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite |
+| `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite. Has `module_config_per_tier` (recycler quality slots per tier) |
+| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables (one-shot, all 4 recycler slots quality). Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier` |
 | `cross-item-shuffle` | plan() | foundry+recycler | LDS cast + recycle. Splits machine count between `foundry_machines` and `recycler_machines`. Has `byproduct_legendary`, `byproduct_credited`, `byproduct_overflow`, `fluid_demand` |
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
 | `co-product-driver` | plan() | per recipe | Driven activation: recipe runs purely for its non-primary solid output (e.g. `molten-iron-from-lava` for stone). Has `target`, `co_product_per_min`, `crafts_per_min`, `inputs`, `overflow_outputs` |
@@ -518,7 +519,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **300 tests**, 41 classes.
+`dev/test_quality_planner.py` — **306 tests**, 42 classes.
 
 | Class | Coverage |
 |---|---|
@@ -552,6 +553,7 @@ MACHINE_INHERENT_PROD = {
 | `TestDispatchMemoization` (post-2026-05-08 audit) | Solver kernel called once per unique `(item, env)` key; Path A/B decision cached and re-used; per-`plan()` cache isolation (no cross-call leak); cycle detection via pre-populated `_in_flight` forces Path A with explanatory note; solver cache keyed by env (epic-quality variant gets a fresh kernel call). |
 | `TestCoProductIncidental` (shipped 2026-05-14) | `incidental_byproduct_legendary` / `_credited` / `_overflow` fields always present (empty when no multi-output recipe active).  `iron-plate @ vulcanus` emits stone byproduct as overflow (no stone demand).  `concrete @ vulcanus` emits 4.8 legendary stone/min, all credited, dropping mined-recycle target from 60 to 55.2 stone/min.  Surplus + credit notes appear in `notes`.  Linear scaling under rate doubling.  Fluid byproducts excluded from helper output.  `format_human` renders an `Incidental Co-Products` section when non-empty.  `_plan_self_recycle_target` sub-plan emits the empty fields. |
 | `TestCoProductDriven` (shipped 2026-05-14) | `enumerate_co_product_drivers` returns the expected stock candidates (lava casting × 2 for stone, processing recipes for seeds, etc.) sorted by descending per-craft yield.  Default off — no `driver_overflow` and no `co-product-driver` stage.  Explicit `--enable-driver molten-iron-from-lava` on `stone-wall @ vulcanus` activates the foundry stage, eliminates the stone mined-recycle stage, surfaces molten-iron in `driver_overflow`, drops total machines >10×.  `--enable-drivers all` picks the highest-yield candidate (copper variant with 15 stone/craft).  Unknown recipe key fails-fast.  Driver skipped when its fluid ingredient (lava) needs an unlocked planet (vulcanus).  Driver's calcite ingredient routes through the asteroid chain.  Linear rate scaling.  `format_human` renders `[driver]` stage line + `Driver Overflow` section.  Sub-plans (self-recycle target) include empty `driver_overflow` field. |
+| `TestModuleConfigSurface` | Quality-loop stages carry `module_config_per_tier` (scrap recyclers = `4x quality-N-Q`); `format_human` renders a `modules:` line for scrap / asteroid-reprocessing / mined-raw stages; `_module_config_summary` collapses uniform per-tier configs, lists when they vary, handles empty / zero-slot |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.

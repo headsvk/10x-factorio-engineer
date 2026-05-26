@@ -3714,5 +3714,59 @@ class TestReagentFluidQuality(unittest.TestCase):
         self.assertNotIn("sulfur", raw)
 
 
+class TestModuleConfigSurface(unittest.TestCase):
+    """Quality-loop stages surface their quality-module config in output."""
+
+    def _scrap_plan(self):
+        return qp.plan(
+            "accumulator", 5, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+            module_quality="rare", quality_module_tier=2,
+        )
+
+    def test_scrap_stage_has_module_config(self):
+        out = self._scrap_plan()
+        scrap = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
+        mcfg = scrap["module_config_per_tier"]
+        self.assertTrue(mcfg)
+        # Every recycler slot is a quality module at the configured tier/quality.
+        for cfg in mcfg.values():
+            self.assertEqual(cfg["recycle"], f"{qp.RECYCLER_SLOTS}x quality-2-rare")
+
+    def test_human_output_shows_recycler_modules(self):
+        text = qp.format_human(self._scrap_plan())
+        self.assertIn("modules: 4x quality-2-rare", text)
+
+    def test_asteroid_stage_renders_modules(self):
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        text = qp.format_human(out)
+        self.assertIn("modules: 2x quality-3-legendary", text)
+
+    def test_summary_collapses_uniform(self):
+        mcfg = {
+            "normal": {"craft": "n/a", "recycle": "4x quality-3-legendary"},
+            "uncommon": {"craft": "n/a", "recycle": "4x quality-3-legendary"},
+        }
+        self.assertEqual(qp._module_config_summary(mcfg), "4x quality-3-legendary")
+
+    def test_summary_lists_when_varying(self):
+        mcfg = {
+            "normal": {"craft": "n/a", "recycle": "4x quality-3-legendary"},
+            "uncommon": {"craft": "n/a", "recycle": "2x quality-3-legendary"},
+        }
+        s = qp._module_config_summary(mcfg)
+        self.assertIn("normal: 4x quality-3-legendary", s)
+        self.assertIn("uncommon: 2x quality-3-legendary", s)
+
+    def test_summary_empty_and_no_modules(self):
+        self.assertEqual(qp._module_config_summary({}), "")
+        self.assertEqual(
+            qp._module_config_summary(
+                {"normal": {"craft": "n/a", "recycle": "0x quality-3-legendary"}}
+            ),
+            "no modules",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

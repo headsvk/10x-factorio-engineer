@@ -2003,6 +2003,13 @@ def compute_scrap_source(
         "covered": covered,
         "overflow": overflow,
         "recycler_quality_chance": q,
+        "module_config_per_tier": {
+            QUALITY_TIERS[t]: {
+                "craft": "n/a",
+                "recycle": f"{RECYCLER_SLOTS}x quality-{quality_module_tier}-{module_quality}",
+            }
+            for t in range(target_tier)
+        },
     }
     return {
         "scrap_per_min": scrap_per_min,
@@ -5721,6 +5728,30 @@ def plan(
 # Output formatting
 # ---------------------------------------------------------------------------
 
+def _module_config_summary(mcfg: dict) -> str:
+    """Compact one-line summary of a quality-loop stage's per-tier module config.
+
+    ``mcfg`` maps tier_name -> ``{"craft": str, "recycle": str}``.  Collapses to
+    a single value when every tier shares the same config (the common recycler
+    case — all slots quality), else lists it per tier.  Returns "" when empty.
+    """
+    if not mcfg:
+        return ""
+
+    def _parts(cfg: dict) -> str:
+        bits = [
+            val for key in ("craft", "recycle")
+            if (val := cfg.get(key)) and val != "n/a" and not val.startswith("0x")
+        ]
+        return " + ".join(bits) if bits else "no modules"
+
+    per_tier = {t: _parts(c) for t, c in mcfg.items()}
+    distinct = set(per_tier.values())
+    if len(distinct) == 1:
+        return next(iter(distinct))
+    return "; ".join(f"{t}: {lbl}" for t, lbl in per_tier.items())
+
+
 def format_human(out: dict) -> str:
     L: list[str] = []
     tgt = out["target"]
@@ -5935,6 +5966,9 @@ def format_human(out: dict) -> str:
                 f"{st['rate_per_min']:.2f}/min "
                 f"({st['machine_count']:.2f} × {_humanize(st['machine'])}){fluids}{mods}{capped}{tag}"
             )
+        mc = _module_config_summary(st.get("module_config_per_tier", {}))
+        if mc:
+            L.append(f"                 modules: {mc}")
     L.append("")
     L.append(f"Total machines: {out['total_machine_count']:.2f}")
     if "total_power_mw" in out:
