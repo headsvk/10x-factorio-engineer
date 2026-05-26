@@ -122,7 +122,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
-| `dev/test_cli.py` | `unittest` suite (233 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (237 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (310 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
@@ -151,6 +151,7 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `build_recipe_index(data)` | `{item_key: [recipe, ...]}`, skips recycling + barrel subgroups |
 | `build_resource_info(data)` | `{item: {mining_time, yield, category}}` using `Fraction` |
 | `build_machine_power_w(data)` | `{machine_key: watts}` for electric machines only (burners excluded); scans `crafting_machines`, `agricultural_tower`, `rocket_silo`, `mining_drills` |
+| `build_machine_prod_bonus(data)` | `{machine_key: Fraction}` built-in productivity from the dataset's `prod_bonus` (foundry/EM-plant/biochamber = 1/2, else 0). Applied in `_compute_module_effects` to **every** recipe regardless of `allow_productivity` (that flag only gates modules/beacons) |
 | `_beacon_sharing_factor(machine_key)` | Returns how many machines share each physical beacon (4 for ≤4-tile machines, 2 for 5–7-tile, 1 for ≥8-tile) |
 | `_compute_step_power(...)` | Returns `(power_kw, power_kw_ceil, beacon_power_kw)` for a production step using module/beacon config |
 | `compute_location_unlocks(location)` | Return the `frozenset` of planet-locked advanced machines unlocked at `location` (e.g. Vulcanus → `{foundry}`). `None` for `location=None` (legacy "all unlocked"). |
@@ -466,7 +467,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 233 tests covering:
+`dev/test_cli.py` contains 237 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -502,6 +503,7 @@ python -m unittest dev.test_cli -v
 | `TestPlanetMachineUnlocks` | `compute_location_unlocks` per-planet table (nauvis empty, vulcanus={foundry}, gleba={biochamber}, fulgora={EM-plant}, aquilo=all four); `get_machine` legacy behaviour (no unlocks) keeps premium machines; Nauvis falls back to chemical-plant for `chemistry-or-cryogenics` / `organic-or-chemistry`, assembler for `electronics*` / `metallurgy-or-assembling` / `pressing` / `cryogenics-or-assembling`; Vulcanus keeps foundry only (cryo/biochamber/EM cats fall back); Aquilo keeps all four; end-to-end regression: Nauvis LDS routes plastic-bar + oil cracking to chemical-plant, electronic-circuit to assembler-3; Fulgora EC uses EM-plant; Vulcanus tungsten-plate stays on foundry; Aquilo plastic-bar uses cryogenic-plant; `pick_recipe` filters out `metallurgy` recipes (casting-iron) on Nauvis; `--recipe-machine` override bypasses unlock filtering. |
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
 | `TestUseCeil` | `--use-ceil` two-pass re-solve: single-step bus-only line gives integer `machine_count`; two-step chain tops out at integer with intermediate correctly sized; binding-is-intermediate case leaves rate unchanged; already-integer counts produce no rescaling; `use_ceil: true` echoed in JSON output |
+| `TestMachineInherentProd` | `build_machine_prod_bonus` returns 1/2 for foundry/EM-plant/biochamber and 0 for assembler/furnace; `_compute_module_effects` returns the machine built-in prod even when `allow_prod=False` (modules gated, inherent not) and 0 for non-inherent machines; EM-plant electronic-circuit machine count is 2/3 of the no-inherent baseline |
 
 ### `dev/test_quality_planner.py` (310 tests)
 
