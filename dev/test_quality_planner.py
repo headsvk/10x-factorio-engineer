@@ -2126,18 +2126,6 @@ class TestTechGating(unittest.TestCase):
         assert result is not None  # narrow for type checker
         self.assertEqual(result[0], "cryogenic-plant")
 
-    def test_quality_tier_locked(self):
-        # quality_module_tier=3 needs --tech quality-module-3=1.
-        locked_q3 = dict(qp.ALL_TECH_UNLOCKED)
-        locked_q3["quality-module-3"] = 0
-        with self.assertRaises(ValueError) as cm:
-            qp.plan(
-                "iron-plate", 60, _data(),
-                quality_module_tier=3,
-                tech_state=locked_q3,
-            )
-        self.assertIn("quality-module-3", str(cm.exception))
-
     def test_unknown_tech_name_errors(self):
         # _parse_tech_state should sys.exit on unknown tech name with a
         # sorted list of valid names.
@@ -2175,7 +2163,7 @@ class TestTechGating(unittest.TestCase):
         )
         narrow = qp.plan(
             "iron-plate", 60, _data(),
-            tech_state={"recycling": 1, "tungsten-carbide": 1, "quality-module-3": 1},
+            tech_state={"recycling": 1, "tungsten-carbide": 1},
         )
         self.assertAlmostEqual(
             narrow["total_machine_count"], baseline["total_machine_count"],

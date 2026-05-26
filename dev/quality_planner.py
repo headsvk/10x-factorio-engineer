@@ -544,9 +544,6 @@ TECH_GATES: dict[str, dict] = {
     "electromagnetic-plant":  {"machines": ["electromagnetic-plant"]},
     "cryogenic-plant":        {"machines": ["cryogenic-plant"]},
     "biochamber":             {"machines": ["biochamber"]},
-    "quality-module":         {"quality_tier": 1},
-    "quality-module-2":       {"quality_tier": 2},
-    "quality-module-3":       {"quality_tier": 3},
 }
 
 # Convenience: every tech researched.  Used by tests and as a documented
@@ -608,18 +605,6 @@ def _tech_locked_machines(tech_state: dict[str, int]) -> frozenset[str]:
         for m in info.get("machines", []):
             locked.add(m)
     return frozenset(locked)
-
-
-def _tech_quality_tier_cap(tech_state: dict[str, int]) -> int:
-    """Highest unlocked quality-module tier (0=none) given tech_state."""
-    cap = 0
-    for tech, info in TECH_GATES.items():
-        tier = info.get("quality_tier")
-        if tier is None:
-            continue
-        if tech_state.get(tech, 0) >= 1 and tier > cap:
-            cap = tier
-    return cap
 
 
 def _machine_for_recipe(
@@ -4764,14 +4749,6 @@ def plan(
         raise ValueError(
             "ERROR: --tech recycling=0 — no quality work is possible without "
             "the recycler.  Add --tech recycling=1 to proceed."
-        )
-    # Quality-module-tier must be unlocked.
-    cap = _tech_quality_tier_cap(tech_state)
-    if quality_module_tier > cap:
-        raise ValueError(
-            f"ERROR: quality_module_tier={quality_module_tier} requires "
-            f"--tech quality-module-{quality_module_tier}=1 (current cap from "
-            f"tech_state: {cap})."
         )
     if item_key in SELF_RECYCLING_BLOCKLIST and item_key not in SELF_RECYCLE_TARGETS:
         raise ValueError(

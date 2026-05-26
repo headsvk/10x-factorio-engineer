@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **301 tests, all passing, ~1.8 s.**
+**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **300 tests, all passing, ~1.7 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -27,7 +27,7 @@ Currently shipped:
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
-- **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber / quality-module tier. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`.
+- **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`. Quality-module *tier* is not gated by `--tech` — `--quality-module-tier` is self-declaring (you'd only request a tier you have).
 - **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge recipes give the other uranium isotope.  Surplus surfaces as `incidental_byproduct_overflow`.
 - **Driven co-product activation (`--enable-driver RECIPE_KEY` / `--enable-drivers all`, 2026-05-14)** — for any leaf raw R demanded via mined-recycle, the planner can activate a recipe that produces R as a non-primary solid (e.g. `molten-iron-from-lava` for stone) purely to harvest R, accepting the recipe's primary as overflow.  Driver ingredients are walked through the standard legendary chain (asteroid → calcite, etc.).  `--enable-drivers all` is cost-gated against the no-driver baseline.  Headline impact: `stone-wall @ 60/min --planets nauvis,vulcanus --enable-drivers all` drops from 2244 to ~65 machines (35× reduction).
 
@@ -39,7 +39,7 @@ Currently shipped:
 Every invocation needs `--tech` flags listing what's researched. To save typing, the examples below define `TECH_ALL` for the fully-researched baseline:
 
 ```bash
-TECH_ALL='--tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 --tech cryogenic-plant=1 --tech biochamber=1 --tech quality-module-3=1'
+TECH_ALL='--tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 --tech cryogenic-plant=1 --tech biochamber=1'
 
 # Asteroid-only iron-plate (the simplest plan)
 python dev/quality_planner.py --item iron-plate --rate 60 $TECH_ALL
@@ -63,7 +63,7 @@ python dev/quality_planner.py --item processing-unit --rate 60 \
 # Early-game: no space platform AND no foundry yet
 python dev/quality_planner.py --item iron-plate --rate 60 \
     --planets nauvis,vulcanus --no-asteroids \
-    --tech recycling=1 --tech quality-module-3=1
+    --tech recycling=1
 
 # Legendary biolab (Gleba/cryo building) — auto-compare picks ingredient-upcycle
 python dev/quality_planner.py --item biolab --rate 1 \
@@ -114,7 +114,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--target-quality Q` | `legendary` | Goal quality tier. The quality loops stop here instead of pushing to legendary (e.g. `rare` treats rare-or-better as success — much cheaper than full legendary). Choices: `uncommon,rare,epic,legendary` |
 | `--planets P1,P2,…` | empty | Unlocked planets. Empty = asteroid-only. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
 | `--module-quality Q` | `--target-quality` | Quality of quality-modules in loops. Defaults to (and may not exceed) `--target-quality` — you can't have modules of a quality you haven't researched. Choices: `normal,uncommon,rare,epic,legendary` |
-| `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules |
+| `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules. Self-declaring — not gated by `--tech` (you'd only request a tier you've researched). |
 | `--assembler-level {2,3}` | `3` | Assembler tier for non-categorised recipes |
 | `--machine-quality Q` | `normal` | Quality of every assembly / crusher / recycler machine. Applies `cli.MACHINE_QUALITY_SPEED` (+0/+30/+60/+90/+150 %) |
 | `--assembly-modules` | off | Fill assembly slots with prod modules at `--module-quality` and `--prod-module-tier`. Inherent +50 % prod (foundry/EM-plant/biochamber) is always applied |
@@ -125,7 +125,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--enable-driver RECIPE` | none | Repeatable. Activate a co-product driver by recipe key (e.g. `molten-iron-from-lava` to harvest stone for `stone-wall @ vulcanus`). Driver primary becomes overflow. See `enumerate_co_product_drivers` for the candidate list. |
 | `--enable-drivers all` | off | Try every driver candidate, picking the highest-yield driver per mined-recycle leaf. Cost-gated against the no-driver baseline. Mutually exclusive with `--enable-driver`. |
 | `--no-asteroids` | off | Skip asteroid path; route iron-ore/copper-ore/ice/calcite via planet self-recycle |
-| `--tech NAME=LEVEL` | empty | Repeatable. Tech research state. **Without any `--tech` flag, NOTHING is researched and the plan fails-fast on the recycler check.** Valid names: `recycling`, `tungsten-carbide`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`, `quality-module`, `quality-module-2`, `quality-module-3`. To replicate the fully-researched baseline list every tech with `=1`. |
+| `--tech NAME=LEVEL` | empty | Repeatable. Tech research state (machine/building unlocks only). **Without any `--tech` flag, NOTHING is researched and the plan fails-fast on the recycler check.** Valid names: `recycling`, `tungsten-carbide`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`. To replicate the fully-researched baseline list every tech with `=1`. |
 | `--format {human,json}` | `human` | Output format |
 
 ---
@@ -269,7 +269,6 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_hot_spot_suggestions` | Inspects `summary.by_role`, emits actionable notes when one role > 50 % of machines |
 | `_pick_recipe_fluid_preferred` | Recipe selection: prefer recipes with most fluid ingredients (foundry casting > furnace); drops candidates whose machine is locked under `tech_state` |
 | `_tech_locked_machines` | Returns frozenset of machine keys locked by the given `tech_state` |
-| `_tech_quality_tier_cap` | Highest unlocked quality-module tier (0=none) |
 | `_machine_for_recipe` | Wraps `cli.get_machine` with `CATEGORY_FALLBACK` routing — returns None when the primary machine is locked AND the recipe category has no fallback |
 | `walk_recipe_tree` | Two-pass walker. Builds stage list + raw_demand dict. Accepts `extra_raws`, `byproduct_credits`, `assembly_modules`, `machine_quality`, `no_asteroids`, **`tech_state` (required kwarg)**, plus dispatch-plumbing kwargs `_cache` / `_in_flight` / `_force_tree_walk_for` / `_dispatch_env` / `_dispatch_out` |
 | `_plan_self_recycle_target` | Path A implementation. Now threads `_cache` + `_in_flight` so its inner ingredient walks can dispatch deeper blocklist intermediates |
@@ -425,7 +424,7 @@ The planner gates which machines/recipes the player has unlocked via `tech_state
 - **CLI default**: no `--tech` flags → `tech_state == {}` (everything locked) → `plan()` fails-fast on the recycler check.
 - **Library default**: `tech_state` has no default; callers must pass an explicit dict. `qp.ALL_TECH_UNLOCKED` is the constant for "fully researched" (used by every existing test).
 
-`TECH_GATES` declares what each tech name unlocks: either a list of machines (`recycler`, `foundry`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`) or a `quality_tier` (1/2/3 for `quality-module`/-2/-3).
+`TECH_GATES` declares what each tech name unlocks: a list of machines (`recycler`, `foundry`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`).  Quality-module *tier* is no longer gated here — `--quality-module-tier` is self-declaring, and module/machine *quality* is bounded by `--target-quality` instead (see below).
 
 When a primary machine is locked, `_machine_for_recipe` consults `CATEGORY_FALLBACK` for an alternative:
 - `electronics` / `electronics-with-fluid` / `pressing` → assembler-N (these are categories that assembler-3 natively supports).
@@ -433,7 +432,7 @@ When a primary machine is locked, `_machine_for_recipe` consults `CATEGORY_FALLB
 - `*-or-chemistry` / `chemistry-or-cryogenics` → chemical-plant.
 - Categories without an entry (`metallurgy`, `cryogenics`, `electromagnetics`, `organic`) have no fallback — recipes routing through them fail-fast with an actionable hint naming the missing tech.
 
-Quality-module tier is checked against `_tech_quality_tier_cap(tech_state)`: requesting `quality_module_tier=3` with `quality-module-3` locked fails-fast at `plan()` entry.
+Quality ceiling is set by `--target-quality` (the assumption: if you've researched epic/legendary quality you'd be targeting it, not rare).  `--module-quality` defaults to `--target-quality` and `plan()` fails-fast if `--module-quality` or `--machine-quality` exceeds it — you can't have modules or machines of a quality you haven't researched.
 
 ### Hot-spot advisor
 
@@ -519,7 +518,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **301 tests**, 41 classes.
+`dev/test_quality_planner.py` — **300 tests**, 41 classes.
 
 | Class | Coverage |
 |---|---|
@@ -547,7 +546,7 @@ MACHINE_INHERENT_PROD = {
 | `TestNoAsteroids` | `--no-asteroids` routes via `MINED_RAW_NO_ASTEROID_FALLBACK`; fail-fast names the missing planet |
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
-| `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, `quality-module-3` gate, partial-lock baseline parity, `_parse_tech_state` validation, `tech_state` is a required kwarg |
+| `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, partial-lock baseline parity, `_parse_tech_state` validation (machine techs only), `tech_state` is a required kwarg |
 | `TestGlebaTargets` (V3 item 4) | `biolab`/`captive-biter-spawner` in `SELF_RECYCLE_TARGETS`; auto-comparator picks Path B for tungsten-carbide, plans succeed for captive-biter-spawner (post-audit Path B may now win); explanatory notes always present; shuffle enumeration includes buildings + modules + military + endgame; single-output recyclers excluded; `tank`/`biochamber`/`capture-robot-rocket`/`productivity-module-3` plan as shuffle targets; shuffle DP correctly skips prod-bearing slots when recipe has `allow_productivity=False`. |
 | `TestSelfRecycleIntermediate` (post-2026-05-08 audit) | 14 previously-failing endgame targets now plan: `electromagnetic-plant`, `foundry`, `mech-armor`, `fusion-reactor`, `quality-module-3`, `metallurgic-/electromagnetic-/cryogenic-science-pack`. Verifies normal-quality inputs propagate (`holmium-solution` in `normal_fluid_input`). Verifies `summary.by_role` includes `self-recycle-target`. Verifies linear scaling under rate doubling. Verifies Pass 2 deduplicates intermediates so duplicate `order` entries don't re-emit. |
 | `TestDispatchMemoization` (post-2026-05-08 audit) | Solver kernel called once per unique `(item, env)` key; Path A/B decision cached and re-used; per-`plan()` cache isolation (no cross-call leak); cycle detection via pre-populated `_in_flight` forces Path A with explanatory note; solver cache keyed by env (epic-quality variant gets a fresh kernel call). |

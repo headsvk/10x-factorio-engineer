@@ -817,9 +817,9 @@ When gathering `--tech`, treat each target planet's native machine as already
 unlocked (per `PLANET_MACHINE_UNLOCKS`: Vulcanus→foundry, Fulgora→
 electromagnetic-plant, Gleba→biochamber, Aquilo→all four) plus the recycler —
 the player can't be operating on that planet otherwise — and only ask them to
-confirm or add *cross-planet* tech.  (Quality-module tech is implied by
-`--quality-module-tier`: tier 2 ⇒ `quality-module-2=1`, tier 3 ⇒
-`quality-module-3=1`.)
+confirm or add *cross-planet* tech.  `--tech` covers machine/building unlocks
+only; quality-module *tier* is set directly with `--quality-module-tier` (no
+tech flag), and the quality *ceiling* comes from `--target-quality`.
 
 ### When to call it
 
@@ -862,11 +862,12 @@ python dev/quality_planner.py --item <item-id> --rate <N>
 **Tech state is required.** Without `--tech` flags the planner fails-fast on
 the recycler check.  Ask the player which tech they have, then list the
 unlocks: `recycling`, `tungsten-carbide` (foundry), `electromagnetic-plant`,
-`cryogenic-plant`, `biochamber`, `quality-module`/`-2`/`-3`.  For the common
-"fully researched" case use:
+`cryogenic-plant`, `biochamber`.  (`--tech` is machine/building unlocks only —
+quality-module tier is `--quality-module-tier`, not a tech flag.)  For the
+common "fully researched" case use:
 ```
 --tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 \
---tech cryogenic-plant=1 --tech biochamber=1 --tech quality-module-3=1
+--tech cryogenic-plant=1 --tech biochamber=1
 ```
 
 ### Planet flag
@@ -910,8 +911,10 @@ Surface the error verbatim — most are actionable:
   category '<cat>'`: a foundry/EM-plant/cryo recipe routes through a locked
   machine and has no fallback. Add `--tech tungsten-carbide=1` (foundry),
   `--tech electromagnetic-plant=1`, or `--tech cryogenic-plant=1` as needed
-- `quality_module_tier=N requires --tech quality-module-N=1`: bump the
-  quality-module tech tier
+- `--module-quality <q> exceeds --target-quality <t>` (or the same for
+  `--machine-quality`): the requested module/machine quality is above the goal
+  tier. Lower it, or raise `--target-quality` if the player has that quality
+  researched
 - `requires '<raw>'... — add --planets <P>`: tell the player which planet to add
 - `recipe '<r>' is self-recycling`: occurs when the item is needed as an
   *intermediate* (these ARE valid as targets — superconductor, holmium-plate,
