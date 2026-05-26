@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-14. Tests: `python -m unittest dev.test_quality_planner -v` — **245 tests, all passing, ~1.4 s.**
+**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **301 tests, all passing, ~1.8 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -113,7 +113,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--rate N` | required | Target items per minute (at `--target-quality`) |
 | `--target-quality Q` | `legendary` | Goal quality tier. The quality loops stop here instead of pushing to legendary (e.g. `rare` treats rare-or-better as success — much cheaper than full legendary). Choices: `uncommon,rare,epic,legendary` |
 | `--planets P1,P2,…` | empty | Unlocked planets. Empty = asteroid-only. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
-| `--module-quality Q` | `legendary` | Quality of quality-modules in loops. Choices: `normal,uncommon,rare,epic,legendary` |
+| `--module-quality Q` | `--target-quality` | Quality of quality-modules in loops. Defaults to (and may not exceed) `--target-quality` — you can't have modules of a quality you haven't researched. Choices: `normal,uncommon,rare,epic,legendary` |
 | `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules |
 | `--assembler-level {2,3}` | `3` | Assembler tier for non-categorised recipes |
 | `--machine-quality Q` | `normal` | Quality of every assembly / crusher / recycler machine. Applies `cli.MACHINE_QUALITY_SPEED` (+0/+30/+60/+90/+150 %) |
@@ -519,7 +519,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **245 tests**, 31 classes.
+`dev/test_quality_planner.py` — **301 tests**, 41 classes.
 
 | Class | Coverage |
 |---|---|

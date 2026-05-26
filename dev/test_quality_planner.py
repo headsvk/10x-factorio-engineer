@@ -3119,6 +3119,47 @@ class TestTargetQuality(unittest.TestCase):
         self.assertNotIn("legendary out", text)
         self.assertNotIn("at tier legendary", text)
 
+    def test_module_quality_defaults_to_target(self):
+        # Unspecified module quality follows the target tier (no legendary
+        # default leaking into a rare plan).
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertEqual(out["module_quality"], "rare")
+
+    def test_default_target_keeps_legendary_modules(self):
+        # No flags: target defaults legendary, so modules default legendary too.
+        out = qp.plan(
+            "iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertEqual(out["module_quality"], "legendary")
+
+    def test_module_quality_above_target_rejected(self):
+        with self.assertRaises(ValueError):
+            qp.plan(
+                "accumulator", 10, _data(), planets=["fulgora"],
+                tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+                module_quality="legendary",
+            )
+
+    def test_machine_quality_above_target_rejected(self):
+        with self.assertRaises(ValueError):
+            qp.plan(
+                "accumulator", 10, _data(), planets=["fulgora"],
+                tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+                machine_quality="epic",
+            )
+
+    def test_module_quality_below_target_allowed(self):
+        # A rare loop built with normal modules is valid (just less efficient).
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+            module_quality="normal",
+        )
+        self.assertEqual(out["module_quality"], "normal")
+
 
 # ---------------------------------------------------------------------------
 # Fulgora scrap-recycling quality source

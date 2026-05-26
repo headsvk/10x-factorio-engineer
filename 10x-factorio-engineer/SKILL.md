@@ -803,14 +803,15 @@ matching `--target-quality` rather than defaulting to legendary.
 **No dashboard — gather the player's setup before running.**  Unlike the
 calculator, the planner has no dashboard or saved state and cannot infer the
 player's modules, tech, or planets.  Ask the player for every argument that
-materially changes the plan instead of silently assuming defaults.  In
-particular, **do not assume legendary `--module-quality` (or any max-tier
-default) for a sub-legendary `--target-quality`** — someone making rare items
-is usually running rare/epic modules, and guessing wrong can halve or double
-the raw cost.  Confirm at minimum: `--target-quality`, `--module-quality`,
-`--quality-module-tier`, `--tech` (what's researched), `--planets`,
-`--assembly-modules`, and `--machine-quality`.  Only fall back to the
-documented defaults for arguments the player explicitly leaves unspecified.
+materially changes the plan instead of silently assuming defaults.
+`--module-quality` and `--machine-quality` now default to (and may not exceed)
+`--target-quality` — so a rare target no longer silently uses legendary
+modules, and asking for a quality above your target fails-fast.  Still confirm
+the player's actual module quality, since they may run *below* the target tier
+(e.g. normal modules in a rare loop).  Confirm at minimum: `--target-quality`,
+`--module-quality`, `--quality-module-tier`, `--tech` (what's researched),
+`--planets`, `--assembly-modules`, and `--machine-quality`.  Only fall back to
+the documented defaults for arguments the player explicitly leaves unspecified.
 
 When gathering `--tech`, treat each target planet's native machine as already
 unlocked (per `PLANET_MACHINE_UNLOCKS`: Vulcanus→foundry, Fulgora→
@@ -843,7 +844,7 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     --tech NAME=LEVEL                                      # REQUIRED. Repeat for each unlocked tech.
     [--target-quality uncommon|rare|epic|legendary]        # default: legendary (the goal tier — see note above)
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
-    [--module-quality normal|uncommon|rare|epic|legendary] # default: legendary
+    [--module-quality normal|uncommon|rare|epic|legendary] # default: matches --target-quality; may not exceed it
     [--quality-module-tier 1|2|3]                          # default: 3
     [--assembler-level 2|3]                                # default: 3
     [--machine-quality normal|uncommon|rare|epic|legendary] # default: normal

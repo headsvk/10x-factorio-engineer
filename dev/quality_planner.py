@@ -4699,7 +4699,7 @@ def plan(
     rate: float,
     data: dict,
     *,
-    module_quality: str = "legendary",
+    module_quality: str | None = None,
     research_levels: dict[str, int] | None = None,
     assembler_level: int = 3,
     quality_module_tier: int = 3,
@@ -4733,6 +4733,23 @@ def plan(
     for items that would otherwise route through ``_plan_self_recycle_target``.
     """
     research_levels = research_levels or {}
+    # Module/machine quality default to the target tier and may not exceed it:
+    # you can't have modules or machines of a quality you haven't researched
+    # (and if you've researched epic/legendary you'd be targeting it, not rare).
+    if module_quality is None:
+        module_quality = QUALITY_TIERS[target_tier]
+    if QUALITY_INDEX[module_quality] > target_tier:
+        raise ValueError(
+            f"ERROR: --module-quality {module_quality} exceeds --target-quality "
+            f"{QUALITY_TIERS[target_tier]} — you can't have modules of a quality "
+            "you haven't researched. Lower --module-quality or raise --target-quality."
+        )
+    if QUALITY_INDEX[machine_quality] > target_tier:
+        raise ValueError(
+            f"ERROR: --machine-quality {machine_quality} exceeds --target-quality "
+            f"{QUALITY_TIERS[target_tier]} — you can't build machines of a quality "
+            "you haven't researched. Lower --machine-quality or raise --target-quality."
+        )
     planets_fs: frozenset[str] = frozenset(planets) if planets else frozenset()
     # Validate planet names against the known list.
     unknown = planets_fs - set(KNOWN_PLANETS)
@@ -6046,7 +6063,14 @@ def parse_args() -> argparse.Namespace:
             "better as success.  Default legendary."
         ),
     )
-    p.add_argument("--module-quality", default="legendary", choices=list(QUALITY_TIERS))
+    p.add_argument(
+        "--module-quality", default=None, choices=list(QUALITY_TIERS),
+        help=(
+            "Quality of the quality-modules used in the loops.  Defaults to "
+            "--target-quality and may not exceed it (you can't have modules of "
+            "a quality you haven't researched)."
+        ),
+    )
     p.add_argument("--quality-module-tier", default=3, type=int, choices=[1, 2, 3])
     p.add_argument("--assembler-level", default=3, type=int, choices=[2, 3])
     p.add_argument("--research", action="append", default=[],
