@@ -4,7 +4,8 @@ Quality Planner V2
 
 Separate tool that answers:
   "Given my research, module tier, and which planets I've unlocked, what's
-   the cheapest way to make N legendary <item> per minute?"
+   the cheapest way to make N <item> per minute at a target quality tier
+   (legendary by default; lower it with --target-quality)?"
 
 V1 scope (asteroid-only, Nauvis-subset):
   * Nauvis-style assembly items whose raws are all reachable via
@@ -35,10 +36,18 @@ which ``--planets`` flag would unblock them.
 Usage
 -----
     python dev/quality_planner.py --item <item-id> --rate <N>
+        --tech NAME=LEVEL ...                              # REQUIRED (e.g. recycling=1)
+        [--target-quality uncommon|rare|epic|legendary]    # default: legendary (goal tier)
         [--planets nauvis,vulcanus,fulgora,gleba,aquilo]
         [--module-quality normal|uncommon|rare|epic|legendary]
+        [--quality-module-tier 1|2|3]
         [--assembler-level 2|3]
+        [--machine-quality normal|uncommon|rare|epic|legendary]
+        [--assembly-modules] [--prod-module-tier 1|2|3]
         [--research NAME=LEVEL ...]
+        [--enable-shuffle NAME ...] [--enable-shuffles all]
+        [--enable-driver RECIPE_KEY ...] [--enable-drivers all]
+        [--no-asteroids]
         [--format json|human]
 
 Stdlib only.  Shares the Space Age dataset with cli.py.

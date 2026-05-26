@@ -793,6 +793,13 @@ For self-recycle-target items the planner runs an **auto-comparator**: both
 Path A (self-recycle the target) and Path B (upcycle ingredients then craft
 once) are computed and the cheaper one wins.  The choice appears in `notes`.
 
+**Target quality is configurable — it is not legendary-only.**  The planner
+defaults to legendary, but `--target-quality {uncommon,rare,epic,legendary}`
+stops the quality loops at any tier (rare-or-better counts as success for
+`--target-quality rare`, etc.).  A sub-legendary target is much cheaper than
+full legendary, so when the player asks for "rare/epic &lt;item&gt;" pass the
+matching `--target-quality` rather than defaulting to legendary.
+
 ### When to call it
 
 Invoke `quality_planner.py` when the player asks for:
@@ -814,6 +821,7 @@ throughput, bus sizing, bottleneck analysis, and all non-quality math.
 ```
 python dev/quality_planner.py --item <item-id> --rate <N>
     --tech NAME=LEVEL                                      # REQUIRED. Repeat for each unlocked tech.
+    [--target-quality uncommon|rare|epic|legendary]        # default: legendary (the goal tier — see note above)
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
     [--module-quality normal|uncommon|rare|epic|legendary] # default: legendary
     [--quality-module-tier 1|2|3]                          # default: 3
@@ -824,6 +832,8 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--research NAME=LEVEL ...]                            # e.g. asteroid-productivity=5
     [--enable-shuffle NAME ...]                            # cross-item shuffle by output-item key
     [--enable-shuffles all]                                # activate every applicable shuffle
+    [--enable-driver RECIPE_KEY ...]                       # harvest a recipe's co-product to cover a leaf raw
+    [--enable-drivers all]                                 # try every co-product driver (cost-gated)
     [--no-asteroids]                                       # no space platform yet
     [--format json|human]                                  # default: human
 ```

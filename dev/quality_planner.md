@@ -110,7 +110,8 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | Flag | Default | Description |
 |---|---|---|
 | `--item ID` | required | Target item (one only) |
-| `--rate N` | required | Legendary items per minute |
+| `--rate N` | required | Target items per minute (at `--target-quality`) |
+| `--target-quality Q` | `legendary` | Goal quality tier. The quality loops stop here instead of pushing to legendary (e.g. `rare` treats rare-or-better as success — much cheaper than full legendary). Choices: `uncommon,rare,epic,legendary` |
 | `--planets P1,P2,…` | empty | Unlocked planets. Empty = asteroid-only. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
 | `--module-quality Q` | `legendary` | Quality of quality-modules in loops. Choices: `normal,uncommon,rare,epic,legendary` |
 | `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules |
