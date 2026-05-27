@@ -591,6 +591,21 @@ def _machine_speed(machine_key: str) -> float:
     return float(s)
 
 
+def _module_speed_mult(quality_slots: int = 0, prod_slots: int = 0,
+                       prod_tier: int = 3) -> float:
+    """Crafting-speed multiplier from module speed penalties.
+
+    Quality modules are a flat -5%/slot; prod modules -5/-10/-15% per tier
+    (`cli.QUALITY_MODULE_SPEED_PENALTY` / `cli.PROD_MODULE_SPEED_PENALTY`).
+    Neither is quality-scaled.  Multiply a stage's effective machine speed by
+    this; floored at 0.2 (Factorio's -80% speed floor).
+    """
+    penalty = quality_slots * float(cli.QUALITY_MODULE_SPEED_PENALTY[1])
+    if prod_slots:
+        penalty += prod_slots * float(cli.PROD_MODULE_SPEED_PENALTY[prod_tier])
+    return max(1.0 + penalty, 0.2)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1349,11 +1364,21 @@ def compute_shuffle_stage(
         normal_primary_in_per_min / primary_in_per_cast / (1.0 - r_per_cycle)
     )
     cast_time = float(cast_recipe.get("energy_required", 1.0))
-    cast_machines = total_casts_per_min * cast_time / (cast_speed * 60.0)
+    cast_machines = total_casts_per_min * cast_time / (
+        cast_speed
+        * _module_speed_mult(prod_slots=cfg0.get("cast_prod", 0),
+                             quality_slots=cfg0.get("cast_quality", 0),
+                             prod_tier=prod_module_tier)
+        * 60.0
+    )
 
     total_recycles_per_min = total_casts_per_min * items_per_craft
     rec_time = float(rec_recipe.get("energy_required", 0.9375))
-    recycler_machines = total_recycles_per_min * rec_time / (rec_speed * 60.0)
+    recycler_machines = total_recycles_per_min * rec_time / (
+        rec_speed
+        * _module_speed_mult(quality_slots=cfg0.get("recycle_quality", RECYCLER_SLOTS))
+        * 60.0
+    )
 
     # Byproducts: each non-primary solid recycle return scaled by the
     # ratio of (byproduct output / primary output) per LDS recycle cycle.
@@ -1445,7 +1470,10 @@ def _baseline_cost_for_leaf(
             _recipe_result_amount(rep_recipe, chunk) if rep_recipe else 0.8
         )
         total_crafts = normal_input / max(1.0 - retention, 1e-6)
-        return total_crafts * 2.0 / (CRUSHER_SPEED * qm_speed_mult * 60.0)
+        return total_crafts * 2.0 / (
+            CRUSHER_SPEED * qm_speed_mult
+            * _module_speed_mult(quality_slots=CRUSHER_SLOTS) * 60.0
+        )
 
     # Mined raw: recycler self-loop
     if leaf in MINED_RAW_PLANETS:
@@ -1461,7 +1489,10 @@ def _baseline_cost_for_leaf(
         )
         total_crafts = normal_input / max(1.0 - retention, 1e-6)
         rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-        return total_crafts * rec_time / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+        return total_crafts * rec_time / (
+            RECYCLER_SPEED * qm_speed_mult
+            * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+        )
 
     # Assembly product: use the existing chain's machine_count for that stage.
     if chain_stages:
@@ -1990,7 +2021,10 @@ def compute_scrap_source(
         cascade["recycle_amounts"].get(it, 0.0) * cascade["recycle_time"].get(it, 0.2)
         for it in cascade["recycle_amounts"]
     )
-    machine_count = scrap_per_min * recycle_load / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+    machine_count = scrap_per_min * recycle_load / (
+        RECYCLER_SPEED * qm_speed_mult
+        * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+    )
 
     q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
     stage = {
@@ -2975,7 +3009,11 @@ def walk_recipe_tree(
             continue  # fully covered by byproduct credit
         crafts_per_min = net_demand_item / (per_craft_output * eff_prod)
         crafting_time = float(recipe.get("energy_required", 1))
-        machine_count = crafts_per_min * crafting_time / (machine_speed_f * 60.0)
+        machine_count = crafts_per_min * crafting_time / (
+            machine_speed_f
+            * _module_speed_mult(prod_slots=prod_slots_filled, prod_tier=prod_module_tier)
+            * 60.0
+        )
         inputs: dict[str, float] = {}
         for ing in recipe.get("ingredients", []):
             inputs[ing["name"]] = float(ing.get("amount", 0)) * crafts_per_min
@@ -3979,7 +4017,14 @@ def _plan_self_recycle_target(
 
     crafts_per_min = rate / v
     craft_time = float(craft_recipe.get("energy_required", 1.0))
-    craft_machines = crafts_per_min * craft_time / (machine_speed_f * 60.0)
+    _scfg0 = configs.get(0, {"craft_prod": 0, "craft_quality": 0})
+    craft_machines = crafts_per_min * craft_time / (
+        machine_speed_f
+        * _module_speed_mult(prod_slots=_scfg0.get("craft_prod", 0),
+                             quality_slots=_scfg0.get("craft_quality", 0),
+                             prod_tier=prod_module_tier)
+        * 60.0
+    )
 
     # Recycler: each tier-cycle produces (1+prod)*items_per_craft items at quality
     # distribution; recycler processes these → 0.25 retention back.  Total
@@ -4031,7 +4076,10 @@ def _plan_self_recycle_target(
         wrap_machine_key = ""
 
     total_recycle_crafts = crafts_per_min * items_per_craft / max(1.0 - retention, 1e-6)
-    recycler_machines = total_recycle_crafts * rec_time / (RECYCLER_SPEED * qm_mult * 60.0)
+    recycler_machines = total_recycle_crafts * rec_time / (
+        RECYCLER_SPEED * qm_mult
+        * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+    )
     # Container-craft assemblers.  Two source paths:
     #   wrap_active → wrap recipe's resolved machine.
     #   legacy     → cli.get_machine on craft_category.
@@ -5209,7 +5257,12 @@ def plan(
             crafting_time = float(recipe.get("energy_required", 1))
             machine_speed_f = float(machine_speed) * qm_speed_mult
             driver_machine_count = (
-                crafts_per_min * crafting_time / (machine_speed_f * 60.0)
+                crafts_per_min * crafting_time / (
+                    machine_speed_f
+                    * _module_speed_mult(prod_slots=prod_slots_filled_drv,
+                                         prod_tier=prod_module_tier)
+                    * 60.0
+                )
             )
             # Build the stage's inputs map and walk non-raw ingredients.
             driver_inputs: dict[str, float] = {}
@@ -5409,7 +5462,10 @@ def plan(
         # Geometric avg across 4 tiers; in practice use V to back out cycles.
         # Total processing load ≈ normal_input_per_min / (1 - retention) crafts/min.
         total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
-        machine_count = total_crafts_per_min * 2.0 / (CRUSHER_SPEED * qm_speed_mult * 60.0)
+        machine_count = total_crafts_per_min * 2.0 / (
+            CRUSHER_SPEED * qm_speed_mult
+            * _module_speed_mult(quality_slots=CRUSHER_SLOTS) * 60.0
+        )
         reprocessing_stages.append({
             "role": "asteroid-reprocessing",
             "chunk": chunk,
@@ -5477,7 +5533,10 @@ def plan(
             retention = _recipe_result_amount(rec_recipe, raw_key) if rec_recipe else 0.25
             total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
             rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-            machine_count = total_crafts_per_min * rec_time / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+            machine_count = total_crafts_per_min * rec_time / (
+                RECYCLER_SPEED * qm_speed_mult
+                * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+            )
             mined_recycle_stages.append({
                 "role": "mined-raw-self-recycle",
                 "raw": raw_key,

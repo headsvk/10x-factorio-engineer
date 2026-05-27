@@ -1726,11 +1726,14 @@ class TestHotSpotAdvisor(unittest.TestCase):
         self.assertIn("--planets vulcanus", sugs[0])
 
     def test_e2e_processing_unit_emits_suggestion(self):
-        # processing-unit on Nauvis with --assembly-modules: mined-coal
-        # dominates → expect mined-raw hot-spot note suggesting --enable-shuffle low-density-structure.
+        # processing-unit on Nauvis (no assembly modules): coal self-recycle
+        # dominates (>50%) → expect mined-raw hot-spot note suggesting
+        # --enable-shuffle low-density-structure.  (With --assembly-modules the
+        # prod-module speed penalty inflates the assembly stages, pushing coal
+        # just under 50%, so the suggestion no longer fires — see fix history.)
         out = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], assembly_modules=True,
+            planets=["nauvis"],
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         notes = out.get("notes", [])
@@ -3807,6 +3810,42 @@ class TestModuleConfigSurface(unittest.TestCase):
         # Modules off: foundry casting still shows its built-in +50%.
         out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         self.assertIn("inherent +50% prod", qp.format_human(out))
+
+
+class TestModuleSpeedPenalty(unittest.TestCase):
+    """Module speed penalties reduce effective machine speed → more machines."""
+
+    def test_quality_penalty(self):
+        self.assertAlmostEqual(qp._module_speed_mult(quality_slots=4), 0.8)   # -20%
+        self.assertAlmostEqual(qp._module_speed_mult(quality_slots=2), 0.9)   # -10%
+
+    def test_prod_penalty_per_tier(self):
+        self.assertAlmostEqual(qp._module_speed_mult(prod_slots=4, prod_tier=3), 0.4)  # -60%
+        self.assertAlmostEqual(qp._module_speed_mult(prod_slots=4, prod_tier=1), 0.8)  # -20%
+
+    def test_floor_at_20pct(self):
+        # 8 prod-3 = -120% → floored at 0.2 (Factorio -80% speed floor).
+        self.assertAlmostEqual(qp._module_speed_mult(prod_slots=8, prod_tier=3), 0.2)
+
+    def test_combined_quality_and_prod(self):
+        # 2 quality (-10%) + 2 prod-3 (-30%) = -40% → 0.6.
+        self.assertAlmostEqual(
+            qp._module_speed_mult(quality_slots=2, prod_slots=2, prod_tier=3), 0.6
+        )
+
+    def test_wired_into_loop_stages(self):
+        # Neutralising the penalty must lower an asteroid-crusher-dominated plan
+        # (iron-plate: crushers run 2 quality modules, -10%).
+        data = _data()
+        base = qp.plan("iron-plate", 60, data, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        orig = qp._module_speed_mult
+        try:
+            qp._module_speed_mult = lambda *a, **k: 1.0
+            no_pen = qp.plan("iron-plate", 60, data, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        finally:
+            qp._module_speed_mult = orig
+        self.assertGreater(base, no_pen)
+        self.assertLess(base / no_pen, 1.12)  # crushers dominate; foundry steps unaffected
 
 
 if __name__ == "__main__":

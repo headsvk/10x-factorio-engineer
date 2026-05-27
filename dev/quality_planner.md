@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **310 tests, all passing, ~2.4 s.**
+**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **315 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -88,15 +88,15 @@ python dev/quality_planner.py --item stone-wall --rate 60 \
 
 ## Regression anchors
 
-Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-05-26 after the inherent-prod fix (machine built-in +50% now always applies — see changelog):
+Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-05-26 after the inherent-prod fix (machine built-in +50% always applies) **and the module-speed-penalty fix** (quality modules −5%/slot in recyclers/crushers, prod modules per-tier in assembly — see changelog). The penalty only moves the machine-count column; input rates are unchanged:
 
 | target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
 |---|---|---|---|---|---|
-| `iron-plate` | — | 18.1 | metallic 281, oxide 28 | — | — |
-| `processing-unit` | nauvis | ~904 | metallic 6750, oxide 731 | coal 321 874 | petroleum-gas 2 400, sulfuric-acid 300 |
-| `artillery-shell` | nauvis,vulcanus | ~4 940 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.57M | lava 9 300 |
+| `iron-plate` | — | 20.0 | metallic 281, oxide 28 | — | — |
+| `processing-unit` | nauvis | ~1 062 | metallic 6750, oxide 731 | coal 321 874 | petroleum-gas 2 400, sulfuric-acid 300 |
+| `artillery-shell` | nauvis,vulcanus | ~6 100 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.57M | lava 9 300 |
 
-With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from ~904 machines to **~12.9 machines** — modules off is the conservative baseline (but inherent machine prod still applies even there).
+With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from ~1 062 machines to **~19.9 machines** — modules off is the conservative baseline (but inherent machine prod still applies even there). The assembly-modules figure is higher than the pre-penalty estimate because pure prod modules now carry their −5/−10/−15%-per-slot speed cost (the planner models no speed modules/beacons to offset it).
 
 These are sanity checks, not committed expectations. If a refactor moves them, investigate the cause rather than rubber-stamping.
 
@@ -265,6 +265,7 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_env_signature` | Frozen tuple of cost-affecting kwargs; used as the secondary key in `_cache.plans` |
 | `choose_path_self_recycle` | Dispatcher: picks min(Path A, Path B) for SELF_RECYCLE_TARGETS items at any depth. Cycle-guards via `_in_flight`. Subsumes the top-level auto-comparator AND walker intermediate dispatch |
 | `_assembly_prod_bonus` | (machine, recipe, slots, flag, quality, tier) → (prod_fraction, slots_filled). Includes inherent prod for foundry/EM/biochamber |
+| `_module_speed_mult` | (quality_slots, prod_slots, prod_tier) → speed multiplier from module speed penalties (quality −5%/slot flat; prod −5/−10/−15% per tier; floored at 0.2). Multiplied into every stage's effective machine speed. **Self-feed LP not yet covered (its per-config costs are part-2 work).** |
 | `_compute_incidental_byproducts` | Walks activated assembly stages, returns `({item: rate}, {item: [{recipe, primary, rate}, ...]})` of non-primary SOLID outputs.  `eff_prod` reconstructed from stored `research_prod` + `module_prod` on the stage |
 | `enumerate_co_product_drivers` | Returns `{co_product: [candidates...]}` — every multi-output recipe (excluding crushing/recycling/captive-spawner) becomes a candidate keyed by each of its solid outputs.  Sorted by descending per-craft yield.  Cached per dataset |
 | `_stage_power_kw` | Dispatches per role; compound stages split power between machine types |
@@ -520,7 +521,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **310 tests**, 42 classes.
+`dev/test_quality_planner.py` — **315 tests**, 43 classes.
 
 | Class | Coverage |
 |---|---|
@@ -555,6 +556,7 @@ MACHINE_INHERENT_PROD = {
 | `TestCoProductIncidental` (shipped 2026-05-14) | `incidental_byproduct_legendary` / `_credited` / `_overflow` fields always present (empty when no multi-output recipe active).  `iron-plate @ vulcanus` emits stone byproduct as overflow (no stone demand).  `concrete @ vulcanus` emits 4.8 legendary stone/min, all credited, dropping mined-recycle target from 60 to 55.2 stone/min.  Surplus + credit notes appear in `notes`.  Linear scaling under rate doubling.  Fluid byproducts excluded from helper output.  `format_human` renders an `Incidental Co-Products` section when non-empty.  `_plan_self_recycle_target` sub-plan emits the empty fields. |
 | `TestCoProductDriven` (shipped 2026-05-14) | `enumerate_co_product_drivers` returns the expected stock candidates (lava casting × 2 for stone, processing recipes for seeds, etc.) sorted by descending per-craft yield.  Default off — no `driver_overflow` and no `co-product-driver` stage.  Explicit `--enable-driver molten-iron-from-lava` on `stone-wall @ vulcanus` activates the foundry stage, eliminates the stone mined-recycle stage, surfaces molten-iron in `driver_overflow`, drops total machines >10×.  `--enable-drivers all` picks the highest-yield candidate (copper variant with 15 stone/craft).  Unknown recipe key fails-fast.  Driver skipped when its fluid ingredient (lava) needs an unlocked planet (vulcanus).  Driver's calcite ingredient routes through the asteroid chain.  Linear rate scaling.  `format_human` renders `[driver]` stage line + `Driver Overflow` section.  Sub-plans (self-recycle target) include empty `driver_overflow` field. |
 | `TestModuleConfigSurface` | Quality-loop stages carry `module_config_per_tier` (scrap recyclers = `4x quality-N-Q`); `format_human` renders a `modules:` line for scrap / asteroid-reprocessing / mined-raw stages; `_module_config_summary` collapses uniform per-tier configs, lists when they vary, handles empty / zero-slot |
+| `TestModuleSpeedPenalty` | `_module_speed_mult`: quality −5%/slot (×0.8 at 4 slots), prod −5/−10/−15% per tier, combined, floored at 0.2; penalty is wired into the loop stages (neutralising it lowers the asteroid-crusher-dominated iron-plate plan by ~×1.11) |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.
@@ -563,6 +565,7 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 
 ## Gotchas (institutional knowledge)
 
+- **Module speed penalties are applied via `_module_speed_mult`, not baked into the SPEED constants.** Recyclers/crushers run all-quality slots (uniform −20%/−10%), assembly/cast legs use the tier-0 (`cfg0`) representative config. The penalty multiplies the *effective speed* (so machine counts rise: recyclers ×1.25, crushers ×1.11). It rides on top of the `1/(1−retention)` craft-volume approximation — both are orthogonal. **The self-feed LP (`solve_self_feed_target_loop`, pentapod-egg) does NOT yet apply the penalty** — its cost coefficients are per-config and belong to the per-tier-craft-volume rework (part 2).
 - **`RAW_TO_CHUNK` ≠ all raws.** It only contains items actually produced by crushing recipes. Mined-only raws (coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, gleba bio-raws) live in `MINED_RAW_PLANETS`.
 - **Use `advanced-*-asteroid-crushing` (2 outputs), not basic.** A V1 bug silently produced 0 copper-ore because `metallic-asteroid-crushing` only outputs iron-ore.
 - **Self-recycling items as test targets:** many "obvious" V2 candidates are self-recycling and fail fast as intermediates. Use `electrolyte`, `low-density-structure`, `battery`, `artillery-shell`, `processing-unit`, `tungsten-plate` as test targets when `superconductor`/`holmium-plate`/`tungsten-carbide` are wrong (they only work as TARGETS via `_plan_self_recycle_target`).
