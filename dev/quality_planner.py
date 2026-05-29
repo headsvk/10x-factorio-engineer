@@ -4,7 +4,8 @@ Quality Planner V2
 
 Separate tool that answers:
   "Given my research, module tier, and which planets I've unlocked, what's
-   the cheapest way to make N legendary <item> per minute?"
+   the cheapest way to make N <item> per minute at a target quality tier
+   (legendary by default; lower it with --target-quality)?"
 
 V1 scope (asteroid-only, Nauvis-subset):
   * Nauvis-style assembly items whose raws are all reachable via
@@ -35,10 +36,18 @@ which ``--planets`` flag would unblock them.
 Usage
 -----
     python dev/quality_planner.py --item <item-id> --rate <N>
+        --tech NAME=LEVEL ...                              # REQUIRED (e.g. recycling=1)
+        [--target-quality uncommon|rare|epic|legendary]    # default: legendary (goal tier)
         [--planets nauvis,vulcanus,fulgora,gleba,aquilo]
         [--module-quality normal|uncommon|rare|epic|legendary]
+        [--quality-module-tier 1|2|3]
         [--assembler-level 2|3]
+        [--machine-quality normal|uncommon|rare|epic|legendary]
+        [--assembly-modules] [--prod-module-tier 1|2|3]
         [--research NAME=LEVEL ...]
+        [--enable-shuffle NAME ...] [--enable-shuffles all]
+        [--enable-driver RECIPE_KEY ...] [--enable-drivers all]
+        [--no-asteroids]
         [--format json|human]
 
 Stdlib only.  Shares the Space Age dataset with cli.py.
@@ -535,9 +544,6 @@ TECH_GATES: dict[str, dict] = {
     "electromagnetic-plant":  {"machines": ["electromagnetic-plant"]},
     "cryogenic-plant":        {"machines": ["cryogenic-plant"]},
     "biochamber":             {"machines": ["biochamber"]},
-    "quality-module":         {"quality_tier": 1},
-    "quality-module-2":       {"quality_tier": 2},
-    "quality-module-3":       {"quality_tier": 3},
 }
 
 # Convenience: every tech researched.  Used by tests and as a documented
@@ -585,6 +591,21 @@ def _machine_speed(machine_key: str) -> float:
     return float(s)
 
 
+def _module_speed_mult(quality_slots: int = 0, prod_slots: int = 0,
+                       prod_tier: int = 3) -> float:
+    """Crafting-speed multiplier from module speed penalties.
+
+    Quality modules are a flat -5%/slot; prod modules -5/-10/-15% per tier
+    (`cli.QUALITY_MODULE_SPEED_PENALTY` / `cli.PROD_MODULE_SPEED_PENALTY`).
+    Neither is quality-scaled.  Multiply a stage's effective machine speed by
+    this; floored at 0.2 (Factorio's -80% speed floor).
+    """
+    penalty = quality_slots * float(cli.QUALITY_MODULE_SPEED_PENALTY[1])
+    if prod_slots:
+        penalty += prod_slots * float(cli.PROD_MODULE_SPEED_PENALTY[prod_tier])
+    return max(1.0 + penalty, 0.2)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -599,18 +620,6 @@ def _tech_locked_machines(tech_state: dict[str, int]) -> frozenset[str]:
         for m in info.get("machines", []):
             locked.add(m)
     return frozenset(locked)
-
-
-def _tech_quality_tier_cap(tech_state: dict[str, int]) -> int:
-    """Highest unlocked quality-module tier (0=none) given tech_state."""
-    cap = 0
-    for tech, info in TECH_GATES.items():
-        tier = info.get("quality_tier")
-        if tier is None:
-            continue
-        if tech_state.get(tech, 0) >= 1 and tier > cap:
-            cap = tier
-    return cap
 
 
 def _machine_for_recipe(
@@ -1355,11 +1364,21 @@ def compute_shuffle_stage(
         normal_primary_in_per_min / primary_in_per_cast / (1.0 - r_per_cycle)
     )
     cast_time = float(cast_recipe.get("energy_required", 1.0))
-    cast_machines = total_casts_per_min * cast_time / (cast_speed * 60.0)
+    cast_machines = total_casts_per_min * cast_time / (
+        cast_speed
+        * _module_speed_mult(prod_slots=cfg0.get("cast_prod", 0),
+                             quality_slots=cfg0.get("cast_quality", 0),
+                             prod_tier=prod_module_tier)
+        * 60.0
+    )
 
     total_recycles_per_min = total_casts_per_min * items_per_craft
     rec_time = float(rec_recipe.get("energy_required", 0.9375))
-    recycler_machines = total_recycles_per_min * rec_time / (rec_speed * 60.0)
+    recycler_machines = total_recycles_per_min * rec_time / (
+        rec_speed
+        * _module_speed_mult(quality_slots=cfg0.get("recycle_quality", RECYCLER_SLOTS))
+        * 60.0
+    )
 
     # Byproducts: each non-primary solid recycle return scaled by the
     # ratio of (byproduct output / primary output) per LDS recycle cycle.
@@ -1451,7 +1470,10 @@ def _baseline_cost_for_leaf(
             _recipe_result_amount(rep_recipe, chunk) if rep_recipe else 0.8
         )
         total_crafts = normal_input / max(1.0 - retention, 1e-6)
-        return total_crafts * 2.0 / (CRUSHER_SPEED * qm_speed_mult * 60.0)
+        return total_crafts * 2.0 / (
+            CRUSHER_SPEED * qm_speed_mult
+            * _module_speed_mult(quality_slots=CRUSHER_SLOTS) * 60.0
+        )
 
     # Mined raw: recycler self-loop
     if leaf in MINED_RAW_PLANETS:
@@ -1467,7 +1489,10 @@ def _baseline_cost_for_leaf(
         )
         total_crafts = normal_input / max(1.0 - retention, 1e-6)
         rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-        return total_crafts * rec_time / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+        return total_crafts * rec_time / (
+            RECYCLER_SPEED * qm_speed_mult
+            * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+        )
 
     # Assembly product: use the existing chain's machine_count for that stage.
     if chain_stages:
@@ -1996,7 +2021,10 @@ def compute_scrap_source(
         cascade["recycle_amounts"].get(it, 0.0) * cascade["recycle_time"].get(it, 0.2)
         for it in cascade["recycle_amounts"]
     )
-    machine_count = scrap_per_min * recycle_load / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+    machine_count = scrap_per_min * recycle_load / (
+        RECYCLER_SPEED * qm_speed_mult
+        * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+    )
 
     q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
     stage = {
@@ -2009,6 +2037,13 @@ def compute_scrap_source(
         "covered": covered,
         "overflow": overflow,
         "recycler_quality_chance": q,
+        "module_config_per_tier": {
+            QUALITY_TIERS[t]: {
+                "craft": "n/a",
+                "recycle": f"{RECYCLER_SLOTS}x quality-{quality_module_tier}-{module_quality}",
+            }
+            for t in range(target_tier)
+        },
     }
     return {
         "scrap_per_min": scrap_per_min,
@@ -2502,21 +2537,23 @@ def _assembly_prod_bonus(
     module_quality: str,
     prod_module_tier: int,
 ) -> tuple[float, int]:
-    """Prod bonus from inherent machine prod + N prod modules filling all slots.
+    """Prod bonus = machine inherent prod (always) + N prod modules.
 
-    Returns ``(prod_fraction, slots_filled)``.  Slots_filled is the number of
-    module slots actually filled with prod modules — 0 if the recipe disallows
-    productivity OR ``assembly_modules`` is False.
+    The machine's built-in productivity (foundry / EM-plant / biochamber +50%)
+    applies to EVERY recipe the machine crafts — it is NOT gated by the recipe's
+    ``allow_productivity`` flag (that flag only restricts productivity MODULES /
+    beacons) nor by ``--assembly-modules`` (which only adds module slots on top).
+    Wiki-confirmed for the EM plant (accumulator, solar-panel, etc.); same
+    underlying mechanic for foundry / biochamber.
 
-    Quality of the modules is ``module_quality`` (matches the planner's quality
-    config so the user gets internally-consistent module choices).  Tier is
-    ``prod_module_tier`` (default 3).
+    Prod MODULES are added only when ``assembly_modules`` is set, the recipe
+    allows productivity, and the machine has free slots.
+
+    Returns ``(prod_fraction, slots_filled)``.
     """
-    if not assembly_modules:
-        return 0.0, 0
-    if not recipe.get("allow_productivity", True):
-        return 0.0, 0
     inherent = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+    if not assembly_modules or not recipe.get("allow_productivity", True):
+        return inherent, 0
     slots = int(slots_map.get(machine_key, 0))
     if slots <= 0:
         return inherent, 0
@@ -2972,7 +3009,11 @@ def walk_recipe_tree(
             continue  # fully covered by byproduct credit
         crafts_per_min = net_demand_item / (per_craft_output * eff_prod)
         crafting_time = float(recipe.get("energy_required", 1))
-        machine_count = crafts_per_min * crafting_time / (machine_speed_f * 60.0)
+        machine_count = crafts_per_min * crafting_time / (
+            machine_speed_f
+            * _module_speed_mult(prod_slots=prod_slots_filled, prod_tier=prod_module_tier)
+            * 60.0
+        )
         inputs: dict[str, float] = {}
         for ing in recipe.get("ingredients", []):
             inputs[ing["name"]] = float(ing.get("amount", 0)) * crafts_per_min
@@ -2993,6 +3034,7 @@ def walk_recipe_tree(
             "research_prod": research_prod,
             "module_prod": module_prod,
             "prod_modules": prod_slots_filled,
+            "allow_productivity": bool(recipe.get("allow_productivity", False)),
             "prod_module_tier": prod_module_tier if prod_slots_filled > 0 else 0,
             "prod_module_quality": assembly_module_quality if prod_slots_filled > 0 else "normal",
             "machine_quality": machine_quality,
@@ -3975,7 +4017,14 @@ def _plan_self_recycle_target(
 
     crafts_per_min = rate / v
     craft_time = float(craft_recipe.get("energy_required", 1.0))
-    craft_machines = crafts_per_min * craft_time / (machine_speed_f * 60.0)
+    _scfg0 = configs.get(0, {"craft_prod": 0, "craft_quality": 0})
+    craft_machines = crafts_per_min * craft_time / (
+        machine_speed_f
+        * _module_speed_mult(prod_slots=_scfg0.get("craft_prod", 0),
+                             quality_slots=_scfg0.get("craft_quality", 0),
+                             prod_tier=prod_module_tier)
+        * 60.0
+    )
 
     # Recycler: each tier-cycle produces (1+prod)*items_per_craft items at quality
     # distribution; recycler processes these → 0.25 retention back.  Total
@@ -4027,7 +4076,10 @@ def _plan_self_recycle_target(
         wrap_machine_key = ""
 
     total_recycle_crafts = crafts_per_min * items_per_craft / max(1.0 - retention, 1e-6)
-    recycler_machines = total_recycle_crafts * rec_time / (RECYCLER_SPEED * qm_mult * 60.0)
+    recycler_machines = total_recycle_crafts * rec_time / (
+        RECYCLER_SPEED * qm_mult
+        * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+    )
     # Container-craft assemblers.  Two source paths:
     #   wrap_active → wrap recipe's resolved machine.
     #   legacy     → cli.get_machine on craft_category.
@@ -4690,7 +4742,7 @@ def plan(
     rate: float,
     data: dict,
     *,
-    module_quality: str = "legendary",
+    module_quality: str | None = None,
     research_levels: dict[str, int] | None = None,
     assembler_level: int = 3,
     quality_module_tier: int = 3,
@@ -4724,6 +4776,23 @@ def plan(
     for items that would otherwise route through ``_plan_self_recycle_target``.
     """
     research_levels = research_levels or {}
+    # Module/machine quality default to the target tier and may not exceed it:
+    # you can't have modules or machines of a quality you haven't researched
+    # (and if you've researched epic/legendary you'd be targeting it, not rare).
+    if module_quality is None:
+        module_quality = QUALITY_TIERS[target_tier]
+    if QUALITY_INDEX[module_quality] > target_tier:
+        raise ValueError(
+            f"ERROR: --module-quality {module_quality} exceeds --target-quality "
+            f"{QUALITY_TIERS[target_tier]} — you can't have modules of a quality "
+            "you haven't researched. Lower --module-quality or raise --target-quality."
+        )
+    if QUALITY_INDEX[machine_quality] > target_tier:
+        raise ValueError(
+            f"ERROR: --machine-quality {machine_quality} exceeds --target-quality "
+            f"{QUALITY_TIERS[target_tier]} — you can't build machines of a quality "
+            "you haven't researched. Lower --machine-quality or raise --target-quality."
+        )
     planets_fs: frozenset[str] = frozenset(planets) if planets else frozenset()
     # Validate planet names against the known list.
     unknown = planets_fs - set(KNOWN_PLANETS)
@@ -4738,14 +4807,6 @@ def plan(
         raise ValueError(
             "ERROR: --tech recycling=0 — no quality work is possible without "
             "the recycler.  Add --tech recycling=1 to proceed."
-        )
-    # Quality-module-tier must be unlocked.
-    cap = _tech_quality_tier_cap(tech_state)
-    if quality_module_tier > cap:
-        raise ValueError(
-            f"ERROR: quality_module_tier={quality_module_tier} requires "
-            f"--tech quality-module-{quality_module_tier}=1 (current cap from "
-            f"tech_state: {cap})."
         )
     if item_key in SELF_RECYCLING_BLOCKLIST and item_key not in SELF_RECYCLE_TARGETS:
         raise ValueError(
@@ -5196,7 +5257,12 @@ def plan(
             crafting_time = float(recipe.get("energy_required", 1))
             machine_speed_f = float(machine_speed) * qm_speed_mult
             driver_machine_count = (
-                crafts_per_min * crafting_time / (machine_speed_f * 60.0)
+                crafts_per_min * crafting_time / (
+                    machine_speed_f
+                    * _module_speed_mult(prod_slots=prod_slots_filled_drv,
+                                         prod_tier=prod_module_tier)
+                    * 60.0
+                )
             )
             # Build the stage's inputs map and walk non-raw ingredients.
             driver_inputs: dict[str, float] = {}
@@ -5396,7 +5462,10 @@ def plan(
         # Geometric avg across 4 tiers; in practice use V to back out cycles.
         # Total processing load ≈ normal_input_per_min / (1 - retention) crafts/min.
         total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
-        machine_count = total_crafts_per_min * 2.0 / (CRUSHER_SPEED * qm_speed_mult * 60.0)
+        machine_count = total_crafts_per_min * 2.0 / (
+            CRUSHER_SPEED * qm_speed_mult
+            * _module_speed_mult(quality_slots=CRUSHER_SLOTS) * 60.0
+        )
         reprocessing_stages.append({
             "role": "asteroid-reprocessing",
             "chunk": chunk,
@@ -5464,7 +5533,10 @@ def plan(
             retention = _recipe_result_amount(rec_recipe, raw_key) if rec_recipe else 0.25
             total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
             rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-            machine_count = total_crafts_per_min * rec_time / (RECYCLER_SPEED * qm_speed_mult * 60.0)
+            machine_count = total_crafts_per_min * rec_time / (
+                RECYCLER_SPEED * qm_speed_mult
+                * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+            )
             mined_recycle_stages.append({
                 "role": "mined-raw-self-recycle",
                 "raw": raw_key,
@@ -5718,6 +5790,30 @@ def plan(
 # Output formatting
 # ---------------------------------------------------------------------------
 
+def _module_config_summary(mcfg: dict) -> str:
+    """Compact one-line summary of a quality-loop stage's per-tier module config.
+
+    ``mcfg`` maps tier_name -> ``{"craft": str, "recycle": str}``.  Collapses to
+    a single value when every tier shares the same config (the common recycler
+    case — all slots quality), else lists it per tier.  Returns "" when empty.
+    """
+    if not mcfg:
+        return ""
+
+    def _parts(cfg: dict) -> str:
+        bits = [
+            val for key in ("craft", "recycle")
+            if (val := cfg.get(key)) and val != "n/a" and not val.startswith("0x")
+        ]
+        return " + ".join(bits) if bits else "no modules"
+
+    per_tier = {t: _parts(c) for t, c in mcfg.items()}
+    distinct = set(per_tier.values())
+    if len(distinct) == 1:
+        return next(iter(distinct))
+    return "; ".join(f"{t}: {lbl}" for t, lbl in per_tier.items())
+
+
 def format_human(out: dict) -> str:
     L: list[str] = []
     tgt = out["target"]
@@ -5919,19 +6015,27 @@ def format_human(out: dict) -> str:
             capped = " [PROD-CAPPED]" if st.get("prod_capped") else ""
             tag = " [NORMAL]" if st.get("normal_quality_chain") else ""
             n_prod = int(st.get("prod_modules", 0))
+            mprod = float(st.get("module_prod", 0.0))
             if n_prod > 0:
                 mods = (
                     f", {n_prod}x prod-{st.get('prod_module_tier', 3)}-"
                     f"{st.get('prod_module_quality', 'normal')} "
-                    f"(+{st.get('module_prod', 0.0) * 100.0:.0f}%)"
+                    f"(+{mprod * 100.0:.0f}%)"
                 )
+            elif mprod > 1e-9:
+                # Machine's built-in productivity (foundry/EM-plant/biochamber);
+                # applies even when the recipe disallows prod modules.
+                mods = f", inherent +{mprod * 100.0:.0f}% prod"
             else:
-                mods = ""
+                mods = ", no prod modules"
             L.append(
                 f"  [{role:10s}] {st['recipe']}: "
                 f"{st['rate_per_min']:.2f}/min "
                 f"({st['machine_count']:.2f} × {_humanize(st['machine'])}){fluids}{mods}{capped}{tag}"
             )
+        mc = _module_config_summary(st.get("module_config_per_tier", {}))
+        if mc:
+            L.append(f"                 modules: {mc}")
     L.append("")
     L.append(f"Total machines: {out['total_machine_count']:.2f}")
     if "total_power_mw" in out:
@@ -6037,7 +6141,14 @@ def parse_args() -> argparse.Namespace:
             "better as success.  Default legendary."
         ),
     )
-    p.add_argument("--module-quality", default="legendary", choices=list(QUALITY_TIERS))
+    p.add_argument(
+        "--module-quality", default=None, choices=list(QUALITY_TIERS),
+        help=(
+            "Quality of the quality-modules used in the loops.  Defaults to "
+            "--target-quality and may not exceed it (you can't have modules of "
+            "a quality you haven't researched)."
+        ),
+    )
     p.add_argument("--quality-module-tier", default=3, type=int, choices=[1, 2, 3])
     p.add_argument("--assembler-level", default=3, type=int, choices=[2, 3])
     p.add_argument("--research", action="append", default=[],

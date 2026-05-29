@@ -57,10 +57,12 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --s
 | `--recipe-beacon RECIPE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY[+...]` | _(none)_ | Per-recipe beacon override; same value format as `--beacon`. Repeatable. |
 | `--bus-item ITEM-ID` | _(none)_ | Treat item as a bus input (raw resource); stops recursion at this item; repeatable |
 | `--use-ceil` | _(off)_ | Re-solve at the rate the tightest-rounding (binding) step's ceiled machine count produces. Finds the step where `ceil(mc)/mc` is smallest, scales the target rate by that ratio, then re-solves so all steps are correctly sized for integer machines. Outputs `"use_ceil": true`. Single `--item` only. Oil-product top targets are not supported. |
-| `--research NAME=LEVEL` | _(none)_ | Infinite productivity research level. `NAME` is one of `mining-productivity`, `steel-productivity`, `low-density-structure-productivity`, `scrap-recycling-productivity`, `processing-unit-productivity`, `plastic-bar-productivity`, `rocket-fuel-productivity`, `asteroid-productivity`, `rocket-part-productivity`. `LEVEL` is an integer ≥ 0, each level = +10 % prod. `mining-productivity` multiplies every drill/pumpjack yield (not `offshore-pump`) and is uncapped. The other techs add to recipe prod on the recipes listed in §3.1 and are capped at **+300 % total machine prod** (sum of module prod + research prod). Repeatable. |
+| `--research NAME=LEVEL` | _(none)_ | Infinite productivity research level. `NAME` is one of `mining-productivity`, `steel-productivity`, `low-density-structure-productivity`, `scrap-recycling-productivity`, `processing-unit-productivity`, `plastic-bar-productivity`, `rocket-fuel-productivity`, `asteroid-productivity`, `rocket-part-productivity`. `LEVEL` is an integer ≥ 0, each level = +10 % prod. `mining-productivity` multiplies every drill/pumpjack yield (not `offshore-pump`) and is uncapped. The other techs add to recipe prod on the recipes listed in §3.1 and are capped at **+300 % total machine prod** (sum of machine built-in prod + module prod + research prod). Repeatable. |
 | `--format json/human` | `json` | Output format. **Always omit this flag** (defaults to `json`) — `--format human` is for human terminal reading only, not for Claude's programmatic use. |
 
-**Module TYPE values (machine modules):** `prod` / `speed` / `efficiency`
+**Machine built-in productivity:** the foundry, electromagnetic-plant, and biochamber each have a **+50 % built-in productivity** that the CLI applies automatically to *every* recipe they craft — including recipes flagged `allow_productivity: false` (e.g. `accumulator`, `solar-panel`). That flag only blocks productivity *modules*/beacons, not the machine's intrinsic bonus. So expect those machines' counts (and their upstream raw demand) to be ~1/1.5 of a naive no-prod estimate even with no modules.
+
+**Module TYPE values (machine modules):** `prod` / `speed` / `efficiency` / `quality`. `quality` modules impose a flat −5 % speed penalty per module (so they raise machine_count) but their output-quality effect is **not** modelled — the CLI computes throughput only, so a step with quality modules reports the same item rates, just with more (slower) machines.
 **Module TYPE values (beacon modules):** `speed` / `efficiency` only — `prod` not allowed in beacons. Efficiency modules in beacons transmit a reduced energy bonus to nearby machines, lowering their power draw.
 
 **Quality enum:** `normal` / `uncommon` / `rare` / `epic` / `legendary` (applies to `--machine-quality`, `--beacon-quality`, pump quality, and the QUALITY field in module specs)
@@ -793,6 +795,34 @@ For self-recycle-target items the planner runs an **auto-comparator**: both
 Path A (self-recycle the target) and Path B (upcycle ingredients then craft
 once) are computed and the cheaper one wins.  The choice appears in `notes`.
 
+**Target quality is configurable — it is not legendary-only.**  The planner
+defaults to legendary, but `--target-quality {uncommon,rare,epic,legendary}`
+stops the quality loops at any tier (rare-or-better counts as success for
+`--target-quality rare`, etc.).  A sub-legendary target is much cheaper than
+full legendary, so when the player asks for "rare/epic &lt;item&gt;" pass the
+matching `--target-quality` rather than defaulting to legendary.
+
+**No dashboard — gather the player's setup before running.**  Unlike the
+calculator, the planner has no dashboard or saved state and cannot infer the
+player's modules, tech, or planets.  Ask the player for every argument that
+materially changes the plan instead of silently assuming defaults.
+`--module-quality` and `--machine-quality` now default to (and may not exceed)
+`--target-quality` — so a rare target no longer silently uses legendary
+modules, and asking for a quality above your target fails-fast.  Still confirm
+the player's actual module quality, since they may run *below* the target tier
+(e.g. normal modules in a rare loop).  Confirm at minimum: `--target-quality`,
+`--module-quality`, `--quality-module-tier`, `--tech` (what's researched),
+`--planets`, `--assembly-modules`, and `--machine-quality`.  Only fall back to
+the documented defaults for arguments the player explicitly leaves unspecified.
+
+When gathering `--tech`, treat each target planet's native machine as already
+unlocked (per `PLANET_MACHINE_UNLOCKS`: Vulcanus→foundry, Fulgora→
+electromagnetic-plant, Gleba→biochamber, Aquilo→all four) plus the recycler —
+the player can't be operating on that planet otherwise — and only ask them to
+confirm or add *cross-planet* tech.  `--tech` covers machine/building unlocks
+only; quality-module *tier* is set directly with `--quality-module-tier` (no
+tech flag), and the quality *ceiling* comes from `--target-quality`.
+
 ### When to call it
 
 Invoke `quality_planner.py` when the player asks for:
@@ -814,8 +844,9 @@ throughput, bus sizing, bottleneck analysis, and all non-quality math.
 ```
 python dev/quality_planner.py --item <item-id> --rate <N>
     --tech NAME=LEVEL                                      # REQUIRED. Repeat for each unlocked tech.
+    [--target-quality uncommon|rare|epic|legendary]        # default: legendary (the goal tier — see note above)
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
-    [--module-quality normal|uncommon|rare|epic|legendary] # default: legendary
+    [--module-quality normal|uncommon|rare|epic|legendary] # default: matches --target-quality; may not exceed it
     [--quality-module-tier 1|2|3]                          # default: 3
     [--assembler-level 2|3]                                # default: 3
     [--machine-quality normal|uncommon|rare|epic|legendary] # default: normal
@@ -824,6 +855,8 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--research NAME=LEVEL ...]                            # e.g. asteroid-productivity=5
     [--enable-shuffle NAME ...]                            # cross-item shuffle by output-item key
     [--enable-shuffles all]                                # activate every applicable shuffle
+    [--enable-driver RECIPE_KEY ...]                       # harvest a recipe's co-product to cover a leaf raw
+    [--enable-drivers all]                                 # try every co-product driver (cost-gated)
     [--no-asteroids]                                       # no space platform yet
     [--format json|human]                                  # default: human
 ```
@@ -831,11 +864,12 @@ python dev/quality_planner.py --item <item-id> --rate <N>
 **Tech state is required.** Without `--tech` flags the planner fails-fast on
 the recycler check.  Ask the player which tech they have, then list the
 unlocks: `recycling`, `tungsten-carbide` (foundry), `electromagnetic-plant`,
-`cryogenic-plant`, `biochamber`, `quality-module`/`-2`/`-3`.  For the common
-"fully researched" case use:
+`cryogenic-plant`, `biochamber`.  (`--tech` is machine/building unlocks only —
+quality-module tier is `--quality-module-tier`, not a tech flag.)  For the
+common "fully researched" case use:
 ```
 --tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 \
---tech cryogenic-plant=1 --tech biochamber=1 --tech quality-module-3=1
+--tech cryogenic-plant=1 --tech biochamber=1
 ```
 
 ### Planet flag
@@ -879,8 +913,10 @@ Surface the error verbatim — most are actionable:
   category '<cat>'`: a foundry/EM-plant/cryo recipe routes through a locked
   machine and has no fallback. Add `--tech tungsten-carbide=1` (foundry),
   `--tech electromagnetic-plant=1`, or `--tech cryogenic-plant=1` as needed
-- `quality_module_tier=N requires --tech quality-module-N=1`: bump the
-  quality-module tech tier
+- `--module-quality <q> exceeds --target-quality <t>` (or the same for
+  `--machine-quality`): the requested module/machine quality is above the goal
+  tier. Lower it, or raise `--target-quality` if the player has that quality
+  researched
 - `requires '<raw>'... — add --planets <P>`: tell the player which planet to add
 - `recipe '<r>' is self-recycling`: occurs when the item is needed as an
   *intermediate* (these ARE valid as targets — superconductor, holmium-plate,

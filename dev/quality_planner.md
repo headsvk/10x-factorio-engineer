@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-14. Tests: `python -m unittest dev.test_quality_planner -v` — **245 tests, all passing, ~1.4 s.**
+**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **315 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -27,9 +27,10 @@ Currently shipped:
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
-- **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber / quality-module tier. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`.
+- **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`. Quality-module *tier* is not gated by `--tech` — `--quality-module-tier` is self-declaring (you'd only request a tier you have).
 - **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge recipes give the other uranium isotope.  Surplus surfaces as `incidental_byproduct_overflow`.
 - **Driven co-product activation (`--enable-driver RECIPE_KEY` / `--enable-drivers all`, 2026-05-14)** — for any leaf raw R demanded via mined-recycle, the planner can activate a recipe that produces R as a non-primary solid (e.g. `molten-iron-from-lava` for stone) purely to harvest R, accepting the recipe's primary as overflow.  Driver ingredients are walked through the standard legendary chain (asteroid → calcite, etc.).  `--enable-drivers all` is cost-gated against the no-driver baseline.  Headline impact: `stone-wall @ 60/min --planets nauvis,vulcanus --enable-drivers all` drops from 2244 to ~65 machines (35× reduction).
+- **Inherent-prod fix (2026-05-26)** — a machine's built-in productivity (foundry / EM-plant / biochamber +50%) now applies to **every** recipe it crafts, regardless of the recipe's `allow_productivity` flag (which only gates prod *modules*/beacons) and regardless of `--assembly-modules`.  Wiki-confirmed for the EM plant (e.g. `accumulator`, `solar-panel`).  Previously `_assembly_prod_bonus` zeroed inherent prod when the recipe disallowed productivity OR when `--assembly-modules` was off, under-crediting productivity and over-sizing chains.  Shifted the regression anchors (e.g. accumulator @ 5/min rare on Fulgora: scrap ~6 800 → ~4 530).
 
 
 ---
@@ -39,7 +40,7 @@ Currently shipped:
 Every invocation needs `--tech` flags listing what's researched. To save typing, the examples below define `TECH_ALL` for the fully-researched baseline:
 
 ```bash
-TECH_ALL='--tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 --tech cryogenic-plant=1 --tech biochamber=1 --tech quality-module-3=1'
+TECH_ALL='--tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 --tech cryogenic-plant=1 --tech biochamber=1'
 
 # Asteroid-only iron-plate (the simplest plan)
 python dev/quality_planner.py --item iron-plate --rate 60 $TECH_ALL
@@ -63,7 +64,7 @@ python dev/quality_planner.py --item processing-unit --rate 60 \
 # Early-game: no space platform AND no foundry yet
 python dev/quality_planner.py --item iron-plate --rate 60 \
     --planets nauvis,vulcanus --no-asteroids \
-    --tech recycling=1 --tech quality-module-3=1
+    --tech recycling=1
 
 # Legendary biolab (Gleba/cryo building) — auto-compare picks ingredient-upcycle
 python dev/quality_planner.py --item biolab --rate 1 \
@@ -87,15 +88,15 @@ python dev/quality_planner.py --item stone-wall --rate 60 \
 
 ## Regression anchors
 
-Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`):
+Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-05-26 after the inherent-prod fix (machine built-in +50% always applies) **and the module-speed-penalty fix** (quality modules −5%/slot in recyclers/crushers, prod modules per-tier in assembly — see changelog). The penalty only moves the machine-count column; input rates are unchanged:
 
 | target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
 |---|---|---|---|---|---|
-| `iron-plate` | — | 18.3 | metallic 281, oxide 28 | — | — |
-| `processing-unit` | nauvis | 614.2 | metallic 1406, carbonic 703, oxide 59 | coal 321 874 | crude-oil 5 333 |
-| `artillery-shell` | nauvis,vulcanus | ~5 000 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.5M | lava 9 300 |
+| `iron-plate` | — | 20.0 | metallic 281, oxide 28 | — | — |
+| `processing-unit` | nauvis | ~1 062 | metallic 6750, oxide 731 | coal 321 874 | petroleum-gas 2 400, sulfuric-acid 300 |
+| `artillery-shell` | nauvis,vulcanus | ~6 100 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.57M | lava 9 300 |
 
-With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from 620 machines to **~12.6 machines** (50× drop) — modules off is the conservative baseline.
+With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from ~1 062 machines to **~19.9 machines** — modules off is the conservative baseline (but inherent machine prod still applies even there). The assembly-modules figure is higher than the pre-penalty estimate because pure prod modules now carry their −5/−10/−15%-per-slot speed cost (the planner models no speed modules/beacons to offset it).
 
 These are sanity checks, not committed expectations. If a refactor moves them, investigate the cause rather than rubber-stamping.
 
@@ -110,10 +111,11 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | Flag | Default | Description |
 |---|---|---|
 | `--item ID` | required | Target item (one only) |
-| `--rate N` | required | Legendary items per minute |
+| `--rate N` | required | Target items per minute (at `--target-quality`) |
+| `--target-quality Q` | `legendary` | Goal quality tier. The quality loops stop here instead of pushing to legendary (e.g. `rare` treats rare-or-better as success — much cheaper than full legendary). Choices: `uncommon,rare,epic,legendary` |
 | `--planets P1,P2,…` | empty | Unlocked planets. Empty = asteroid-only. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
-| `--module-quality Q` | `legendary` | Quality of quality-modules in loops. Choices: `normal,uncommon,rare,epic,legendary` |
-| `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules |
+| `--module-quality Q` | `--target-quality` | Quality of quality-modules in loops. Defaults to (and may not exceed) `--target-quality` — you can't have modules of a quality you haven't researched. Choices: `normal,uncommon,rare,epic,legendary` |
+| `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules. Self-declaring — not gated by `--tech` (you'd only request a tier you've researched). |
 | `--assembler-level {2,3}` | `3` | Assembler tier for non-categorised recipes |
 | `--machine-quality Q` | `normal` | Quality of every assembly / crusher / recycler machine. Applies `cli.MACHINE_QUALITY_SPEED` (+0/+30/+60/+90/+150 %) |
 | `--assembly-modules` | off | Fill assembly slots with prod modules at `--module-quality` and `--prod-module-tier`. Inherent +50 % prod (foundry/EM-plant/biochamber) is always applied |
@@ -124,7 +126,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--enable-driver RECIPE` | none | Repeatable. Activate a co-product driver by recipe key (e.g. `molten-iron-from-lava` to harvest stone for `stone-wall @ vulcanus`). Driver primary becomes overflow. See `enumerate_co_product_drivers` for the candidate list. |
 | `--enable-drivers all` | off | Try every driver candidate, picking the highest-yield driver per mined-recycle leaf. Cost-gated against the no-driver baseline. Mutually exclusive with `--enable-driver`. |
 | `--no-asteroids` | off | Skip asteroid path; route iron-ore/copper-ore/ice/calcite via planet self-recycle |
-| `--tech NAME=LEVEL` | empty | Repeatable. Tech research state. **Without any `--tech` flag, NOTHING is researched and the plan fails-fast on the recycler check.** Valid names: `recycling`, `tungsten-carbide`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`, `quality-module`, `quality-module-2`, `quality-module-3`. To replicate the fully-researched baseline list every tech with `=1`. |
+| `--tech NAME=LEVEL` | empty | Repeatable. Tech research state (machine/building unlocks only). **Without any `--tech` flag, NOTHING is researched and the plan fails-fast on the recycler check.** Valid names: `recycling`, `tungsten-carbide`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`. To replicate the fully-researched baseline list every tech with `=1`. |
 | `--format {human,json}` | `human` | Output format |
 
 ---
@@ -187,10 +189,11 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 
 | Role | Emitted by | Machine | Notes |
 |---|---|---|---|
-| `assembly` | walker | per recipe | Standard craft step. Has `inputs`, `fluid_inputs`, `solid_inputs`, `module_prod`, `prod_modules`, `machine_quality`, `prod_capped` |
-| `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots) |
+| `assembly` | walker | per recipe | Standard craft step. Has `inputs`, `fluid_inputs`, `solid_inputs`, `module_prod` (inherent + modules), `prod_modules`, `allow_productivity`, `machine_quality`, `prod_capped`. `format_human` shows the prod modules, "inherent +X% prod" when only the machine's built-in bonus applies (e.g. accumulator on the EM plant, or any foundry/EM/biochamber recipe with modules off), or "no prod modules" otherwise |
+| `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots). Has `module_config_per_tier` (crusher quality slots per tier) |
 | `raw-crushing` | plan() | crusher | Legendary chunk → legendary ore (advanced crushing, 2 outputs per recipe) |
-| `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite |
+| `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite. Has `module_config_per_tier` (recycler quality slots per tier) |
+| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables (one-shot, all 4 recycler slots quality). Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier` |
 | `cross-item-shuffle` | plan() | foundry+recycler | LDS cast + recycle. Splits machine count between `foundry_machines` and `recycler_machines`. Has `byproduct_legendary`, `byproduct_credited`, `byproduct_overflow`, `fluid_demand` |
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
 | `co-product-driver` | plan() | per recipe | Driven activation: recipe runs purely for its non-primary solid output (e.g. `molten-iron-from-lava` for stone). Has `target`, `co_product_per_min`, `crafts_per_min`, `inputs`, `overflow_outputs` |
@@ -262,13 +265,13 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_env_signature` | Frozen tuple of cost-affecting kwargs; used as the secondary key in `_cache.plans` |
 | `choose_path_self_recycle` | Dispatcher: picks min(Path A, Path B) for SELF_RECYCLE_TARGETS items at any depth. Cycle-guards via `_in_flight`. Subsumes the top-level auto-comparator AND walker intermediate dispatch |
 | `_assembly_prod_bonus` | (machine, recipe, slots, flag, quality, tier) → (prod_fraction, slots_filled). Includes inherent prod for foundry/EM/biochamber |
+| `_module_speed_mult` | (quality_slots, prod_slots, prod_tier) → speed multiplier from module speed penalties (quality −5%/slot flat; prod −5/−10/−15% per tier; floored at 0.2). Multiplied into every stage's effective machine speed. **Self-feed LP not yet covered (its per-config costs are part-2 work).** |
 | `_compute_incidental_byproducts` | Walks activated assembly stages, returns `({item: rate}, {item: [{recipe, primary, rate}, ...]})` of non-primary SOLID outputs.  `eff_prod` reconstructed from stored `research_prod` + `module_prod` on the stage |
 | `enumerate_co_product_drivers` | Returns `{co_product: [candidates...]}` — every multi-output recipe (excluding crushing/recycling/captive-spawner) becomes a candidate keyed by each of its solid outputs.  Sorted by descending per-craft yield.  Cached per dataset |
 | `_stage_power_kw` | Dispatches per role; compound stages split power between machine types |
 | `_hot_spot_suggestions` | Inspects `summary.by_role`, emits actionable notes when one role > 50 % of machines |
 | `_pick_recipe_fluid_preferred` | Recipe selection: prefer recipes with most fluid ingredients (foundry casting > furnace); drops candidates whose machine is locked under `tech_state` |
 | `_tech_locked_machines` | Returns frozenset of machine keys locked by the given `tech_state` |
-| `_tech_quality_tier_cap` | Highest unlocked quality-module tier (0=none) |
 | `_machine_for_recipe` | Wraps `cli.get_machine` with `CATEGORY_FALLBACK` routing — returns None when the primary machine is locked AND the recipe category has no fallback |
 | `walk_recipe_tree` | Two-pass walker. Builds stage list + raw_demand dict. Accepts `extra_raws`, `byproduct_credits`, `assembly_modules`, `machine_quality`, `no_asteroids`, **`tech_state` (required kwarg)**, plus dispatch-plumbing kwargs `_cache` / `_in_flight` / `_force_tree_walk_for` / `_dispatch_env` / `_dispatch_out` |
 | `_plan_self_recycle_target` | Path A implementation. Now threads `_cache` + `_in_flight` so its inner ingredient walks can dispatch deeper blocklist intermediates |
@@ -424,7 +427,7 @@ The planner gates which machines/recipes the player has unlocked via `tech_state
 - **CLI default**: no `--tech` flags → `tech_state == {}` (everything locked) → `plan()` fails-fast on the recycler check.
 - **Library default**: `tech_state` has no default; callers must pass an explicit dict. `qp.ALL_TECH_UNLOCKED` is the constant for "fully researched" (used by every existing test).
 
-`TECH_GATES` declares what each tech name unlocks: either a list of machines (`recycler`, `foundry`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`) or a `quality_tier` (1/2/3 for `quality-module`/-2/-3).
+`TECH_GATES` declares what each tech name unlocks: a list of machines (`recycler`, `foundry`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`).  Quality-module *tier* is no longer gated here — `--quality-module-tier` is self-declaring, and module/machine *quality* is bounded by `--target-quality` instead (see below).
 
 When a primary machine is locked, `_machine_for_recipe` consults `CATEGORY_FALLBACK` for an alternative:
 - `electronics` / `electronics-with-fluid` / `pressing` → assembler-N (these are categories that assembler-3 natively supports).
@@ -432,7 +435,7 @@ When a primary machine is locked, `_machine_for_recipe` consults `CATEGORY_FALLB
 - `*-or-chemistry` / `chemistry-or-cryogenics` → chemical-plant.
 - Categories without an entry (`metallurgy`, `cryogenics`, `electromagnetics`, `organic`) have no fallback — recipes routing through them fail-fast with an actionable hint naming the missing tech.
 
-Quality-module tier is checked against `_tech_quality_tier_cap(tech_state)`: requesting `quality_module_tier=3` with `quality-module-3` locked fails-fast at `plan()` entry.
+Quality ceiling is set by `--target-quality` (the assumption: if you've researched epic/legendary quality you'd be targeting it, not rare).  `--module-quality` defaults to `--target-quality` and `plan()` fails-fast if `--module-quality` or `--machine-quality` exceeds it — you can't have modules or machines of a quality you haven't researched.
 
 ### Hot-spot advisor
 
@@ -518,7 +521,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **245 tests**, 31 classes.
+`dev/test_quality_planner.py` — **315 tests**, 43 classes.
 
 | Class | Coverage |
 |---|---|
@@ -546,12 +549,14 @@ MACHINE_INHERENT_PROD = {
 | `TestNoAsteroids` | `--no-asteroids` routes via `MINED_RAW_NO_ASTEROID_FALLBACK`; fail-fast names the missing planet |
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
-| `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, `quality-module-3` gate, partial-lock baseline parity, `_parse_tech_state` validation, `tech_state` is a required kwarg |
+| `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, partial-lock baseline parity, `_parse_tech_state` validation (machine techs only), `tech_state` is a required kwarg |
 | `TestGlebaTargets` (V3 item 4) | `biolab`/`captive-biter-spawner` in `SELF_RECYCLE_TARGETS`; auto-comparator picks Path B for tungsten-carbide, plans succeed for captive-biter-spawner (post-audit Path B may now win); explanatory notes always present; shuffle enumeration includes buildings + modules + military + endgame; single-output recyclers excluded; `tank`/`biochamber`/`capture-robot-rocket`/`productivity-module-3` plan as shuffle targets; shuffle DP correctly skips prod-bearing slots when recipe has `allow_productivity=False`. |
 | `TestSelfRecycleIntermediate` (post-2026-05-08 audit) | 14 previously-failing endgame targets now plan: `electromagnetic-plant`, `foundry`, `mech-armor`, `fusion-reactor`, `quality-module-3`, `metallurgic-/electromagnetic-/cryogenic-science-pack`. Verifies normal-quality inputs propagate (`holmium-solution` in `normal_fluid_input`). Verifies `summary.by_role` includes `self-recycle-target`. Verifies linear scaling under rate doubling. Verifies Pass 2 deduplicates intermediates so duplicate `order` entries don't re-emit. |
 | `TestDispatchMemoization` (post-2026-05-08 audit) | Solver kernel called once per unique `(item, env)` key; Path A/B decision cached and re-used; per-`plan()` cache isolation (no cross-call leak); cycle detection via pre-populated `_in_flight` forces Path A with explanatory note; solver cache keyed by env (epic-quality variant gets a fresh kernel call). |
 | `TestCoProductIncidental` (shipped 2026-05-14) | `incidental_byproduct_legendary` / `_credited` / `_overflow` fields always present (empty when no multi-output recipe active).  `iron-plate @ vulcanus` emits stone byproduct as overflow (no stone demand).  `concrete @ vulcanus` emits 4.8 legendary stone/min, all credited, dropping mined-recycle target from 60 to 55.2 stone/min.  Surplus + credit notes appear in `notes`.  Linear scaling under rate doubling.  Fluid byproducts excluded from helper output.  `format_human` renders an `Incidental Co-Products` section when non-empty.  `_plan_self_recycle_target` sub-plan emits the empty fields. |
 | `TestCoProductDriven` (shipped 2026-05-14) | `enumerate_co_product_drivers` returns the expected stock candidates (lava casting × 2 for stone, processing recipes for seeds, etc.) sorted by descending per-craft yield.  Default off — no `driver_overflow` and no `co-product-driver` stage.  Explicit `--enable-driver molten-iron-from-lava` on `stone-wall @ vulcanus` activates the foundry stage, eliminates the stone mined-recycle stage, surfaces molten-iron in `driver_overflow`, drops total machines >10×.  `--enable-drivers all` picks the highest-yield candidate (copper variant with 15 stone/craft).  Unknown recipe key fails-fast.  Driver skipped when its fluid ingredient (lava) needs an unlocked planet (vulcanus).  Driver's calcite ingredient routes through the asteroid chain.  Linear rate scaling.  `format_human` renders `[driver]` stage line + `Driver Overflow` section.  Sub-plans (self-recycle target) include empty `driver_overflow` field. |
+| `TestModuleConfigSurface` | Quality-loop stages carry `module_config_per_tier` (scrap recyclers = `4x quality-N-Q`); `format_human` renders a `modules:` line for scrap / asteroid-reprocessing / mined-raw stages; `_module_config_summary` collapses uniform per-tier configs, lists when they vary, handles empty / zero-slot |
+| `TestModuleSpeedPenalty` | `_module_speed_mult`: quality −5%/slot (×0.8 at 4 slots), prod −5/−10/−15% per tier, combined, floored at 0.2; penalty is wired into the loop stages (neutralising it lowers the asteroid-crusher-dominated iron-plate plan by ~×1.11) |
 | `TestParseResearch`, `TestHelpers` | Argument parsing and helper functions |
 
 Targeted bands not committed expectations — the wiki-yield tests use a 5 % tolerance because module/probability rounding accumulates differently from FactorioLab's reference numbers.
@@ -560,6 +565,8 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 
 ## Gotchas (institutional knowledge)
 
+- **Module speed penalties are applied via `_module_speed_mult`, not baked into the SPEED constants.** Recyclers/crushers run all-quality slots (uniform −20%/−10%), assembly/cast legs use the tier-0 (`cfg0`) representative config. The penalty multiplies the *effective speed* (so machine counts rise: recyclers ×1.25, crushers ×1.11). **Known gap:** the self-feed LP (`solve_self_feed_target_loop`, pentapod-egg) does NOT apply the penalty — its costs are per-config; pentapod-egg is the one niche path affected.
+- **The `1/(1−retention)` craft-volume estimate is kept deliberately — it's accurate, not just "MVP".** A 2026-05-26 investigation built the exact per-tier expected-crafts recursion `C[t]` (mirrors `V[t]`) and compared: the aggregate is within **≤1.3%** of exact across all targets (recyclers self-retention 0.25; crushers self-retention 0.4 — *not* the kernel's 0.8 yield-retention, which counts cross-fed byproduct chunks and must NOT be used for self-loop craft counting). The exact version was reverted: ≤1.3% gain doesn't justify the DP complexity or the self-vs-total-retention footgun. Don't redo it.
 - **`RAW_TO_CHUNK` ≠ all raws.** It only contains items actually produced by crushing recipes. Mined-only raws (coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, gleba bio-raws) live in `MINED_RAW_PLANETS`.
 - **Use `advanced-*-asteroid-crushing` (2 outputs), not basic.** A V1 bug silently produced 0 copper-ore because `metallic-asteroid-crushing` only outputs iron-ore.
 - **Self-recycling items as test targets:** many "obvious" V2 candidates are self-recycling and fail fast as intermediates. Use `electrolyte`, `low-density-structure`, `battery`, `artillery-shell`, `processing-unit`, `tungsten-plate` as test targets when `superconductor`/`holmium-plate`/`tungsten-carbide` are wrong (they only work as TARGETS via `_plan_self_recycle_target`).

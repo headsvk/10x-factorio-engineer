@@ -1058,11 +1058,13 @@ class TestAssemblyModules(unittest.TestCase):
 
     def test_default_off(self):
         out = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
-        # Without flag, stages have no prod modules.
+        # Without the flag, no prod MODULE slots are filled — but the machine's
+        # built-in productivity still applies (foundry/EM-plant/biochamber +50%).
         for st in out["stages"]:
             if st.get("role") == "assembly":
                 self.assertEqual(st.get("prod_modules", 0), 0)
-                self.assertEqual(st.get("module_prod", 0.0), 0.0)
+                inherent = qp.MACHINE_INHERENT_PROD.get(st.get("machine"), 0.0)
+                self.assertAlmostEqual(st.get("module_prod", 0.0), inherent)
 
     def test_flag_reduces_total_machines(self):
         out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
@@ -1123,15 +1125,30 @@ class TestAssemblyModules(unittest.TestCase):
         # Capped flag set (eff_prod hit the 4.0 cap).
         self.assertTrue(any(s.get("prod_capped") for s in plastic_stages))
 
-    def test_recipe_disallowing_prod_skipped(self):
-        # casting-iron / casting-copper-cable typically allow_productivity=true,
-        # but recipes flagged allow_productivity=false (e.g. *-recycling) get 0.
-        # We use the helper directly to verify the gate.
+    def test_recipe_disallowing_prod_gets_inherent_only(self):
+        # allow_productivity=false blocks prod MODULES, but the machine's
+        # built-in productivity still applies (foundry/EM-plant/biochamber +50%).
         recipe = {"allow_productivity": False}
         prod, slots = qp._assembly_prod_bonus(
             "foundry", recipe, {"foundry": 4}, True, "legendary", 3,
         )
-        self.assertEqual(prod, 0.0)
+        self.assertEqual(prod, 0.5)   # inherent still applies
+        self.assertEqual(slots, 0)    # no prod modules
+        # A machine with no inherent prod (assembler) gets nothing.
+        prod2, slots2 = qp._assembly_prod_bonus(
+            "assembling-machine-3", recipe, {"assembling-machine-3": 4},
+            True, "legendary", 3,
+        )
+        self.assertEqual(prod2, 0.0)
+        self.assertEqual(slots2, 0)
+
+    def test_inherent_applies_when_modules_off(self):
+        # Inherent machine prod applies even without --assembly-modules.
+        recipe = {"allow_productivity": True}
+        prod, slots = qp._assembly_prod_bonus(
+            "foundry", recipe, {"foundry": 4}, False, "legendary", 3,
+        )
+        self.assertEqual(prod, 0.5)
         self.assertEqual(slots, 0)
 
     def test_helper_returns_inherent_when_no_slots(self):
@@ -1709,11 +1726,14 @@ class TestHotSpotAdvisor(unittest.TestCase):
         self.assertIn("--planets vulcanus", sugs[0])
 
     def test_e2e_processing_unit_emits_suggestion(self):
-        # processing-unit on Nauvis with --assembly-modules: mined-coal
-        # dominates → expect mined-raw hot-spot note suggesting --enable-shuffle low-density-structure.
+        # processing-unit on Nauvis (no assembly modules): coal self-recycle
+        # dominates (>50%) → expect mined-raw hot-spot note suggesting
+        # --enable-shuffle low-density-structure.  (With --assembly-modules the
+        # prod-module speed penalty inflates the assembly stages, pushing coal
+        # just under 50%, so the suggestion no longer fires — see fix history.)
         out = qp.plan(
             "processing-unit", 60, _data(),
-            planets=["nauvis"], assembly_modules=True,
+            planets=["nauvis"],
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         notes = out.get("notes", [])
@@ -2126,18 +2146,6 @@ class TestTechGating(unittest.TestCase):
         assert result is not None  # narrow for type checker
         self.assertEqual(result[0], "cryogenic-plant")
 
-    def test_quality_tier_locked(self):
-        # quality_module_tier=3 needs --tech quality-module-3=1.
-        locked_q3 = dict(qp.ALL_TECH_UNLOCKED)
-        locked_q3["quality-module-3"] = 0
-        with self.assertRaises(ValueError) as cm:
-            qp.plan(
-                "iron-plate", 60, _data(),
-                quality_module_tier=3,
-                tech_state=locked_q3,
-            )
-        self.assertIn("quality-module-3", str(cm.exception))
-
     def test_unknown_tech_name_errors(self):
         # _parse_tech_state should sys.exit on unknown tech name with a
         # sorted list of valid names.
@@ -2175,7 +2183,7 @@ class TestTechGating(unittest.TestCase):
         )
         narrow = qp.plan(
             "iron-plate", 60, _data(),
-            tech_state={"recycling": 1, "tungsten-carbide": 1, "quality-module-3": 1},
+            tech_state={"recycling": 1, "tungsten-carbide": 1},
         )
         self.assertAlmostEqual(
             narrow["total_machine_count"], baseline["total_machine_count"],
@@ -3119,6 +3127,47 @@ class TestTargetQuality(unittest.TestCase):
         self.assertNotIn("legendary out", text)
         self.assertNotIn("at tier legendary", text)
 
+    def test_module_quality_defaults_to_target(self):
+        # Unspecified module quality follows the target tier (no legendary
+        # default leaking into a rare plan).
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+        )
+        self.assertEqual(out["module_quality"], "rare")
+
+    def test_default_target_keeps_legendary_modules(self):
+        # No flags: target defaults legendary, so modules default legendary too.
+        out = qp.plan(
+            "iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertEqual(out["module_quality"], "legendary")
+
+    def test_module_quality_above_target_rejected(self):
+        with self.assertRaises(ValueError):
+            qp.plan(
+                "accumulator", 10, _data(), planets=["fulgora"],
+                tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+                module_quality="legendary",
+            )
+
+    def test_machine_quality_above_target_rejected(self):
+        with self.assertRaises(ValueError):
+            qp.plan(
+                "accumulator", 10, _data(), planets=["fulgora"],
+                tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+                machine_quality="epic",
+            )
+
+    def test_module_quality_below_target_allowed(self):
+        # A rare loop built with normal modules is valid (just less efficient).
+        out = qp.plan(
+            "accumulator", 10, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+            module_quality="normal",
+        )
+        self.assertEqual(out["module_quality"], "normal")
+
 
 # ---------------------------------------------------------------------------
 # Fulgora scrap-recycling quality source
@@ -3683,6 +3732,120 @@ class TestReagentFluidQuality(unittest.TestCase):
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertNotIn("sulfur", raw)
+
+
+class TestModuleConfigSurface(unittest.TestCase):
+    """Quality-loop stages surface their quality-module config in output."""
+
+    def _scrap_plan(self):
+        return qp.plan(
+            "accumulator", 5, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+            module_quality="rare", quality_module_tier=2,
+        )
+
+    def test_scrap_stage_has_module_config(self):
+        out = self._scrap_plan()
+        scrap = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
+        mcfg = scrap["module_config_per_tier"]
+        self.assertTrue(mcfg)
+        # Every recycler slot is a quality module at the configured tier/quality.
+        for cfg in mcfg.values():
+            self.assertEqual(cfg["recycle"], f"{qp.RECYCLER_SLOTS}x quality-2-rare")
+
+    def test_human_output_shows_recycler_modules(self):
+        text = qp.format_human(self._scrap_plan())
+        self.assertIn("modules: 4x quality-2-rare", text)
+
+    def test_asteroid_stage_renders_modules(self):
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        text = qp.format_human(out)
+        self.assertIn("modules: 2x quality-3-legendary", text)
+
+    def test_summary_collapses_uniform(self):
+        mcfg = {
+            "normal": {"craft": "n/a", "recycle": "4x quality-3-legendary"},
+            "uncommon": {"craft": "n/a", "recycle": "4x quality-3-legendary"},
+        }
+        self.assertEqual(qp._module_config_summary(mcfg), "4x quality-3-legendary")
+
+    def test_summary_lists_when_varying(self):
+        mcfg = {
+            "normal": {"craft": "n/a", "recycle": "4x quality-3-legendary"},
+            "uncommon": {"craft": "n/a", "recycle": "2x quality-3-legendary"},
+        }
+        s = qp._module_config_summary(mcfg)
+        self.assertIn("normal: 4x quality-3-legendary", s)
+        self.assertIn("uncommon: 2x quality-3-legendary", s)
+
+    def test_summary_empty_and_no_modules(self):
+        self.assertEqual(qp._module_config_summary({}), "")
+        self.assertEqual(
+            qp._module_config_summary(
+                {"normal": {"craft": "n/a", "recycle": "0x quality-3-legendary"}}
+            ),
+            "no modules",
+        )
+
+    def test_assembly_stage_carries_allow_productivity(self):
+        out = self._scrap_plan()
+        acc = next(s for s in out["stages"] if s.get("product") == "accumulator")
+        bat = next(s for s in out["stages"] if s.get("product") == "battery")
+        self.assertFalse(acc["allow_productivity"])  # accumulator disallows prod
+        self.assertTrue(bat["allow_productivity"])
+
+    def test_human_shows_inherent_prod_on_disallowed_recipe(self):
+        # accumulator disallows prod MODULES, but the EM plant's built-in +50%
+        # still applies — surfaced as "inherent +50% prod", not a blank.
+        out = qp.plan(
+            "accumulator", 5, _data(), planets=["fulgora"],
+            tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
+            module_quality="rare", quality_module_tier=2,
+            assembly_modules=True, prod_module_tier=2,
+        )
+        text = qp.format_human(out)
+        self.assertIn("inherent +50% prod", text)
+
+    def test_human_shows_inherent_prod_when_modules_off(self):
+        # Modules off: foundry casting still shows its built-in +50%.
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        self.assertIn("inherent +50% prod", qp.format_human(out))
+
+
+class TestModuleSpeedPenalty(unittest.TestCase):
+    """Module speed penalties reduce effective machine speed → more machines."""
+
+    def test_quality_penalty(self):
+        self.assertAlmostEqual(qp._module_speed_mult(quality_slots=4), 0.8)   # -20%
+        self.assertAlmostEqual(qp._module_speed_mult(quality_slots=2), 0.9)   # -10%
+
+    def test_prod_penalty_per_tier(self):
+        self.assertAlmostEqual(qp._module_speed_mult(prod_slots=4, prod_tier=3), 0.4)  # -60%
+        self.assertAlmostEqual(qp._module_speed_mult(prod_slots=4, prod_tier=1), 0.8)  # -20%
+
+    def test_floor_at_20pct(self):
+        # 8 prod-3 = -120% → floored at 0.2 (Factorio -80% speed floor).
+        self.assertAlmostEqual(qp._module_speed_mult(prod_slots=8, prod_tier=3), 0.2)
+
+    def test_combined_quality_and_prod(self):
+        # 2 quality (-10%) + 2 prod-3 (-30%) = -40% → 0.6.
+        self.assertAlmostEqual(
+            qp._module_speed_mult(quality_slots=2, prod_slots=2, prod_tier=3), 0.6
+        )
+
+    def test_wired_into_loop_stages(self):
+        # Neutralising the penalty must lower an asteroid-crusher-dominated plan
+        # (iron-plate: crushers run 2 quality modules, -10%).
+        data = _data()
+        base = qp.plan("iron-plate", 60, data, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        orig = qp._module_speed_mult
+        try:
+            qp._module_speed_mult = lambda *a, **k: 1.0
+            no_pen = qp.plan("iron-plate", 60, data, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        finally:
+            qp._module_speed_mult = orig
+        self.assertGreater(base, no_pen)
+        self.assertLess(base / no_pen, 1.12)  # crushers dominate; foundry steps unaffected
 
 
 if __name__ == "__main__":

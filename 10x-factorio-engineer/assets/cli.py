@@ -398,6 +398,14 @@ PROD_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
     3: Fraction(-3, 20),   # -15%
 }
 
+# Speed PENALTY per quality module slot (negative; flat -5% all tiers,
+# NOT quality-scaled — only positive module effects scale with module quality)
+QUALITY_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
+    1: Fraction(-1, 20),   # -5%
+    2: Fraction(-1, 20),   # -5%
+    3: Fraction(-1, 20),   # -5%
+}
+
 # Number of module slots in a standard beacon (quality-invariant)
 BEACON_SLOTS: int = 2
 
@@ -654,6 +662,31 @@ def build_machine_module_slots(data: dict) -> dict[str, int]:
             key = m.get("key", "")
             if key:
                 result[key] = int(m.get("module_slots", 0))
+    return result
+
+
+def build_machine_prod_bonus(data: dict) -> dict[str, Fraction]:
+    """
+    Return {machine_key: built-in productivity bonus as a Fraction}.
+
+    The foundry, electromagnetic-plant, and biochamber carry a +50% built-in
+    productivity (``prod_bonus`` in the dataset).  This bonus applies to EVERY
+    recipe the machine crafts, regardless of the recipe's ``allow_productivity``
+    flag — that flag only gates productivity *modules*/beacons, not the
+    machine's intrinsic productivity.  Machines without the field default to 0.
+    """
+    result: dict[str, Fraction] = {}
+    sources: list[list] = [
+        data.get("crafting_machines", []),
+        data.get("agricultural_tower", []),
+        data.get("rocket_silo", []),
+        data.get("mining_drills", []),
+    ]
+    for machine_list in sources:
+        for m in machine_list:
+            key = m.get("key", "")
+            if key:
+                result[key] = Fraction(m.get("prod_bonus", 0) or 0)
     return result
 
 
@@ -1052,6 +1085,7 @@ class Solver:
         beacon_configs: dict | None = None,
         default_beacon_config: dict | None = None,
         machine_module_slots: dict | None = None,
+        machine_prod_bonus: dict | None = None,
         machine_quality: str = "normal",
         beacon_quality: str = "normal",
         recipe_overrides: dict | None = None,
@@ -1071,6 +1105,7 @@ class Solver:
         self.beacon_configs:        dict = beacon_configs        or {}
         self.default_beacon_config: dict | None = default_beacon_config
         self.machine_module_slots:  dict = machine_module_slots  or {}
+        self.machine_prod_bonus:    dict = machine_prod_bonus    or {}
         self.machine_quality: str  = machine_quality
         self.beacon_quality:  str  = beacon_quality
         self.recipe_overrides:         dict = recipe_overrides         or {}
@@ -1136,9 +1171,12 @@ class Solver:
 
         Module prod is computed from specs; research prod is looked up from
         self.recipe_research_prod[recipe_key].  Both are gated by the
-        recipe's allow_productivity flag and summed additively.  The total
-        is clamped to MAX_CRAFTING_PROD (+300 %) per Space Age rules; the
-        third return value is True when clamping occurred.
+        recipe's allow_productivity flag and summed additively.  The machine's
+        built-in productivity (foundry / EM-plant / biochamber +50%) is added
+        on top and is NOT gated by allow_productivity — that flag only restricts
+        modules/beacons, not the machine's intrinsic bonus.  The total is
+        clamped to MAX_CRAFTING_PROD (+300 %) per Space Age rules; the third
+        return value is True when clamping occurred.
         """
         slots = self.machine_module_slots.get(machine_key, 0)
         speed_bonus = Fraction(0)
@@ -1157,13 +1195,21 @@ class Solver:
                             module_prod += eff_count * MODULE_PROD_BONUS[spec["tier"]] * qual_mult
                     elif spec["type"] == "speed":
                         speed_bonus += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
+                    elif spec["type"] == "quality":
+                        # Quality modules slow the machine (-5 % each, flat); no
+                        # effect on output count (quality rolls are not modelled here).
+                        speed_bonus += eff_count * QUALITY_MODULE_SPEED_PENALTY[spec["tier"]]
                     # efficiency: no effect on production count
 
         research_prod = Fraction(0)
         if allow_prod and recipe_key is not None:
             research_prod = self.recipe_research_prod.get(recipe_key, Fraction(0))
 
-        total_prod = module_prod + research_prod
+        # Machine built-in productivity (foundry/EM-plant/biochamber +50%):
+        # applies to every recipe regardless of allow_productivity.
+        inherent_prod = self.machine_prod_bonus.get(machine_key, Fraction(0))
+
+        total_prod = inherent_prod + module_prod + research_prod
         capped = False
         if total_prod > MAX_CRAFTING_PROD:
             total_prod = MAX_CRAFTING_PROD
@@ -1650,6 +1696,10 @@ def compute_miners(
                         elif spec["type"] == "speed":
                             speed_bonus  += eff_count * SPEED_MODULE_BONUS[spec["tier"]] * qual_mult
                             energy_bonus += eff_count * MODULE_CONSUMPTION_PENALTY["speed"][spec["tier"]]
+                        elif spec["type"] == "quality":
+                            # Quality modules in drills slow them (-5 % each, flat);
+                            # no consumption effect.
+                            speed_bonus  += eff_count * QUALITY_MODULE_SPEED_PENALTY[spec["tier"]]
                         elif spec["type"] == "efficiency":
                             energy_bonus -= eff_count * MODULE_EFFICIENCY_REDUCTION[spec["tier"]] * qual_mult
             energy_bonus = max(energy_bonus, Fraction(-4, 5))
@@ -2093,6 +2143,7 @@ def _clone_solver(s: "Solver") -> "Solver":
         beacon_configs=s.beacon_configs or None,
         default_beacon_config=s.default_beacon_config,
         machine_module_slots=s.machine_module_slots or None,
+        machine_prod_bonus=s.machine_prod_bonus or None,
         machine_quality=s.machine_quality,
         beacon_quality=s.beacon_quality,
         recipe_overrides=s.recipe_overrides or None,
@@ -2522,6 +2573,7 @@ def main() -> None:
     resource_info   = build_resource_info(data)
     machine_power_w      = build_machine_power_w(data)
     machine_module_slots = build_machine_module_slots(data)
+    machine_prod_bonus   = build_machine_prod_bonus(data)
     known_items     = build_known_items(data)
 
     for item in args.items:
@@ -2535,6 +2587,7 @@ def main() -> None:
         beacon_configs=beacon_configs or None,
         default_beacon_config=default_beacon_config,
         machine_module_slots=machine_module_slots,
+        machine_prod_bonus=machine_prod_bonus,
         machine_quality=args.machine_quality,
         beacon_quality=args.beacon_quality,
         recipe_overrides=recipe_overrides or None,

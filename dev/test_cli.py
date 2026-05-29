@@ -34,6 +34,7 @@ def setUpModule() -> None:
             "recipe_idx":          cli.build_recipe_index(data),
             "resource_info":       cli.build_resource_info(data),
             "machine_module_slots": cli.build_machine_module_slots(data),
+            "machine_prod_bonus":  cli.build_machine_prod_bonus(data),
             "planet_props":        cli.get_planet_props(data, location),
         }
 
@@ -52,6 +53,7 @@ def setUpModule() -> None:
         "recipe_idx":          cli.build_recipe_index(sa_data),
         "resource_info":       cli.build_resource_info(sa_data),
         "machine_module_slots": cli.build_machine_module_slots(sa_data),
+        "machine_prod_bonus":  cli.build_machine_prod_bonus(sa_data),
         "planet_props":        {},
     }
 
@@ -69,6 +71,7 @@ def _solver(location: "str | None" = None, **kwargs) -> cli.Solver:
         beacon_configs           = kwargs.get("beacon_configs",           None),
         default_beacon_config    = kwargs.get("default_beacon_config",    None),
         machine_module_slots     = kwargs.get("machine_module_slots",     d["machine_module_slots"]),
+        machine_prod_bonus       = kwargs.get("machine_prod_bonus",       d["machine_prod_bonus"]),
         machine_quality          = kwargs.get("machine_quality",          "normal"),
         beacon_quality           = kwargs.get("beacon_quality",           "normal"),
         recipe_overrides         = kwargs.get("recipe_overrides",         None),
@@ -609,10 +612,11 @@ class TestGlebaMachineRouting(unittest.TestCase):
         s.solve("transport-belt", Fraction(60))
         s.resolve_oil(_DATA["space-age"]["data"])
         self.assertEqual(s.steps["transport-belt"]["machine"], "foundry")
-        # Exact machine count: recipe yields 2/cycle, time=0.5s, foundry speed=4
-        # effective rate per foundry = 4/0.5 * 2 * 60 = 960/min
-        # machines = 60 / 960 = 1/16
-        self.assertEqual(s.steps["transport-belt"]["machine_count"], Fraction(1, 16))
+        # Exact machine count: recipe yields 2/cycle, time=0.5s, foundry speed=4,
+        # plus the foundry's +50% built-in productivity (3 belts/cycle effective).
+        # effective rate per foundry = 4/0.5 * 2 * 1.5 * 60 = 1440/min
+        # machines = 60 / 1440 = 1/24
+        self.assertEqual(s.steps["transport-belt"]["machine_count"], Fraction(1, 24))
 
     def test_biter_egg_captive_spawner(self):
         # biter-egg has category 'captive-spawner-process' → captive-spawner.
@@ -680,7 +684,10 @@ class TestNutrientsRecipes(unittest.TestCase):
         self.assertIn("nutrients-from-yumako-mash", s.steps)
         self.assertNotIn("nutrients-from-fish", s.steps)
         self.assertEqual(set(s.raw_resources.keys()), {"yumako"})
-        self.assertEqual(s.raw_resources["yumako"], Fraction(2))
+        # Both the yumako-mash and nutrients steps run on the biochamber, whose
+        # +50% built-in productivity applies (not gated by allow_productivity),
+        # so yumako = 2 * (2/3)^2 = 8/9.
+        self.assertEqual(s.raw_resources["yumako"], Fraction(8, 9))
         for step in s.steps.values():
             self.assertEqual(step["machine"], "biochamber")
 
@@ -707,8 +714,12 @@ class TestNutrientsRecipes(unittest.TestCase):
         s.solve("nutrients", Fraction(40))
         s.resolve_oil(_DATA["space-age"]["data"])
         self.assertEqual(set(s.raw_resources.keys()), {"yumako", "jellynut"})
-        self.assertEqual(s.raw_resources["yumako"],   Fraction(75, 8))
-        self.assertEqual(s.raw_resources["jellynut"], Fraction(15, 4))
+        # Three biochamber steps (nutrients ← bioflux ← mash/jelly), each with the
+        # +50% built-in productivity, so demand is scaled by (2/3)^3:
+        #   yumako   = 75/8 * (2/3)^3 = 25/9
+        #   jellynut = 15/4 * (2/3)^3 = 10/9
+        self.assertEqual(s.raw_resources["yumako"],   Fraction(25, 9))
+        self.assertEqual(s.raw_resources["jellynut"], Fraction(10, 9))
 
 
 # ---------------------------------------------------------------------------
@@ -745,6 +756,7 @@ def _solver_new(location: "str | None" = None, **kwargs) -> cli.Solver:
         beacon_configs           = kwargs.get("beacon_configs",           None),
         default_beacon_config    = kwargs.get("default_beacon_config",    None),
         machine_module_slots     = kwargs.get("machine_module_slots",     d["machine_module_slots"]),
+        machine_prod_bonus       = kwargs.get("machine_prod_bonus",       d["machine_prod_bonus"]),
         machine_quality          = kwargs.get("machine_quality",          "normal"),
         beacon_quality           = kwargs.get("beacon_quality",           "normal"),
         recipe_overrides         = kwargs.get("recipe_overrides",         None),
@@ -835,6 +847,35 @@ class TestModuleConfig(unittest.TestCase):
         self.assertEqual(
             s.steps["electronic-circuit"]["machine_count"],
             Fraction(5, 7),
+        )
+
+    def test_quality_module_speed_penalty(self):
+        # Quality modules impose a flat -5%/module speed penalty (output quality
+        # is not modelled here). 4× quality-3 = -20% speed → 1/0.8 = 1.25x machines.
+        no_mod = _solver_new()
+        no_mod.solve("electronic-circuit", Fraction(60))
+        q = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "quality", 3)]
+        })
+        q.solve("electronic-circuit", Fraction(60))
+        self.assertEqual(
+            q.steps["electronic-circuit"]["machine_count"],
+            no_mod.steps["electronic-circuit"]["machine_count"] * Fraction(5, 4),
+        )
+
+    def test_quality_module_penalty_not_quality_scaled(self):
+        # The -5% penalty is flat — module quality does not change it.
+        normal_q = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "quality", 3, "normal")]
+        })
+        normal_q.solve("electronic-circuit", Fraction(60))
+        leg_q = _solver_new(module_configs={
+            "assembling-machine-3": [_mspec(4, "quality", 3, "legendary")]
+        })
+        leg_q.solve("electronic-circuit", Fraction(60))
+        self.assertEqual(
+            normal_q.steps["electronic-circuit"]["machine_count"],
+            leg_q.steps["electronic-circuit"]["machine_count"],
         )
 
     def test_speed_reduces_machine_count(self):
@@ -3408,7 +3449,10 @@ class TestResearchProductivity(unittest.TestCase):
             base.steps["casting-steel"]["machine_count"]
             / prod.steps["casting-steel"]["machine_count"]
         )
-        self.assertEqual(Fraction(ratio), Fraction(13, 10))
+        # casting-steel runs on the foundry (+50% built-in prod), so the
+        # research ratio is measured against that baseline:
+        # (1 + 0.5 + 0.3) / (1 + 0.5) = 1.8/1.5 = 6/5.
+        self.assertEqual(Fraction(ratio), Fraction(6, 5))
 
     def test_asteroid_productivity_moves_all_six_recipes(self):
         s = _solver("space-age", research_levels={"asteroid-productivity": 2})
@@ -3427,8 +3471,10 @@ class TestResearchProductivity(unittest.TestCase):
             base.steps["bioplastic"]["machine_count"]
             / prod.steps["bioplastic"]["machine_count"]
         )
-        # +50 % prod → 1/1.5 machines
-        self.assertEqual(Fraction(ratio), Fraction(15, 10))
+        # bioplastic runs on the biochamber (+50% built-in prod), so the level-5
+        # research ratio is measured against that baseline:
+        # (1 + 0.5 + 0.5) / (1 + 0.5) = 2.0/1.5 = 4/3.
+        self.assertEqual(Fraction(ratio), Fraction(4, 3))
 
     def test_research_prod_stacks_additively_with_module_prod(self):
         # 4 prod-3 normal (+40% prod, −60% speed) + L3 research (+30% prod, no penalty).
@@ -3698,6 +3744,42 @@ class TestUseCeil(unittest.TestCase):
         self.assertTrue(out.get("use_ceil"), msg="use_ceil should be True in output")
         mc = out["production_steps"][0]["machine_count"]
         self.assertEqual(mc, math.ceil(mc), msg=f"machine_count {mc} should be integer")
+
+
+class TestMachineInherentProd(unittest.TestCase):
+    """Foundry / EM-plant / biochamber +50% built-in productivity applies to
+    every recipe (not gated by allow_productivity — only modules/beacons are)."""
+
+    def test_build_machine_prod_bonus(self):
+        pb = cli.build_machine_prod_bonus(_DATA["space-age"]["data"])
+        self.assertEqual(pb["foundry"], Fraction(1, 2))
+        self.assertEqual(pb["electromagnetic-plant"], Fraction(1, 2))
+        self.assertEqual(pb["biochamber"], Fraction(1, 2))
+        self.assertEqual(pb.get("assembling-machine-3", Fraction(0)), Fraction(0))
+        self.assertEqual(pb.get("electric-furnace", Fraction(0)), Fraction(0))
+
+    def test_inherent_not_gated_by_allow_productivity(self):
+        # allow_prod=False must STILL return the machine's built-in +50%.
+        s = _solver("fulgora")
+        prod, _spd, _cap = s._compute_module_effects([], "electromagnetic-plant", False)
+        self.assertEqual(prod, Fraction(1, 2))
+        # A machine with no built-in prod returns 0.
+        prod2, _spd2, _cap2 = s._compute_module_effects([], "assembling-machine-3", False)
+        self.assertEqual(prod2, Fraction(0))
+
+    def test_inherent_reduces_em_plant_machine_count(self):
+        # Electronic-circuit on the EM plant: +50% prod → 2/3 the machine count
+        # of the no-inherent baseline, and upstream demand falls too.
+        s = _solver("fulgora")
+        s.solve("electronic-circuit", Fraction(60))
+        s.resolve_oil(_DATA["fulgora"]["data"])
+        self.assertEqual(s.steps["electronic-circuit"]["machine"], "electromagnetic-plant")
+        with_inherent = s.steps["electronic-circuit"]["machine_count"]
+        s2 = _solver("fulgora", machine_prod_bonus={})
+        s2.solve("electronic-circuit", Fraction(60))
+        s2.resolve_oil(_DATA["fulgora"]["data"])
+        without = s2.steps["electronic-circuit"]["machine_count"]
+        self.assertEqual(with_inherent, without * Fraction(2, 3))
 
 
 if __name__ == "__main__":
