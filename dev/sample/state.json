@@ -11,9 +11,20 @@
   "machine_overrides": {},
   "research_levels": {
     "mining-productivity": 3,
-    "steel-productivity": 2
+    "steel-productivity": 2,
+    "lab-research-speed": 6,
+    "research-productivity": 2
   },
   "preferred_belt": "blue",
+  "lab_config": {
+    "building": "lab",
+    "quality": "normal",
+    "module_type": "prod",
+    "module_tier": 2,
+    "module_quality": "normal",
+    "beacon": { "count": 0, "tier": 3, "module_quality": "normal", "beacon_quality": "normal" },
+    "research_cycle_time": 60
+  },
   "locations": [
     {
       "id": "nauvis",

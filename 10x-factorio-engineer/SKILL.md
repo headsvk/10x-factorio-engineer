@@ -274,13 +274,34 @@ working context and update it after every player message.
   // Infinite productivity research levels — account-wide, shared across all locations.
   // Each non-zero entry becomes --research NAME=LEVEL on every cli.py invocation.
   // Absent key or 0 = no bonus. See §3.1 for the research → recipe map.
+  // Two LAB-only keys also live here (dashboard-only; NOT passed to cli.py — labs
+  // aren't in the CLI). They feed the dashboard's Research Labs card:
+  //   "lab-research-speed":    0-6   — Lab research speed tech; additive SPEED bonus → fewer labs.
+  //   "research-productivity": 0+    — Space Age infinite tech; +10% lab PRODUCTIVITY per level → higher eSPM.
   "research_levels": {
     // e.g. "mining-productivity": 5,
     //      "steel-productivity": 3,
-    //      "processing-unit-productivity": 10
+    //      "processing-unit-productivity": 10,
+    //      "lab-research-speed": 6,
+    //      "research-productivity": 2
   },
 
   "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — lead with this tier in answers (shared)
+
+  // Research-lab consumption model (dashboard-only — labs are not in cli.py).
+  // Drives the "Research Labs" card: how many labs consume the science production
+  // (SPM), and effective research throughput (eSPM = SPM × (1+lab_prod) / drain).
+  // Speed (lab-research-speed + modules + beacons) sets labs-needed; productivity
+  // (prod modules + research-productivity tech) sets eSPM. Biolab: ×2 speed, 0.5 drain, 4 slots.
+  "lab_config": {
+    "building": "lab",                // "lab" | "biolab" (biolab = Space Age)
+    "quality": "normal",              // lab housing quality (raises base speed)
+    "module_type": "prod",            // "prod" | "speed" | "none" — fills all slots
+    "module_tier": 2,                 // 1 | 2 | 3
+    "module_quality": "normal",
+    "beacon": { "count": 0, "tier": 3, "module_quality": "normal", "beacon_quality": "normal" },  // speed beacons (count 0 = none)
+    "research_cycle_time": 60          // seconds per research unit (T); labs scale linearly with this
+  },
 
   // ── Per-location data ────────────────────────────────────────────────────────
   // Each location is a planet (1 per planet) or a named space platform (unlimited).
@@ -387,6 +408,7 @@ When a player says something like:
 - *"I'm at level 3 steel productivity"* → set `research_levels["steel-productivity"] = 3`, re-run CLI for every line that touches `steel-plate` or `casting-steel`.
 - *"I have level 10 processing unit productivity"* → set `research_levels["processing-unit-productivity"] = 10`, re-run CLI for any line producing `processing-unit`.
 - Generic form: any *"level N X productivity"* where X matches one of the research names in §3.1 maps to a `research_levels` entry. Re-run CLI for every line whose recipe list in §3.1 intersects the affected recipes.
+- *"my labs are biolabs with 4 prod-3 modules"* / *"I run 8 speed beacons on my labs"* → update `lab_config` (`building`, `module_type`/`module_tier`/`module_quality`, `beacon`). The dashboard's Research Labs card is **driven entirely by this JSON** — it only exposes a research-cycle-time picker interactively, so the player relies on you to set the rest. `lab-research-speed` and `research-productivity` go in `research_levels` (not `lab_config`). No CLI re-run needed (labs aren't modelled by cli.py); the dashboard recomputes labs-needed and eSPM from `lab_config` + those two research levels.
 
 **Productivity research re-runs — crafting vs mining are different.**
 
@@ -584,6 +606,10 @@ publishes it once from `10x-factorio-engineer/assets/dashboard.html` and it stay
 - In-artifact chat powered by `window.claude.complete()` — player can ask light
   questions and report machine placements directly in the dashboard
 - Import / Export buttons for syncing state with CLI sessions
+- **Science Targets** section shows SPM (science/min produced) and **eSPM** (effective
+  research throughput after lab productivity), plus a **Research Labs** card computing how
+  many labs/biolabs are needed to consume the SPM given the player's lab modules, beacons,
+  quality, `lab-research-speed` / `research-productivity` tech levels, and research cycle time
 
 ### State sync: CLI → Dashboard
 

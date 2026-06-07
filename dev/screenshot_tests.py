@@ -235,6 +235,15 @@ def _base_state(save_name="Test Factory", dataset="space-age") -> dict:
         "machine_overrides": {},
         "research_levels": {},
         "preferred_belt": "blue",
+        "lab_config": {
+            "building": "lab",
+            "quality": "normal",
+            "module_type": "prod",
+            "module_tier": 2,
+            "module_quality": "normal",
+            "beacon": {"count": 0, "tier": 3, "module_quality": "normal", "beacon_quality": "normal"},
+            "research_cycle_time": 60,
+        },
         "chat_log": [],
     }
 
@@ -293,8 +302,12 @@ def make_state_science_vanilla() -> dict:
 
 
 def make_state_science_space_age() -> dict:
-    """Space Age dataset — 2 locations both contributing to automation science."""
+    """Space Age dataset — 2 locations both contributing to automation science.
+    Also exercises the Research Labs card: biolab + prod modules + lab techs → eSPM."""
     state = _base_state("Multi-Planet Science")
+    state["research_levels"] = {"lab-research-speed": 6, "research-productivity": 3}
+    state["lab_config"]["building"] = "biolab"
+    state["lab_config"]["module_quality"] = "rare"
     nauvis_line = make_minimal_line(
         "automation-science-pack", "Automation Science", 60, 60,
     )
@@ -616,11 +629,13 @@ def make_state_chat() -> dict:
 
 
 def make_state_research() -> dict:
-    """Research section with 2 active levels — mining=5, steel=3 (space-age)."""
+    """Research section with recipe + lab techs active (space-age)."""
     state = _base_state("Research Tracking", dataset="space-age")
     state["research_levels"] = {
         "mining-productivity": 5,
         "steel-productivity": 3,
+        "lab-research-speed": 6,
+        "research-productivity": 2,
     }
     state["locations"] = [_loc(
         "nauvis", "Nauvis",

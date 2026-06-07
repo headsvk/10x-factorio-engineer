@@ -228,6 +228,35 @@
     .spm-sep      { font-family: 'JetBrains Mono', monospace; font-size: 24px; color: var(--text-dim); line-height: 1; }
     .spm-label    { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900;
                     letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
+    .spm-arrow    { font-family: 'JetBrains Mono', monospace; font-size: 18px; color: var(--text-dim); line-height: 1; }
+    .spm-espm     { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700;
+                    font-variant-numeric: tabular-nums; line-height: 1; color: var(--accent); }
+
+    /* ── Research-lab card ── */
+    .lab-card   { background: var(--bg-input); border: 1px solid var(--border-sub);
+                  border-radius: 4px; padding: 10px 12px; margin-top: 12px; }
+    .lab-card-head { display: flex; align-items: center; justify-content: space-between;
+                     gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .lab-card-title { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 800;
+                      text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+    .lab-card-count { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; color: var(--text); }
+    .lab-config-row { display: flex; align-items: center; justify-content: space-between;
+                      gap: 8px 16px; flex-wrap: wrap; margin-bottom: 10px; }
+    .lab-config-summary { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); }
+    .lab-stats  { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+    .lab-stat   { display: flex; flex-direction: column; gap: 1px; }
+    .lab-stat-k { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700;
+                  text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
+    .lab-stat-v { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+                  color: var(--text); font-variant-numeric: tabular-nums; }
+    .lab-ctl    { display: flex; align-items: center; gap: 5px; }
+    .lab-ctl-l  { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
+                  text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+    .lab-select, .lab-num { background: var(--bg-card); border: 1px solid var(--border); border-radius: 3px;
+                  color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px;
+                  padding: 2px 5px; height: 24px; }
+    .lab-num    { width: 50px; text-align: right; }
+    .lab-select:focus, .lab-num:focus { outline: none; border-color: var(--accent); }
 
     /* ── Overview ── */
     .overview-line { padding: 10px 12px; border-radius: 4px; border: 1px solid; margin-bottom: 6px; }
@@ -572,6 +601,15 @@ const DEFAULT_STATE = {
   module_configs: {}, beacon_configs: {}, recipe_overrides: {}, machine_overrides: {},
   research_levels: {},
   preferred_belt: 'blue',
+  lab_config: {
+    building: 'lab',            // 'lab' | 'biolab'
+    quality: 'normal',
+    module_type: 'prod',        // 'prod' | 'speed' | 'none'
+    module_tier: 2,             // 1 | 2 | 3
+    module_quality: 'normal',
+    beacon: { count: 0, tier: 3, module_quality: 'normal', beacon_quality: 'normal' },
+    research_cycle_time: 60,    // T seconds
+  },
   locations: [makeLocation('nauvis', 'planet')],
   chat_log: [],
 };
@@ -581,7 +619,7 @@ const DEFAULT_STATE = {
 // wide bonus, not a recipe-keyed bonus.  Used for UI labels, rendering, and
 // staleness detection on line cards.
 const PRODUCTIVITY_RESEARCH = {
-  'mining-productivity':                { label: 'Mining',              recipes: [],                                                                  sa: false },
+  'mining-productivity':                { label: 'Mining Productivity', recipes: [],                                                                  sa: false },
   'steel-productivity':                 { label: 'Steel',               recipes: ['steel-plate', 'casting-steel'],                                    sa: true  },
   'low-density-structure-productivity': { label: 'Low-Density Structure', recipes: ['low-density-structure', 'casting-low-density-structure'],          sa: true  },
   'scrap-recycling-productivity':       { label: 'Scrap Recycling',     recipes: ['scrap-recycling'],                                                 sa: true  },
@@ -658,6 +696,34 @@ const FLUID_ITEM_IDS = new Set([
   'sulfuric-acid','lubricant','heavy-water','fluorine','ammonia',
   'holmium-solution','calcium-chloride','brine','lava',
 ]);
+
+// ── Research-lab modelling (labs are not in the CLI dataset) ──────────────────
+// Base research speed by quality; biolab is ~2× a lab. From wiki Lab.md / Biolab.md.
+const LAB_BASE_SPEED = {
+  lab:    { normal: 1, uncommon: 1.3, rare: 1.6, epic: 1.9, legendary: 2.5 },
+  biolab: { normal: 2, uncommon: 2.6, rare: 3.2, epic: 3.8, legendary: 5   },
+};
+const LAB_SLOTS    = { lab: 2,  biolab: 4   };
+const LAB_POWER_KW = { lab: 60, biolab: 300 };
+const LAB_DRAIN    = { lab: 1,  biolab: 0.5 };   // biolab consumes half the packs per research
+// Lab research speed (research): finite 6 levels, non-uniform CUMULATIVE % bonus (index = level).
+const LAB_SPEED_CUM = [0, 20, 50, 90, 140, 190, 250];
+
+const QUALITY_TIERS = ['normal', 'uncommon', 'rare', 'epic', 'legendary'];
+// Module-effect tables — mirror cli.py.
+const MODULE_QUALITY_MULT   = { normal: 1, uncommon: 1.3, rare: 1.6, epic: 1.9, legendary: 2.5 };
+const MODULE_PROD_BONUS     = { 1: 0.04, 2: 0.06, 3: 0.10 };
+const PROD_MODULE_SPEED_PEN = { 1: -0.05, 2: -0.10, 3: -0.15 };
+const SPEED_MODULE_BONUS    = { 1: 0.20, 2: 0.30, 3: 0.50 };
+const BEACON_EFFECTIVITY    = { normal: 1.5, uncommon: 1.7, rare: 1.9, epic: 2.1, legendary: 2.5 };
+const BEACON_SLOTS = 2;
+
+// Lab-only research techs — kept OUT of PRODUCTIVITY_RESEARCH so the recipe-staleness
+// logic ignores them.  Stored as plain levels in STATE.research_levels.
+const LAB_RESEARCH = {
+  'research-productivity': { label: 'Research Productivity', sa: true  },  // +10%/lvl, infinite
+  'lab-research-speed':    { label: 'Lab Research Speed',    sa: false, max: 6 },
+};
 
 const SYSTEM_PROMPT = `You are a Factorio factory co-pilot embedded in a dashboard artifact.
 
@@ -906,6 +972,54 @@ function allSciRates() {
   return result;
 }
 
+// Model how many labs are needed to consume `spm` science/min and the effective
+// research throughput (eSPM).  Speed (ERS) sets labs-needed; productivity sets eSPM.
+// See wiki Lab.md §Production requirements.  Pure — no DOM.
+function computeLabLine(spm) {
+  const cfg      = STATE.lab_config ?? DEFAULT_STATE.lab_config;
+  const building = cfg.building === 'biolab' ? 'biolab' : 'lab';
+  const quality  = cfg.quality ?? 'normal';
+  const slots    = LAB_SLOTS[building];
+  const bls      = LAB_BASE_SPEED[building][quality] ?? 1;
+  const drain    = LAB_DRAIN[building];
+  const levels   = STATE.research_levels ?? {};
+
+  // Module effects across all slots (one chosen type fills every slot).
+  const qmult = MODULE_QUALITY_MULT[cfg.module_quality] ?? 1;
+  let modProd = 0, modSpeed = 0;
+  if (cfg.module_type === 'prod') {
+    modProd  = slots * (MODULE_PROD_BONUS[cfg.module_tier] ?? 0) * qmult;
+    modSpeed = slots * (PROD_MODULE_SPEED_PEN[cfg.module_tier] ?? 0);
+  } else if (cfg.module_type === 'speed') {
+    modSpeed = slots * (SPEED_MODULE_BONUS[cfg.module_tier] ?? 0) * qmult;
+  }
+
+  // Beacons: speed only (2.0 beacons carry no productivity).
+  const bc = cfg.beacon ?? {};
+  let beaconSpeed = 0;
+  if ((bc.count ?? 0) > 0) {
+    beaconSpeed = (BEACON_EFFECTIVITY[bc.beacon_quality] ?? 1.5)
+      * Math.sqrt(bc.count) * BEACON_SLOTS
+      * (SPEED_MODULE_BONUS[bc.tier] ?? 0) * (MODULE_QUALITY_MULT[bc.module_quality] ?? 1);
+  }
+
+  const br  = (LAB_SPEED_CUM[Math.min(levels['lab-research-speed'] ?? 0, 6)] ?? 0) / 100;
+  const mr  = modSpeed + beaconSpeed;
+  const ers = (1 + br) * (1 + mr) * bls;
+  const T   = Number(cfg.research_cycle_time) > 0 ? Number(cfg.research_cycle_time) : 60;
+  const perLab     = 60 * ers * drain / T;          // packs/min consumed per lab
+  const labsNeeded = perLab > 0 ? spm / perLab : 0;
+
+  const researchProd = 0.10 * (levels['research-productivity'] ?? 0);
+  const labProd      = modProd + researchProd;      // additive, uncapped
+  const eSPM         = spm * (1 + labProd) / drain;
+  const powerKw      = labsNeeded * LAB_POWER_KW[building];   // fractional, matches machine-count display
+
+  return { building, quality, slots, bls, drain, ers, br, mr, beaconSpeed,
+           modProd, modSpeed, labProd, researchProd, perLab, labsNeeded, eSPM,
+           powerKw, T, moduleType: cfg.module_type ?? 'none', moduleTier: cfg.module_tier ?? 2 };
+}
+
 function renderScience() {
   const targets = allSciTargets();
   const keys = sortedScienceKeys(Object.keys(targets));
@@ -917,12 +1031,19 @@ function renderScience() {
   const targetSPM    = Math.max(...keys.map(k => targets[k]));
   const spmPct = pct(effectiveSPM, targetSPM);
   const spmCol = statusColor(spmPct);
+  // Lab line consumes actual production; fall back to the target when nothing is built yet.
+  const sciSPM = effectiveSPM > 0 ? effectiveSPM : targetSPM;
+  const lab = computeLabLine(sciSPM);
+  const showESPM = lab.labProd > 0 || lab.drain !== 1;   // hide when eSPM == SPM (redundant)
   const spmHeadline = `
     <div class="spm-headline">
       <span class="spm-number" style="color:${spmCol}">${Math.round(effectiveSPM)}</span>
       <span class="spm-sep">/</span>
       <span class="spm-target">${targetSPM}</span>
       <span class="spm-label">SPM</span>
+      ${showESPM ? `<span class="spm-arrow">→</span>
+      <span class="spm-espm">${Math.round(lab.eSPM)}</span>
+      <span class="spm-label">eSPM</span>` : ''}
     </div>`;
 
   const bars = keys.map(name => {
@@ -959,6 +1080,63 @@ function renderScience() {
       <div class="group-label">Science Targets</div>
       ${spmHeadline}
       <div class="science-grid${keys.length >= 4 ? ' cols-2' : ''}">${bars}</div>
+      ${renderLabCard(lab, sciSPM)}
+    </div>`;
+}
+
+// Common research cycle times (seconds) — picker values. Most techs are 30 or 60s.
+const RESEARCH_TIMES = [15, 30, 45, 60];
+
+// Read-only summary of the lab setup; players change it by asking Claude to update lab_config.
+function labConfigSummary(lab, cfg) {
+  const parts = [label(lab.building)];
+  if (lab.quality && lab.quality !== 'normal') parts.push(label(lab.quality));
+  if (cfg.module_type && cfg.module_type !== 'none') {
+    const mq = cfg.module_quality && cfg.module_quality !== 'normal' ? ` ${cfg.module_quality}` : '';
+    parts.push(`${lab.slots}× ${cfg.module_type}-${cfg.module_tier}${mq}`);
+  } else {
+    parts.push('no modules');
+  }
+  const bc = cfg.beacon ?? {};
+  if ((bc.count ?? 0) > 0) {
+    const bq = bc.beacon_quality && bc.beacon_quality !== 'normal' ? ` ${bc.beacon_quality}` : '';
+    parts.push(`${bc.count}× beacon (speed-${bc.tier}${bq})`);
+  }
+  return parts.join(' · ');
+}
+
+// Research-lab card: labs needed to consume the science. Config is state-driven
+// (player asks Claude to update lab_config); only research cycle time is a picker.
+function renderLabCard(lab, sciSPM) {
+  const cfg = STATE.lab_config ?? DEFAULT_STATE.lab_config;
+  const power = fmtPower(lab.powerKw);
+
+  const stats = [
+    ['eSPM',      fmtN(+lab.eSPM.toFixed(1))],
+    ['Lab speed', `${+lab.ers.toFixed(2)}×`],
+    ['Lab prod',  `+${Math.round(lab.labProd*100)}%`],
+    ['Packs/lab', `${+lab.perLab.toFixed(2)}/min`],
+  ];
+  if (lab.beaconSpeed > 0) stats.push(['Beacon spd', `+${Math.round(lab.beaconSpeed*100)}%`]);
+  if (power) stats.push(['Power', power]);
+  const statsHtml = stats.map(([k,v]) =>
+    `<div class="lab-stat"><span class="lab-stat-k">${k}</span><span class="lab-stat-v">${esc(v)}</span></div>`).join('');
+
+  const curT = +cfg.research_cycle_time || 60;
+  const timeOpts = RESEARCH_TIMES.map(t => `<option value="${t}"${t===curT?' selected':''}>${t}s</option>`).join('');
+
+  return `
+    <div class="lab-card">
+      <div class="lab-card-head">
+        <span class="lab-card-title">🔬 Research Labs</span>
+        <span class="lab-card-count">${fmtMC(lab.labsNeeded)} × ${label(lab.building)} · consume ${fmtN(Math.round(sciSPM))} SPM</span>
+      </div>
+      <div class="lab-config-row">
+        <span class="lab-config-summary">${esc(labConfigSummary(lab, cfg))}</span>
+        <div class="lab-ctl"><span class="lab-ctl-l">Research time</span>
+          <select class="lab-select" data-lab="research_cycle_time">${timeOpts}</select></div>
+      </div>
+      <div class="lab-stats">${statsHtml}</div>
     </div>`;
 }
 
@@ -994,13 +1172,13 @@ function renderResearch() {
     ? `<span class="research-count-pill">${activeCount} active</span>`
     : '<span class="research-count-pill">none</span>';
 
-  const rowHtml = (key, entry) => {
+  const rowHtml = (key, entry, max) => {
     const val = levels[key] ?? 0;
     return `
       <div class="research-row">
         <span class="research-label">${esc(entry.label)}</span>
         <input type="number" class="research-input" data-research="${key}"
-               min="0" step="1" value="${val}" placeholder="0" />
+               min="0" step="1"${max ? ` max="${max}"` : ''} value="${val}" placeholder="0" />
       </div>`;
   };
 
@@ -1011,12 +1189,18 @@ function renderResearch() {
         .map(([k, entry]) => rowHtml(k, entry))
         .join('')
     : '';
+  // Lab techs feed the Research-lab card (speed → labs-needed, productivity → eSPM).
+  const labRows = Object.entries(LAB_RESEARCH)
+    .filter(([, entry]) => isSA || !entry.sa)
+    .map(([k, entry]) => rowHtml(k, entry, entry.max))
+    .join('');
 
   const body = researchOpen ? `
     <div class="research-body">
       <div class="research-grid">
         ${mining}
         ${isSA ? `<div class="research-subgroup-label">Space Age — Recipe Productivity (capped at +300%)</div>${saRows}` : ''}
+        <div class="research-subgroup-label">Labs</div>${labRows}
       </div>
     </div>` : '';
 
@@ -1025,7 +1209,7 @@ function renderResearch() {
       <div class="research-header" id="research-toggle" aria-expanded="${researchOpen}">
         <span class="research-header-main">
           <span class="research-chevron">${researchOpen ? '▼' : '▶'}</span>
-          <span>Research Productivity</span>
+          <span>Research Bonuses</span>
         </span>
         ${countPill}
       </div>
@@ -1712,6 +1896,16 @@ function bindEvents() {
       STATE.research_levels = STATE.research_levels ?? {};
       if (lvl > 0) STATE.research_levels[key] = lvl;
       else         delete STATE.research_levels[key];
+      saveState();
+      render();
+    }));
+
+  // Research cycle time picker — the only interactive lab control. The rest of
+  // lab_config is state-driven (player asks Claude to update it).
+  document.querySelectorAll('select[data-lab="research_cycle_time"]').forEach(el =>
+    el.addEventListener('change', () => {
+      STATE.lab_config = STATE.lab_config ?? { ...DEFAULT_STATE.lab_config };
+      STATE.lab_config.research_cycle_time = Math.max(1, parseInt(el.value, 10) || 60);
       saveState();
       render();
     }));
