@@ -6,15 +6,19 @@ Commands:
         Crawl all pages in dev/wiki/urls.json → dev/wiki/*.md
         Skips pages already written (resume-safe).
 
-    python dev/wiki/crawl.py update  [--days N] [--workers N] [--dry-run]
+    python dev/wiki/crawl.py update  [--days N] [--workers N] [--dry-run] [--show-new]
         Monthly maintenance: query MediaWiki RecentChanges, re-crawl changed pages.
         Automatically cross-references against dev/wiki/urls.json.
+        --show-new prints English pages that changed but aren't in urls.json yet.
 
 Credentials: env vars CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN
              (also checks .env, .env.local, ~/.env)
 
 Note: Cloudflare modifiedSince does NOT work for the Factorio wiki — the wiki does
 not serve usable Last-Modified headers. Always use the RecentChanges API (update cmd).
+
+Endpoint: uses the Browser Rendering /markdown Quick Action (synchronous POST, immediate
+response). Free tier: 1 request per 10 seconds — no daily job cap.
 """
 
 import argparse
@@ -31,7 +35,7 @@ from threading import Lock
 
 
 class QuotaExhaustedError(Exception):
-    """Raised when Cloudflare returns HTTP 429 — daily free-tier quota exhausted."""
+    """Raised when Cloudflare returns HTTP 429 — rate limit exceeded."""
 
 # ---------------------------------------------------------------------------
 # Config
@@ -43,13 +47,8 @@ ERROR_LOG  = "dev/wiki/errors.log"
 WIKI_BASE  = "https://wiki.factorio.com/"
 CF_BASE    = "https://api.cloudflare.com/client/v4/accounts/{account_id}/browser-rendering"
 
-POLL_INTERVAL     = 4     # seconds between job status polls
-                          # formula: max_workers ≈ API_CALLS_PER_SEC × POLL_INTERVAL
-                          # 30 workers × (1/4 poll/s) = 7.5 req/s → comfortable under 9/s budget
-POLL_TIMEOUT      = 120   # seconds before giving up on a job (30 × 4s polls = plenty)
 MIN_CONTENT_BYTES = 300   # files smaller than this are flagged as stubs
-API_CALLS_PER_SEC = 9     # stay under 10/sec REST limit (600/min)
-MIN_PAGE_INTERVAL = 20    # seconds; Cloudflare free tier: 1 new browser instance per 20 s
+REQUEST_INTERVAL  = 12    # seconds; Cloudflare free tier Quick Actions: 1 request per 10 s (12 s gives headroom)
 QUEUE_FILE        = "dev/wiki/update_queue.json"  # resume queue for multi-day update runs
 STAGING_DIR       = "dev/wiki/pages/.staging"      # new crawls land here; diffed then promoted
 
@@ -108,7 +107,7 @@ class RateLimiter:
                 time.sleep(wait)
             self._last = time.monotonic()
 
-_rate_limiter = RateLimiter(API_CALLS_PER_SEC)
+_rate_limiter = RateLimiter(1.0 / REQUEST_INTERVAL)
 
 
 # ---------------------------------------------------------------------------
@@ -127,64 +126,40 @@ def title_to_filename(title: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _request(method: str, url: str, token: str, payload: dict | None = None) -> dict:
-    _rate_limiter.acquire()
     data = json.dumps(payload).encode() if payload else None
-    req = urllib.request.Request(
-        url, data=data, method=method,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        if exc.code == 429:
-            raise QuotaExhaustedError("Cloudflare 429 — daily free-tier quota exhausted") from exc
-        raise
+    for attempt in range(2):
+        if attempt:
+            print("  [429] rate-limited, waiting 30s…", flush=True)
+            time.sleep(30)
+        _rate_limiter.acquire()
+        req = urllib.request.Request(
+            url, data=data, method=method,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                if attempt:
+                    raise QuotaExhaustedError("Cloudflare 429 — rate limit exceeded after retry") from exc
+                continue
+            raise
 
 
 def crawl_page(wiki_title: str, account_id: str, token: str) -> str | None:
-    """Crawl one wiki page. Returns markdown string or None on failure."""
-    wiki_url = WIKI_BASE + wiki_title.replace(" ", "_")
-    crawl_url = CF_BASE.format(account_id=account_id) + "/crawl"
+    """Fetch one wiki page as markdown via the /markdown Quick Action endpoint.
 
-    # Start job
-    resp = _request("POST", crawl_url, token, {
-        "url": wiki_url, "limit": 1, "render": False, "formats": ["markdown"],
-    })
+    Single synchronous POST — no polling needed. Rate-limited to 1 request per
+    REQUEST_INTERVAL seconds by the global _rate_limiter.
+    """
+    wiki_url = WIKI_BASE + wiki_title.replace(" ", "_")
+    url = CF_BASE.format(account_id=account_id) + "/markdown"
+    resp = _request("POST", url, token, {"url": wiki_url})
     if not resp.get("success"):
         raise RuntimeError(f"API error: {resp}")
-    job_id = resp["result"]
-
-    # Poll until complete
-    status_url = crawl_url + f"/{job_id}?limit=1"
-    deadline = time.time() + POLL_TIMEOUT
-    while time.time() < deadline:
-        time.sleep(POLL_INTERVAL)
-        s = _request("GET", status_url, token)
-        status = s.get("result", {}).get("status", "")
-        if status == "completed":
-            break
-        if status.startswith("cancelled") or status == "errored":
-            return None
-    else:
-        return None  # timed out
-
-    # Fetch markdown from completed records
-    base = crawl_url + f"/{job_id}"
-    cursor = None
-    while True:
-        url = f"{base}?status=completed&limit=50"
-        if cursor:
-            url += f"&cursor={cursor}"
-        resp = _request("GET", url, token)
-        for rec in resp.get("result", {}).get("records", []):
-            md = rec.get("markdown", "")
-            if md and md.strip():
-                return md
-        cursor = resp.get("result", {}).get("cursor")
-        if not cursor:
-            break
-    return None
+    md = resp.get("result", "")
+    return md if md and md.strip() else None
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +350,6 @@ def run_update_crawl(to_update: list[str], queried_date: str, account_id: str, t
     start_time = time.time()
 
     def crawl_one(title: str) -> tuple[str, str, int]:
-        page_start = time.monotonic()
         wiki_url = WIKI_BASE + title.replace(" ", "_")
         out_path = os.path.join(STAGING_DIR, title_to_filename(title))
         try:
@@ -385,17 +359,11 @@ def run_update_crawl(to_update: list[str], queried_date: str, account_id: str, t
         except Exception as exc:
             with print_lock:
                 print(f"  ERROR  {title!r}: {exc}", flush=True)
-            elapsed = time.monotonic() - page_start
-            if MIN_PAGE_INTERVAL - elapsed > 0:
-                time.sleep(MIN_PAGE_INTERVAL - elapsed)
             return title, "error", 0
 
         if not md:
             with print_lock:
                 print(f"  EMPTY  {title!r}", flush=True)
-            elapsed = time.monotonic() - page_start
-            if MIN_PAGE_INTERVAL - elapsed > 0:
-                time.sleep(MIN_PAGE_INTERVAL - elapsed)
             return title, "empty", 0
 
         with open(out_path, "w", encoding="utf-8") as fout:
@@ -406,11 +374,6 @@ def run_update_crawl(to_update: list[str], queried_date: str, account_id: str, t
         status = "stub" if size < MIN_CONTENT_BYTES else "ok"
         with print_lock:
             print(f"  {status.upper():<5}  {title!r} ({size // 1024}KB)", flush=True)
-
-        # Pad to MIN_PAGE_INTERVAL to respect 1-new-browser/20s free-tier limit.
-        elapsed = time.monotonic() - page_start
-        if MIN_PAGE_INTERVAL - elapsed > 0:
-            time.sleep(MIN_PAGE_INTERVAL - elapsed)
         return title, status, size
 
     quota_hit = False
@@ -545,7 +508,14 @@ def cmd_update(args):
             url = RC_API.format(days=args.days) + "&rccontinue=" + urllib.request.quote(data["continue"]["rccontinue"])
 
         to_update = sorted(our_pages & changed)
-        print(f"Wiki pages changed: {len(changed)}  |  In our list: {len(to_update)}")
+        new_pages = sorted(changed - our_pages)
+        print(f"Wiki pages changed: {len(changed)}  |  In our list: {len(to_update)}  |  Not in our list: {len(new_pages)}")
+
+        if args.show_new and new_pages:
+            print(f"\nNew pages not in urls.json ({len(new_pages)}) — review and add to urls.json if relevant:")
+            for title in new_pages:
+                print(f"  {title}")
+            print()
 
         if not to_update:
             print("Nothing to update.")
@@ -587,7 +557,8 @@ def main():
 
     # crawl subcommand
     p_crawl = sub.add_parser("crawl", help="Full crawl of wiki_crawl_urls.json")
-    p_crawl.add_argument("--workers", type=int, default=30)
+    p_crawl.add_argument("--workers", type=int, default=1,
+                         help="Concurrent crawlers (default 1; free tier: 1 req/10s)")
     p_crawl.add_argument("--dry-run", action="store_true")
 
     # update subcommand
@@ -595,8 +566,10 @@ def main():
     p_update.add_argument("--days", type=int, default=30,
                           help="Days of RecentChanges to check (max 30)")
     p_update.add_argument("--workers", type=int, default=1,
-                          help="Concurrent crawlers (default 1; free tier allows 1 new browser/20s)")
+                          help="Concurrent crawlers (default 1; free tier: 1 req/10s)")
     p_update.add_argument("--dry-run", action="store_true")
+    p_update.add_argument("--show-new", action="store_true",
+                          help="Print English pages in RecentChanges not yet in urls.json")
 
     args = parser.parse_args()
     {"crawl": cmd_crawl, "update": cmd_update}[args.command](args)

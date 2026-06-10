@@ -118,12 +118,14 @@ The key constraint: **if any output backs up, all recycling stops.** Every item 
 **Quality modules in scrap recyclers:** Productive recyclers cannot hold productivity modules (game rule — prevents net-positive loops). Quality modules are the correct choice for scrap recyclers. Higher quality scrap outputs can seed a quality-manufacturing line. Note: uncommon or higher holmium ore is worthless — holmium solution is a fluid and loses quality; don't bother sorting holmium ore by quality.
 
 **Terrain:**
-- **Plateaus** (islands): only place where factories can be built. Split into small (resource-rich, cramped), medium (moderate resources, moderate space), and large (no resources, most room). Islands can overlap to form larger buildable areas.
-- **Oilsands** (lowlands between islands): cannot build anything except rail supports. Offshore pumps on the oilsand shore produce **unlimited heavy oil** — this is Fulgora's only native fluid resource.
+- **Plateaus** (islands): only place where factories can be built. Three types: small (always have a Fulgoran vault ruin, usually other ruins, and a dense pile of scrap), medium (large number of smaller ruins with scattered scrap patches), and large (no scrap or ore resources — only some fulgorite and a few ruins, most room to build). Islands can overlap to form larger buildable areas.
+- **Oilsands / oil oceans** (lowlands between islands): cannot build anything except rail supports. You can walk through shallow oil ocean, but **deep oil oceans** slow you to a crawl. Offshore pumps on the shore produce **unlimited heavy oil** — this is Fulgora's only native fluid resource. Foundation (researched late-game) can be built on top of oil oceans.
 - Islands too far apart for roboport coverage or big electric poles — each island needs its own logistic and power networks until foundation is researched.
-- Alien ruins are scattered on islands. **Fulgoran lightning attractors** (ruins) protect nearby buildings from lightning before you build your own rods — useful on first landing.
+- Alien ruins are scattered on islands. **Fulgoran lightning attractors** — separate structures from the ruins — also appear on plateaus and protect nearby buildings from lightning strikes before you build your own rods (attractor priority = 1,000, same as a built lightning rod). Useful on first landing.
 
-**Lightning priority:** Lightning collector (10,000) >> Lightning rod (1,000) >> alien ruins (~91–95) >> other metal entities (priority 1). Lightning strikes the highest-priority entity in range. Wooden chests, walls, rail pieces, and trains are immune to lightning.
+**Lightning priority:** Lightning collector (10,000) >> Lightning rod (1,000) >> Fulgoran lightning attractor (1,000) >> Fulgoran vault ruin (95) >> Colossal/Huge/Big/Medium Fulgoran ruins (91–94) >> other metal entities (priority 1). Lightning strikes the highest-priority entity in range. Wooden chests, walls, rail pieces, and trains are immune to lightning.
+
+Note: **Fulgoran lightning attractors are separate structures from the ruins themselves** — a plateau may have both ruins and one or more standalone lightning attractors. The attractor's priority (1,000) is the same as a player-built lightning rod, making early-landing natural protection much stronger than the ruins' own priority suggests.
 
 **Resources unique to Fulgora:** Scrap (only minable resource), Heavy oil (unlimited from oilsand offshore pump).
 **No water on-planet.** Ice can come from scrap recycling (5% chance) — usable for water via melting.
@@ -156,7 +158,7 @@ Use productivity modules to amplify holmium plate output. Handles `electronics`,
 - Every spoilable item has a fixed spoil time — a countdown from 100% freshness to 0%. Items spoil everywhere: in chests, machine input/output slots, inserter hands, and belts. Nothing stops the timer except items still inside a captive biter spawner (eggs don't count down until removed).
 - **Stacking averages freshness:** when inserters combine items into a stack, the resulting freshness is the weighted average. A large stack of 80%-fresh items mixed with 100%-fresh items ends up somewhere between — plan for this in fast-throughput loops.
 - **Freshness transfers through recipes:** if a recipe consumes a spoilable input to produce a spoilable output, the output inherits the input's freshness percentage. Multiple spoilable inputs → average freshness is used.
-- **Agricultural science packs:** these packs spoil and are destroyed if not consumed in time. A pack gives full science at any freshness level — there is no partial-science scaling based on freshness. The risk is packs reaching 0% and becoming worthless spoilage before the lab consumes them. Keep ag-packs fresh, ship them quickly, and keep Gleba→Nauvis transit time short.
+- **Agricultural science packs:** these packs spoil and freshness **directly reduces their science value** — a partially-spoiled pack contributes less science than a fresh one. A pack at 0% freshness becomes worthless spoilage before it's consumed. Keep ag-packs fresh, ship them quickly, and keep Gleba→Nauvis transit time short. Quality ag-packs have longer spoil times AND higher base science value — both factors make quality packs strictly better per pack.
 - **Machine trash slots:** any machine handling spoilable items gains internal trash slots. If an input or output stack spoils, items move to trash slots — the machine can stall if trash slots fill. Any output inserter can take from trash slots; use filter inserters to route spoilage separately from products.
 - **Biter/pentapod egg spoiling is dangerous:** spoiled biter eggs spawn big biters; spoiled pentapod eggs spawn wrigglers. Never let these items sit in open storage.
 
@@ -325,5 +327,5 @@ shipped back to Nauvis for research. Planet order affects which packs are availa
 (`--dataset space-age --item metallurgic-science-pack`) for current accurate values.**
 
 **Logistics note:** Science packs spoil (agricultural pack especially — short timer).
-Gleba packs must be shipped quickly after production; dedicate a fast platform to
+Agricultural pack freshness directly reduces science value — a half-fresh pack gives half the science. Ship them quickly; dedicate a fast platform to
 the Gleba→Nauvis route or use a very short hop with full-speed thrusters.

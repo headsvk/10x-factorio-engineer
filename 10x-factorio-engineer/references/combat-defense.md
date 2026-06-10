@@ -34,7 +34,7 @@ This file covers combat and defense in Factorio, including turret types, enemy m
 - Limited 72° firing arc but can be placed in 8 directions. Does massive damage to everything in its line of fire — including your own buildings, so aim carefully
 - Extremely effective against Demolishers, especially when fired down their bodies — shells can hit multiple segments at once
 - Primary use: space platforms (asteroid defense); can be shipped to any planet for ground defense
-- Note: railgun turret firing speed is currently animation-locked with an effective cap well below what infinite research suggests — a known bug
+- Railgun turret firing speed is animation-locked at a cap of **0.845 shots/second** (once per 71 ticks). This cap is reached at **Railgun shooting speed level 10** — researching further has no effect on the turret. The hand-held railgun does not share this cap. This is intentional design, not a bug.
 
 ---
 
@@ -79,6 +79,7 @@ This file covers combat and defense in Factorio, including turret types, enemy m
 - Rocket turrets essential for medium and large Demolishers
 - No biter expansion — only fixed patrol routes, so aggressive expansion
   is safer than Nauvis once paths are mapped
+- Demolishers release a **smoke cloud** that slows the player AND **damages nearby construction/logistic bots** — avoid using bots during Demolisher fights
 
 ### Gleba (Pentapods)
 **Wiki:** https://wiki.factorio.com/Enemies (Pentapod section — Stomper info is on the Enemies page, no separate Stomper article)
@@ -132,8 +133,10 @@ Certain infinite research levels provide notable efficiency jumps — useful pla
 | Physical projectile damage | Level 1: Gun turrets loaded with firearm magazines kill basic biters in 3 shots instead of 4 — greatly conserves iron plates. |
 | Stronger explosives | Level 2: Grenades destroy trees in one hit. Level 7 (Space Age): Rockets one-shot medium asteroids. Level 12 (Space Age): Rockets two-shot large asteroids. Level 16 (Space Age): Explosive rockets two-shot large asteroids with direct damage. |
 | Laser weapons damage (Space Age) | Level 11: Laser turrets destroy small asteroids in one damage cycle. |
-| Railgun damage (Space Age) | Level 2: Railguns destroy all asteroid sizes in one shot — conserves ammo significantly. |
+| Railgun damage (Space Age) | Level 2: Railgun turrets destroy all asteroid sizes in one shot — conserves ammo significantly. |
+| Railgun shooting speed (Space Age) | Level 10: Railgun turrets reach maximum effective firing rate (0.845 shots/sec, once per 71 ticks). Researching past level 10 has no practical effect on turrets. |
 | Artillery shell damage (Space Age) | Level 9: Artillery shells defeat Nauvis spawners and behemoth worms in one hit — greatly conserves shells. |
+| Refined flammables | Level 9: Flamethrower turrets require 90% less crude oil to destroy Behemoth Biters — greatly conserves fuel. Level 16: 95% less crude oil required. |
 
 ### Turret Creep
 **Community reference:** **Michael Hendriks** (YouTube) — "Ultimate Deathworld" series is the definitive guide to optimised early-to-mid-game combat; the most thorough Factorio combat strategy content available. **Trupen** (YouTube) — concise, fast-paced turret pushing and combat mechanic tutorials.
