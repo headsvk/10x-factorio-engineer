@@ -1916,7 +1916,9 @@ function renderLineCard(line, idx) {
   const itemName  = label(line.item);
   const subtitle  = itemName.trim().toLowerCase() !== titleText.trim().toLowerCase()
     ? `<span class="card-subtitle">${esc(itemName)}</span>` : '';
+  // Show the target only when it differs from actual — "30 / 30/min" is noise.
   const target = line.target_rate ?? 0;
+  const showTarget = target > 0 && Math.abs(displayRate - target) > 1e-9;
   return `
     <div class="line-card ${cardClass}">
       <div class="card-header ${cardClass}" data-card="${idx}" role="button" tabindex="0"
@@ -1929,7 +1931,7 @@ function renderLineCard(line, idx) {
           </div>
         </div>
         <div class="card-header-right">
-          <span class="rate-num">${fmtN(displayRate)}${target ? ` / ${fmtN(target)}` : ''}/min</span>
+          <span class="rate-num">${fmtN(displayRate)}${showTarget ? ` / ${fmtN(target)}` : ''}/min</span>
           <span class="rate-unit">${isFluid ? fmtFluidUnitOnly(displayRate) : fmtUnitOnly(displayRate, belt ?? STATE.preferred_belt)}</span>
         </div>
       </div>
