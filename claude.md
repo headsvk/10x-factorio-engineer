@@ -613,9 +613,11 @@ JSON → UTF-8 bytes → `btoa`) for compact storage and portability.
 lines, writes `10x-factorio-engineer/assets/dashboard.html`. Use `--open` to open
 the result in a browser immediately.
 
-**Header:** compact one-line brand label (`10x Factorio Engineer`) left +
-config pills right (`[Space Age]` when applicable, `[Assembler 3]`,
-`[Electric Furnace]`, `[Productivity N]`). Save name is a subtle subtitle.
+**Header:** compact one-line brand label (`10x Factorio Engineer`) left, badges
+right (`[Space Age]` when applicable + current `[N SPM]`). Global config badges
+were dropped — per-line configs make them misleading. Save name plus an
+"updated Xh ago" relative timestamp (from `state.updated_at`, stamped on every
+save) form a subtle subtitle.
 
 **Features:** see `10x-factorio-engineer/SKILL.md` §5 for section-by-section description.
 

@@ -576,10 +576,15 @@ def make_state_overview() -> dict:
 
 
 def make_state_lines_statuses() -> dict:
-    """Lines tab (collapsed): ok / warn / bad / wip status variants."""
+    """Lines tab (collapsed): ok / overproducing / warn / bad / wip status variants.
+
+    Production Science covers the --use-ceil overproduction case (SKILL.md §3.3
+    rule 4): whole machines yield more than the target, effective > target.
+    """
     state = _base_state("Status Variants")
     lines = [
         make_minimal_line("automation-science-pack", "Automation Science",  90,  90),
+        make_minimal_line("production-science-pack", "Production Science",  90,  92.4),
         make_minimal_line("logistic-science-pack",   "Logistic Science",    90,  72),
         make_minimal_line("chemical-science-pack",   "Chemical Science",    90,  40),
         make_minimal_line("military-science-pack",   "Military Science (WIP)", 60, 60, wip=True),
@@ -731,6 +736,7 @@ SECTION_SCENARIOS = [
     ("section__header-badges.png",          make_state_header_badges,    ".header",            "overview", False,  None),
     ("section__science-vanilla.png",        make_state_science_vanilla,  ".science-section",   "overview", False,  None),
     ("section__science-space-age.png",      make_state_science_space_age,".science-section",   "overview", False,  None),
+    ("section__science-collapsed.png",      make_state_science_space_age,".science-section",   "overview", False,  "#science-toggle"),
     ("section__location-bar.png",           make_state_location_bar,     ".loc-bar",           "overview", False,  None),
     ("section__bottleneck-banner.png",      make_state_with_bottleneck,  ".bottleneck-banner", "overview", False,  None),
     ("section__tab-list.png",               make_state_with_bottleneck,  ".tab-list",          "overview", False,  None),

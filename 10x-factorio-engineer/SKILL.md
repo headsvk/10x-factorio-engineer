@@ -244,6 +244,7 @@ working context and update it after every player message.
 ```jsonc
 {
   "save_name": "My Factory",          // player-given name, default "Main Factory"
+  "updated_at": "2026-06-11T12:00:00.000Z",  // ISO timestamp; dashboard-managed (set on every save) — echo it back unchanged, never invent it
   "dataset": "vanilla",               // "vanilla" | "space-age"
   "assembler": 3,                     // player's current assembler tier (shared across all locations)
   "furnace": "electric",              // furnace type (shared)
@@ -358,7 +359,11 @@ working context and update it after every player message.
             "electric-furnace": 2
           },
           "player_notes": "placed 3 assemblers, still need furnaces",
-          "effective_rate": 52.0  // recalculated from actual_machines
+          // What the line actually yields, vs target_rate = what the player asked for.
+          // Two producers: (a) recalculated from actual_machines during partial builds;
+          // (b) the top-level rate_per_min from a --use-ceil or --machines run — whole
+          // machines overproduce, e.g. target 90 → effective 92.4 (see §3.3 rule 4).
+          "effective_rate": 52.0
         }
       ],
 
@@ -489,6 +494,13 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 1. The `--location` flag is always derived from the parent location's `id`. Don't store it in `cli_args`.
 2. When the player asks to "upgrade this line" (change modules, assembler tier, etc.), **read `cli_args` first** — the sizing key (`rate` / `machines` / `step_machines`) tells you how the line was originally sized, so you preserve that constraint and only modify the parts the player asked to change.
 3. After every CLI run, refresh `cli_args` to reflect the actual command issued.
+4. When a line is sized with `--use-ceil` or `--machines`, set the line's
+   `effective_rate` to the returned top-level `rate_per_min` and keep
+   `target_rate` as the player's original ask. Whole machines overproduce, so
+   `effective_rate` may exceed `target_rate` (e.g. target 90/min with prod
+   modules → 11 whole assemblers → effective 92.4/min). The dashboard shows
+   this as "92.4 / 90/min" at 100%. Also bump the line's `bus_items` supply
+   entry (if any) to the effective rate.
 
 **Example — the uranium line:**
 ```jsonc
