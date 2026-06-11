@@ -731,6 +731,7 @@ SECTION_SCENARIOS = [
     ("section__header-badges.png",          make_state_header_badges,    ".header",            "overview", False,  None),
     ("section__science-vanilla.png",        make_state_science_vanilla,  ".science-section",   "overview", False,  None),
     ("section__science-space-age.png",      make_state_science_space_age,".science-section",   "overview", False,  None),
+    ("section__science-collapsed.png",      make_state_science_space_age,".science-section",   "overview", False,  "#science-toggle"),
     ("section__location-bar.png",           make_state_location_bar,     ".loc-bar",           "overview", False,  None),
     ("section__bottleneck-banner.png",      make_state_with_bottleneck,  ".bottleneck-banner", "overview", False,  None),
     ("section__tab-list.png",               make_state_with_bottleneck,  ".tab-list",          "overview", False,  None),

@@ -20,9 +20,10 @@
       --border-sub:   #28241a;
       --text:         #ece7d2;
       --text-muted:   #8a7f64;
-      --text-dim:     #5a5040;
+      --text-dim:     #6e6450;
       --accent:       #f59e0b;
       --accent-hover: #fbbf24;
+      --accent-contrast: #1c1508;
       --ok:           #4ade80;
       --ok-bg:        rgba(74,222,128,.07);
       --ok-border:    rgba(74,222,128,.2);
@@ -44,9 +45,10 @@
       --border-sub:   #f0e8d5;
       --text:         #1c1608;
       --text-muted:   #6b5f42;
-      --text-dim:     #7a6d4d;
+      --text-dim:     #6b5e40;
       --accent:       #b45309;
       --accent-hover: #92400e;
+      --accent-contrast: #fff8eb;
       --ok:           #16a34a;
       --ok-bg:        rgba(22,163,74,.07);
       --ok-border:    rgba(22,163,74,.22);
@@ -68,9 +70,10 @@
         --border-sub:   #f0e8d5;
         --text:         #1c1608;
         --text-muted:   #6b5f42;
-        --text-dim:     #7a6d4d;
+        --text-dim:     #6b5e40;
         --accent:       #b45309;
         --accent-hover: #92400e;
+        --accent-contrast: #fff8eb;
         --ok:           #16a34a;
         --ok-bg:        rgba(22,163,74,.07);
         --ok-border:    rgba(22,163,74,.22);
@@ -89,8 +92,12 @@
     .header {
       border-bottom: 1px solid var(--border-sub);
       padding: 10px 16px;
+      background: var(--bg-card);
+    }
+    .header-inner {
+      max-width: 1280px; margin-inline: auto;
       display: flex; align-items: center; justify-content: space-between;
-      flex-wrap: wrap; gap: 8px; background: var(--bg-card);
+      flex-wrap: wrap; gap: 8px;
     }
     .header-left { display: flex; flex-direction: column; gap: 2px; }
     .header-title-row { display: flex; align-items: center; gap: 8px; }
@@ -127,7 +134,9 @@
     .btn-ghost { background: transparent; border: none; color: var(--text-dim);
                  border-radius: 3px; padding: 3px 8px; height: 28px; }
     .btn-ghost:hover { background: var(--bg-input); color: var(--text); }
-    .btn-primary { background: var(--accent); border: none; color: #1c1508;
+    .btn-ghost.danger { text-transform: uppercase; }
+    .btn-ghost.danger:hover { background: var(--bad-bg); color: var(--bad); }
+    .btn-primary { background: var(--accent); border: none; color: var(--accent-contrast);
                    border-radius: 3px; padding: 4px 16px; font-weight: 900; text-transform: uppercase; }
     .btn-primary:hover { background: var(--accent-hover); }
     .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
@@ -149,13 +158,22 @@
                        border-left: 3px solid var(--accent);
                        border-radius: 4px; padding: 14px 16px; margin-bottom: 10px; }
     .loc-divider { border: none; border-top: 1px solid var(--border-sub); margin: 0 0 10px; }
+    .science-header { display: flex; align-items: center; justify-content: space-between;
+                      cursor: pointer; user-select: none;
+                      font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+                      text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted);
+                      margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+    .science-header.open { margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-sub); }
+    .science-header-main { display: flex; align-items: center; gap: 8px; }
+    .science-summary { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+                       letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
     .science-grid.cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
     .science-bar { margin-bottom: 12px; }
     .science-bar:last-child { margin-bottom: 0; }
     .science-bar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .science-name { display: flex; align-items: center; gap: 8px; font-family: 'Barlow Condensed', sans-serif;
                     font-size: 14px; font-weight: 700; letter-spacing: .02em; color: var(--text); }
-    .science-dot  { flex-shrink: 0; display: block; }
+    .sci-swatch   { flex-shrink: 0; width: 10px; height: 10px; border-radius: 2px; }
     .science-meta { display: flex; align-items: center; gap: 12px; }
     .rate-text    { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
     .pct-text     { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
@@ -198,23 +216,26 @@
     .card-chip.stale  { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
     .card-chip.capped { color: var(--text-dim); border-color: var(--border); background: var(--bg-input); }
 
-    /* ── Bottleneck banner ── */
+    /* ── Bottleneck banner (one-line summary; full lists live in the Actions tab) ── */
     .bottleneck-banner { background: var(--bad-bg); border: 1px solid var(--bad-border);
                          border-left: 3px solid var(--bad);
-                         border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; }
+                         border-radius: 4px; padding: 10px 16px; margin-bottom: 16px;
+                         display: flex; align-items: center; justify-content: space-between;
+                         gap: 8px; cursor: pointer; user-select: none; }
+    .bottleneck-banner:hover { background: var(--bad-border); }
     .bottleneck-title { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 800;
-                        letter-spacing: .05em; text-transform: uppercase; color: var(--bad); margin-bottom: 8px; }
-    .bottleneck-item  { font-size: 13px; color: var(--bad); opacity: .75; margin-bottom: 4px; }
-    .bottleneck-item:last-child { margin-bottom: 0; }
+                        letter-spacing: .05em; text-transform: uppercase; color: var(--bad); }
+    .bottleneck-go    { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
+                        letter-spacing: .05em; text-transform: uppercase; color: var(--bad); opacity: .7; }
 
     /* ── Tabs ── */
-    .tab-list { display: flex; background: var(--bg-card); border: 1px solid var(--border-sub);
+    .tab-list { display: flex; flex-wrap: wrap; background: var(--bg-card); border: 1px solid var(--border-sub);
                 border-radius: 4px; padding: 2px; margin-bottom: 16px; gap: 2px; }
     .tab-btn  { background: transparent; border: none; color: var(--text-muted);
                 border-radius: 3px; padding: 4px 14px; height: 28px;
                 font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
                 letter-spacing: .05em; text-transform: uppercase; }
-    .tab-btn.active             { background: var(--accent); color: #1c1508; }
+    .tab-btn.active             { background: var(--accent); color: var(--accent-contrast); }
     .tab-btn:hover:not(.active) { background: var(--bg-input); }
     .tab-panel                  { display: none; }
     .tab-panel.active           { display: block; }
@@ -231,6 +252,9 @@
     .spm-arrow    { font-family: 'JetBrains Mono', monospace; font-size: 18px; color: var(--text-dim); line-height: 1; }
     .spm-espm     { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700;
                     font-variant-numeric: tabular-nums; line-height: 1; color: var(--accent); }
+    .spm-limiter  { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+                    letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted);
+                    align-self: center; margin-left: 4px; }
 
     /* ── Research-lab card ── */
     .lab-card   { background: var(--bg-input); border: 1px solid var(--border-sub);
@@ -252,14 +276,15 @@
     .lab-ctl    { display: flex; align-items: center; gap: 5px; }
     .lab-ctl-l  { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
                   text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
-    .lab-select, .lab-num { background: var(--bg-card); border: 1px solid var(--border); border-radius: 3px;
+    .lab-select { background: var(--bg-card); border: 1px solid var(--border); border-radius: 3px;
                   color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px;
                   padding: 2px 5px; height: 24px; }
-    .lab-num    { width: 50px; text-align: right; }
-    .lab-select:focus, .lab-num:focus { outline: none; border-color: var(--accent); }
+    .lab-select:focus { outline: none; border-color: var(--accent); }
 
     /* ── Overview ── */
     .overview-line { padding: 10px 12px; border-radius: 4px; border: 1px solid; margin-bottom: 6px; }
+    .overview-line.clickable { cursor: pointer; user-select: none; }
+    .overview-line.clickable:hover .overview-line-name { color: var(--accent); }
     .overview-line.ok   { background: var(--ok-bg);   border-color: var(--ok-border);   border-left: 3px solid var(--ok);   }
     .overview-line.warn { background: var(--warn-bg);  border-color: var(--warn-border);  border-left: 3px solid var(--warn);  }
     .overview-line.bad  { background: var(--bad-bg);   border-color: var(--bad-border);   border-left: 3px solid var(--bad);   }
@@ -271,6 +296,16 @@
               font-variant-numeric: tabular-nums; width: 40px; text-align: right; }
     .mini-bar      { height: var(--bar-unit); background: var(--bg-input); border-radius: 2px; margin-top: 6px; }
     .mini-bar-fill { height: 100%; border-radius: 2px; transition: width .5s; }
+
+    /* ── Overview rollups ── */
+    .overview-section { margin-bottom: 16px; }
+    .overview-rollup { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .rollup-stat { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700;
+                   font-variant-numeric: tabular-nums; }
+    .overview-link { background: none; border: none; padding: 0; color: var(--text-dim);
+                     font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
+                     letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+    .overview-link:hover { color: var(--text); }
 
     /* ── Bus balance ── */
     .bus-section { margin-bottom: 16px; }
@@ -292,12 +327,12 @@
     .bus-net { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; }
     .bus-belt-tag { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800;
                     letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+    /* Filled portion = consumption (colored by load severity); track = free headroom */
     .bus-bar-track { height: var(--bar-unit); border-radius: 3px; overflow: hidden; margin-bottom: 5px;
-                     display: flex; }
-    .bus-bar-consumed { height: 100%; transition: width .4s ease; }
-    .bus-bar-free { height: 100%; flex: 1; transition: background .4s ease; }
+                     background: var(--bg-input); }
+    .bus-bar-consumed { height: 100%; border-radius: 3px; transition: width .4s ease, background .4s ease; }
     .bus-meta { display: flex; justify-content: space-between;
-                font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); }
+                font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
 
     /* ── Logistics network ── */
     .logi-section { margin-bottom: 16px; }
@@ -308,15 +343,6 @@
     .empty-state code { font-family: 'JetBrains Mono', monospace; font-size: 11px;
                         background: var(--bg-input); border: 1px solid var(--border-sub);
                         border-radius: 2px; padding: 0 4px; color: var(--text-muted); }
-
-    /* ── Next steps ── */
-    .next-steps { margin-top: 16px; }
-    .next-step-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px;
-                      border-radius: 4px; background: var(--ok-bg); border: 1px solid var(--ok-border);
-                      border-left: 3px solid var(--ok);
-                      font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
-    .next-step-item:last-child { margin-bottom: 0; }
-    .arrow { color: var(--ok); opacity: .7; flex-shrink: 0; margin-top: 1px; }
 
     /* ── Line cards ── */
     .line-card { border-radius: 4px; border: 1px solid; background: var(--bg-card); margin-bottom: 8px; overflow: hidden; }
@@ -345,12 +371,10 @@
     .card-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
     .rate-num  { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted);
                  font-variant-numeric: tabular-nums; }
-    .rate-unit { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
+    .rate-unit { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
                  font-variant-numeric: tabular-nums; }
     .item-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600;
                   text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
-    .power-badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
-                   opacity: .7; white-space: nowrap; }
     .power-overview { display: flex; align-items: center; justify-content: space-between;
                       background: var(--bg-card); border: 1px solid var(--border-sub);
                       border-left: 3px solid #c8a840; border-radius: 4px;
@@ -402,7 +426,7 @@
                     white-space: nowrap; }
     .step-io-col--in  .step-io-name { color: #5b9fd4; }
     .step-io-col--out .step-io-name { color: var(--ok); }
-    .step-io-rate { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim);
+    .step-io-rate { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
                     white-space: nowrap; flex-shrink: 0; }
 
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -413,7 +437,7 @@
     .mod-chip {
       display: inline-flex; align-items: center; gap: 1px;
       padding: 1px 4px; border-radius: 2px;
-      font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+      font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
       border: 1px solid; white-space: nowrap; line-height: 1.6; vertical-align: middle;
     }
     .mod-chip.type-prod  { background: rgba(210, 90,  30,.09); border-color: rgba(210, 90,  30,.35);  color: #d06020; }
@@ -422,7 +446,7 @@
     .bcn-chip {
       display: inline-flex; align-items: center; gap: 1px;
       padding: 1px 4px; border-radius: 2px;
-      font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
+      font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
       background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); color: #94a3b8;
       white-space: nowrap; line-height: 1.6; vertical-align: middle;
     }
@@ -468,9 +492,9 @@
                      padding: 8px 10px; resize: none; min-height: 40px; max-height: 120px; line-height: 1.4; }
     .chat-textarea::placeholder { color: var(--text-dim); }
     .chat-textarea:focus { outline: none; border-color: var(--accent); }
-    .chat-send { background: var(--accent); border: none; color: #1c1508; border-radius: 4px;
-                 width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
-                 flex-shrink: 0; font-size: 16px; }
+    .chat-send { background: var(--accent); border: none; color: var(--accent-contrast); border-radius: 4px;
+                 height: 36px; padding: 0 16px; display: flex; align-items: center; justify-content: center;
+                 flex-shrink: 0; font-size: 13px; font-weight: 800; text-transform: uppercase; }
     .chat-send:hover:not(:disabled) { background: var(--accent-hover); }
     .chat-send:disabled { opacity: .4; cursor: not-allowed; }
 
@@ -499,18 +523,15 @@
     .player-notes { font-size: 12px; color: var(--text-dim); font-style: italic;
                     border-top: 1px solid var(--border-sub); padding-top: 10px; margin-top: -4px; }
 
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spin { animation: spin .8s linear infinite; display: inline-block; }
-
     /* ── Location bar ── */
     .loc-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
     .loc-sep  { color: var(--text-dim); padding: 0 2px; font-size: 13px; }
     .loc-btn  { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
-                border-radius: 3px; padding: 3px 10px; height: 26px;
-                font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
+                border-radius: 3px; padding: 3px 12px; height: 28px;
+                font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
                 letter-spacing: .05em; text-transform: uppercase; cursor: pointer; transition: background .12s, color .12s; }
     .loc-btn:hover:not(.active) { background: var(--border); color: var(--text); }
-    .loc-btn.active { background: var(--bg-input); color: var(--accent); border-color: var(--accent); border-bottom: 2px solid var(--accent); }
+    .loc-btn.active { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); font-weight: 800; }
 
     /* ── Science location chips ── */
     .sci-loc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -518,6 +539,13 @@
                      color: var(--text-dim); background: var(--bg-input);
                      border: 1px solid var(--border-sub); border-radius: 2px; padding: 1px 5px;
                      white-space: nowrap; }
+
+    /* ── Narrow screens ── */
+    @media (max-width: 720px) {
+      .science-grid.cols-2 { grid-template-columns: 1fr; }
+      .research-grid       { grid-template-columns: 1fr; }
+      .step-io-grid        { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -658,20 +686,10 @@ const SCIENCE_COLORS = {
   'promethium-science-pack':      [115, 95,215],  // adjusted from near-black
 };
 
-function sciStyle(name) {
+// Pack identity is a color swatch only; bar fill carries status (no icons).
+function sciColor(name) {
   const [r,g,b] = SCIENCE_COLORS[name] || [128,128,128];
-  const dr = Math.round(r*0.35), dg = Math.round(g*0.35), db = Math.round(b*0.35);
-  return { solid: `rgb(${r},${g},${b})`, dark: `rgb(${dr},${dg},${db})` };
-}
-
-// Flask icon from svgrepo.com (viewBox 36×36).
-// Layer 1: filled interior in science color.
-// Layer 2: original outline path in --text-muted (softer than full text color).
-function sciIcon(color) {
-  return `<svg class="science-dot" viewBox="0 0 36 36" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12,2.5 L24,2.5 L24,4 L21,4 L21,15.5 L29.5,28.5 Q31,34 18,34 Q5,34 6.5,28.5 L15,15.5 L15,4 L12,4 Z" fill="${color}"/>
-    <path d="M31.43,27.28,23,14.84V4h1a1,1,0,0,0,0-2H12a1,1,0,0,0,0,2h1V14.84L4.51,27.36A4.29,4.29,0,0,0,5,32.8,4.38,4.38,0,0,0,8.15,34H28a4.24,4.24,0,0,0,3.42-6.72ZM29.85,31a2.62,2.62,0,0,1-2,1H8a2.2,2.2,0,0,1-2.06-1.41,2.68,2.68,0,0,1,.29-2.17l3-4.44,14,0-1.31-2H10.57L15,15.46V4h6V15.46l8.84,13.05A2.23,2.23,0,0,1,29.85,31Z" style="fill:var(--text-muted)"/>
-  </svg>`;
+  return `rgb(${r},${g},${b})`;
 }
 
 const MACHINE_NAMES = {
@@ -783,9 +801,6 @@ function fmtFluid(rate) {
   const tp = PUMP_THROUGHPUT[STATE.machine_quality] ?? 72000;
   return `${fmtN(n)}/min <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} pump)</span>`;
 }
-function fmtRateOnly(rate) {
-  return fmtN(+rate) + '/min';
-}
 function fmtUnitOnly(rate, beltName) {
   const n = +rate;
   const tp = BELT_THROUGHPUT[beltName] ?? 1800;
@@ -800,6 +815,15 @@ function fmtPower(kw) {
   if (kw == null || kw === 0) return null;
   if (kw < 1000) return `${+kw.toFixed(1)} kW`;
   return `${+(kw / 1000).toFixed(2)} MW`;
+}
+function fmtAgo(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60)    return 'just now';
+  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 function summarizeCliArgs(args) {
   if (!args || typeof args !== 'object') return null;
@@ -874,6 +898,7 @@ function migrateState(state) {
 // ── Storage ──────────────────────────────────────────────────────────────────
 
 async function saveState() {
+  STATE.updated_at = new Date().toISOString();
   const encoded = encodeState(STATE);
   try { await window.storage?.set(STORAGE_KEY, encoded); return; } catch {}
   try { localStorage.setItem(STORAGE_KEY, encoded); } catch {}
@@ -903,39 +928,38 @@ function renderStoragePill() {
 }
 
 function renderHeader() {
-  const { save_name, dataset, assembler, furnace, machine_quality, module_configs, preferred_belt } = STATE;
+  const { save_name, dataset, updated_at } = STATE;
+  const ago = updated_at ? fmtAgo(updated_at) : null;
+  // Per-line configs make global setup badges misleading — only dataset + SPM here.
   return `
     <div class="header">
-      <div class="header-left">
-        <div class="header-title-row">
-          <span class="header-title">10x Factorio Engineer</span>
+      <div class="header-inner">
+        <div class="header-left">
+          <div class="header-title-row">
+            <span class="header-title">10x Factorio Engineer</span>
+          </div>
+          <div class="header-save">${esc(save_name)}${ago ? ` · updated ${ago}` : ''}</div>
         </div>
-        <div class="header-save">${esc(save_name)}</div>
-      </div>
-      <div class="header-right">
-        <div class="badges">
-          ${dataset === 'space-age' ? '<span class="badge purple">Space Age</span>' : ''}
-          <span class="badge">${machineLabel(`assembling-machine-${assembler}`)}</span>
-          <span class="badge">${label(furnace)} Furnace</span>
-          ${(machine_quality && machine_quality !== 'normal') ? `<span class="badge">${label(machine_quality)} Machines</span>` : ''}
-          ${preferred_belt ? `<span class="badge">${label(preferred_belt)} Belt</span>` : ''}
-          ${Object.keys(module_configs ?? {}).length ? '<span class="badge">Modules</span>' : ''}
-          ${(() => {
-            const targets = allSciTargets();
-            const sciKeys = Object.keys(targets);
-            if (!sciKeys.length) return '';
-            const rates = allSciRates();
-            const activeKeys = sciKeys.filter(k => !rates[k]?.allWip);
-            const eff = activeKeys.length ? Math.min(...activeKeys.map(k => rates[k]?.total ?? 0)) : 0;
-            return `<span class="badge">${Math.round(eff)} SPM</span>`;
-          })()}
-        </div>
-        <div class="btn-group">
-          <button class="btn" id="btn-export">↓ Export</button>
-          <button class="btn" id="btn-import">↑ Import</button>
-          <button class="btn" id="btn-theme" title="Toggle light/dark mode">${document.documentElement.getAttribute('data-theme') === 'light' ? '☾ Dark' : '☀ Light'}</button>
-          ${renderStoragePill()}
-          <button class="btn-ghost" id="btn-reset" title="Reset all factory data">↺</button>
+        <div class="header-right">
+          <div class="badges">
+            ${dataset === 'space-age' ? '<span class="badge purple">Space Age</span>' : ''}
+            ${(() => {
+              const targets = allSciTargets();
+              const sciKeys = Object.keys(targets);
+              if (!sciKeys.length) return '';
+              const rates = allSciRates();
+              const activeKeys = sciKeys.filter(k => !rates[k]?.allWip);
+              const eff = activeKeys.length ? Math.min(...activeKeys.map(k => rates[k]?.total ?? 0)) : 0;
+              return `<span class="badge">${Math.round(eff)} SPM</span>`;
+            })()}
+          </div>
+          <div class="btn-group">
+            <button class="btn" id="btn-export">Export</button>
+            <button class="btn" id="btn-import">Import</button>
+            <button class="btn" id="btn-theme" title="Toggle light/dark mode">${document.documentElement.getAttribute('data-theme') === 'light' ? 'Dark' : 'Light'}</button>
+            ${renderStoragePill()}
+            <button class="btn-ghost danger" id="btn-reset" title="Reset all factory data">Reset</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -1020,6 +1044,11 @@ function computeLabLine(spm) {
            powerKw, T, moduleType: cfg.module_type ?? 'none', moduleTier: cfg.module_tier ?? 2 };
 }
 
+// UI persistence: whether the Science Targets section is expanded.
+let scienceOpen = localStorage.getItem('science_open') !== '0';
+
+const ESPM_TITLE = 'Effective research throughput: SPM × (1 + lab productivity) ÷ pack drain (biolab consumes half the packs)';
+
 function renderScience() {
   const targets = allSciTargets();
   const keys = sortedScienceKeys(Object.keys(targets));
@@ -1035,6 +1064,25 @@ function renderScience() {
   const sciSPM = effectiveSPM > 0 ? effectiveSPM : targetSPM;
   const lab = computeLabLine(sciSPM);
   const showESPM = lab.labProd > 0 || lab.drain !== 1;   // hide when eSPM == SPM (redundant)
+  // Effective SPM = min across active packs; name the pack holding the headline down.
+  const limiter = (spmPct < 100 && activeKeys.length > 1)
+    ? activeKeys.reduce((a, k) => ((rates[k]?.total ?? 0) < (rates[a]?.total ?? 0) ? k : a), activeKeys[0])
+    : null;
+
+  const headerRow = `
+    <div class="science-header${scienceOpen ? ' open' : ''}" id="science-toggle"
+         role="button" tabindex="0" aria-expanded="${scienceOpen}">
+      <span class="science-header-main">
+        <span class="research-chevron">${scienceOpen ? '▼' : '▶'}</span>
+        <span>Science Targets</span>
+      </span>
+      ${scienceOpen ? '' : `<span class="science-summary">
+        <span style="color:${spmCol}">${Math.round(effectiveSPM)}</span><span style="color:var(--text-dim)"> / ${targetSPM} SPM</span>${showESPM ? `<span style="color:var(--text-dim)"> → </span><span style="color:var(--accent)" title="${ESPM_TITLE}">${Math.round(lab.eSPM)} eSPM</span>` : ''}
+      </span>`}
+    </div>`;
+
+  if (!scienceOpen) return `<div class="science-section">${headerRow}</div>`;
+
   const spmHeadline = `
     <div class="spm-headline">
       <span class="spm-number" style="color:${spmCol}">${Math.round(effectiveSPM)}</span>
@@ -1042,16 +1090,17 @@ function renderScience() {
       <span class="spm-target">${targetSPM}</span>
       <span class="spm-label">SPM</span>
       ${showESPM ? `<span class="spm-arrow">→</span>
-      <span class="spm-espm">${Math.round(lab.eSPM)}</span>
-      <span class="spm-label">eSPM</span>` : ''}
+      <span class="spm-espm" title="${ESPM_TITLE}">${Math.round(lab.eSPM)}</span>
+      <span class="spm-label" title="${ESPM_TITLE}">eSPM</span>` : ''}
+      ${limiter ? `<span class="spm-limiter">limited by ${esc(label(limiter))}</span>` : ''}
     </div>`;
 
+  // Bars are normalized to the max target (targetSPM) so they read as overall-SPM
+  // fractions — the "actual / targetSPM" label makes the basis explicit.
   const bars = keys.map(name => {
     const info   = rates[name];
     const actual = info?.total ?? 0;
-    const target = targets[name];
     const p = pct(actual, targetSPM);
-    const {solid, dark} = sciStyle(name);
     const col = statusColor(p);
     const locCount = (STATE.locations ?? []).length;
     const locChips = locCount <= 1 ? '' : (info?.byLoc ?? []).map(e =>
@@ -1061,23 +1110,24 @@ function renderScience() {
       <div class="science-bar">
         <div class="science-bar-header">
           <div class="science-name">
+            <span class="sci-swatch" style="background:${sciColor(name)}"></span>
             ${esc(label(name))}${info?.allWip ? ' <span class="wip-badge">WIP</span>' : ''}
           </div>
           <div class="science-meta">
-            <span class="rate-text">${fmtN(actual)}/min</span>
+            <span class="rate-text">${fmtN(actual)} / ${targetSPM}/min</span>
             <span class="pct-text" style="color:${col}">${p}%</span>
           </div>
         </div>
         ${locChips ? `<div class="sci-loc-chips">${locChips}</div>` : ''}
         <div class="progress-track" style="margin-top:${locChips ? '6px' : '0'}">
-          <div class="progress-fill" style="width:${p}%;background:linear-gradient(90deg,${dark},${solid})"></div>
+          <div class="progress-fill" style="width:${p}%;background:${col}"></div>
         </div>
       </div>`;
   }).join('');
 
   return `
     <div class="science-section">
-      <div class="group-label">Science Targets</div>
+      ${headerRow}
       ${spmHeadline}
       <div class="science-grid${keys.length >= 4 ? ' cols-2' : ''}">${bars}</div>
       ${renderLabCard(lab, sciSPM)}
@@ -1128,7 +1178,7 @@ function renderLabCard(lab, sciSPM) {
   return `
     <div class="lab-card">
       <div class="lab-card-head">
-        <span class="lab-card-title">🔬 Research Labs</span>
+        <span class="lab-card-title">Research Labs</span>
         <span class="lab-card-count">${fmtMC(lab.labsNeeded)} × ${label(lab.building)} · consume ${fmtN(Math.round(sciSPM))} SPM</span>
       </div>
       <div class="lab-config-row">
@@ -1206,7 +1256,7 @@ function renderResearch() {
 
   return `
     <div class="research-section">
-      <div class="research-header" id="research-toggle" aria-expanded="${researchOpen}">
+      <div class="research-header" id="research-toggle" role="button" tabindex="0" aria-expanded="${researchOpen}">
         <span class="research-header-main">
           <span class="research-chevron">${researchOpen ? '▼' : '▶'}</span>
           <span>Research Bonuses</span>
@@ -1242,13 +1292,19 @@ function lineStaleTechs(line) {
   return stale;
 }
 
+// One-line alarm summary; the full lists live in the Actions tab.
 function renderBottlenecks() {
-  const bn = currentLoc().bottlenecks ?? [];
+  const loc = currentLoc();
+  const bn = loc.bottlenecks ?? [];
   if (!bn.length) return '';
+  const ns = loc.next_steps ?? [];
+  const parts = [`${bn.length} bottleneck${bn.length !== 1 ? 's' : ''}`];
+  if (ns.length) parts.push(`${ns.length} next step${ns.length !== 1 ? 's' : ''}`);
   return `
-    <div class="bottleneck-banner">
-      <div class="bottleneck-title">⚠ ${bn.length} bottleneck${bn.length !== 1 ? 's' : ''}</div>
-      ${bn.map(b => `<div class="bottleneck-item">• ${esc(humanizeText(b))}</div>`).join('')}
+    <div class="bottleneck-banner" id="banner-actions" role="button" tabindex="0"
+         title="Open the Actions tab">
+      <span class="bottleneck-title">${parts.join(' · ')} on ${esc(loc.label)}</span>
+      <span class="bottleneck-go">View →</span>
     </div>`;
 }
 
@@ -1283,7 +1339,6 @@ function renderBusBalance() {
 
   const belt = STATE.preferred_belt;
   const beltTp = BELT_THROUGHPUT[belt] ?? 1800;
-  const pumpTp = PUMP_THROUGHPUT[STATE.machine_quality] ?? 72000;
 
   const renderRow = (item) => {
     const s = supply[item] ?? 0;
@@ -1294,12 +1349,14 @@ function renderBusBalance() {
     const sign = net >= 0 ? '+' : '';
     const rowLabel = busItemMap[item]?.label ?? label(item);
     const isFluid = !!(busItemMap[item]?.fluid);
+    // Fluids: raw /min (signed) — pump fractions round small deficits to 0.00.
     const netDisplay = isFluid
-      ? `${sign}${(Math.abs(net) / pumpTp).toFixed(2)}`
+      ? `${sign}${fmtN(net)}`
       : `${sign}${(net / beltTp).toFixed(2)}`;
-    const unitTag = isFluid ? 'pump' : `${belt} belt`;
+    const unitTag = isFluid ? '/min' : `${belt} belt`;
     const metaConsumed = isFluid ? `${fmtFluid(d)} consumed` : `${fmtRB(d, belt)} consumed`;
     const metaSupply   = isFluid ? `${fmtFluid(s)} supply`   : `${fmtRB(s, belt)} supply`;
+    const loadCol = usedPct >= 100 ? 'var(--bad)' : usedPct >= 80 ? 'var(--warn)' : 'var(--ok)';
     return `
       <div class="bus-row${isFluid ? ' bus-row--fluid' : ''}">
         <div class="bus-row-header">
@@ -1310,8 +1367,7 @@ function renderBusBalance() {
           </div>
         </div>
         <div class="bus-bar-track">
-          <div class="bus-bar-consumed" style="width:${usedPct}%;background:${usedPct>=100?'var(--bad)':'var(--text-dim)'}"></div>
-          <div class="bus-bar-free" style="background:${usedPct>=100?'var(--bad-bg)':usedPct>=80?'var(--warn)':'var(--ok)'}"></div>
+          <div class="bus-bar-consumed" style="width:${usedPct}%;background:${loadCol}"></div>
         </div>
         <div class="bus-meta">
           <span>${metaConsumed}</span>
@@ -1428,7 +1484,9 @@ function countLogisticsItems(loc) {
 function renderLogisticsTab() {
   const loc = currentLoc();
   const { supply, demand } = computeLogisticsBalance(loc);
-  const items = [...new Set([...Object.keys(supply), ...Object.keys(demand)])];
+  // Drop zero/zero rows (e.g. a reserve fully drained by a direct consumer) — pure noise.
+  const items = [...new Set([...Object.keys(supply), ...Object.keys(demand)])]
+    .filter(i => (supply[i] ?? 0) > 0 || (demand[i] ?? 0) > 0);
   if (!items.length) return `
     <div class="empty-state">
       <p>No logistics network activity on ${esc(loc.label)}.</p>
@@ -1476,16 +1534,17 @@ function renderLogisticsTab() {
 function renderTabs() {
   const loc = currentLoc();
   const logiCount = countLogisticsItems(loc);
+  const actionCount = (loc.bottlenecks?.length ?? 0) + (loc.next_steps?.length ?? 0);
   const tabs = [
     ['overview',  'Overview'],
     ['lines',     `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
     ['logistics', `Logistics${logiCount ? ` (${logiCount})` : ''}`],
-    ['issues',    `Actions${loc.next_steps?.length ? ` (${loc.next_steps.length})` : ''}`],
+    ['issues',    `Actions${actionCount ? ` (${actionCount})` : ''}`],
     ['chat',      'Chat'],
   ];
   return `
-    <div class="tab-list">
-      ${tabs.map(([id, txt]) => `<button class="tab-btn${activeTab===id?' active':''}" data-tab="${id}">${esc(txt)}</button>`).join('')}
+    <div class="tab-list" role="tablist">
+      ${tabs.map(([id, txt]) => `<button class="tab-btn${activeTab===id?' active':''}" role="tab" aria-selected="${activeTab===id}" data-tab="${id}">${esc(txt)}</button>`).join('')}
     </div>`;
 }
 
@@ -1493,29 +1552,95 @@ const SMELTING_MACHINES = new Set(['electric-furnace','stone-furnace','steel-fur
 const CIRCUIT_ITEMS     = new Set(['electronic-circuit','advanced-circuit','processing-unit']);
 const SCIENCE_ITEM_SET  = new Set(SCIENCE_ORDER);
 
+function lineStatus(l) {
+  return l.wip ? 'wip' : statusClass(pct(l.effective_rate ?? l.target_rate ?? 0, l.target_rate ?? 0));
+}
+
 function renderOverview() {
   const loc = currentLoc();
+  const lines = loc.lines ?? [];
   const busSection = renderBusBalance();
 
-  const locLines = loc.lines ?? [];
-  const totalPowCeilMw = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
-  const totalPowMw     = locLines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
-  const powerSection = totalPowCeilMw > 0 ? `
-    <div class="power-overview">
-      <div class="power-overview-label">⚡ Power</div>
-      <div class="power-overview-values">
-        <span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
-        <span class="power-ceil-note">/ ${fmtPower(totalPowCeilMw * 1000)} (ceil)</span>
+  // ── Line status rollup: counts + the lines that need attention ──
+  const counts = { ok: 0, warn: 0, bad: 0, wip: 0 };
+  for (const l of lines) counts[lineStatus(l)]++;
+  const attention = lines
+    .map((l, i) => ({ l, i, st: lineStatus(l), p: pct(l.effective_rate ?? l.target_rate ?? 0, l.target_rate ?? 0) }))
+    .filter(e => e.st === 'warn' || e.st === 'bad')
+    .sort((a, b) => a.p - b.p);
+  const linesSection = lines.length ? `
+    <div class="overview-section">
+      <div class="group-label">Lines</div>
+      <div class="overview-rollup">
+        <span class="rollup-stat" style="color:var(--ok)">${counts.ok} ok</span>
+        ${counts.warn ? `<span class="rollup-stat" style="color:var(--warn)">${counts.warn} behind</span>` : ''}
+        ${counts.bad  ? `<span class="rollup-stat" style="color:var(--bad)">${counts.bad} short</span>` : ''}
+        ${counts.wip  ? `<span class="rollup-stat" style="color:var(--text-muted)">${counts.wip} wip</span>` : ''}
+        <button class="overview-link" data-goto-tab="lines">View all →</button>
+      </div>
+      ${attention.map(({ l, i, st, p }) => {
+        const actual = l.effective_rate ?? l.target_rate ?? 0;
+        return `
+        <div class="overview-line ${st} clickable" data-goto-line="${i}" role="button" tabindex="0"
+             title="Open in Lines tab">
+          <div class="overview-line-header">
+            <span class="overview-line-name">${esc(l.label ?? label(l.item))}</span>
+            <div class="overview-stats">
+              <span class="rate-text">${fmtN(actual)} / ${fmtN(l.target_rate ?? 0)}/min</span>
+              <span class="pct-lg" style="color:${statusColor(p)}">${p}%</span>
+            </div>
+          </div>
+          <div class="mini-bar"><div class="mini-bar-fill" style="width:${p}%;background:${statusColor(p)}"></div></div>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
+  // ── Worst logistics deficits ──
+  const { supply, demand } = computeLogisticsBalance(loc);
+  const deficits = [...new Set([...Object.keys(supply), ...Object.keys(demand)])]
+    .map(item => ({ item, net: (supply[item] ?? 0) - (demand[item] ?? 0) }))
+    .filter(e => e.net < 0)
+    .sort((a, b) => a.net - b.net)
+    .slice(0, 3);
+  const logiSection = deficits.length ? `
+    <div class="overview-section">
+      <div class="group-label">Logistics Deficits</div>
+      <div class="overview-rollup">
+        ${deficits.map(e => `<span class="rollup-stat" style="color:var(--bad)">${esc(label(e.item))} ${fmtN(e.net)}/min</span>`).join('')}
+        <button class="overview-link" data-goto-tab="logistics">Details →</button>
       </div>
     </div>` : '';
 
-  if (!busSection && !powerSection) return `
+  // ── Top next step teaser ──
+  const ns = loc.next_steps ?? [];
+  const nextSection = ns.length ? `
+    <div class="overview-section">
+      <div class="group-label">Next Step</div>
+      <div class="issue-item good"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(ns[0]))}</span>
+        ${ns.length > 1 ? `<button class="overview-link" style="margin-left:auto;flex-shrink:0" data-goto-tab="issues">+${ns.length - 1} more →</button>` : ''}
+      </div>
+    </div>` : '';
+
+  // ── Power ──
+  const totalPowCeilMw = lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
+  const totalPowMw     = lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
+  const ceilDiffers = Math.abs(totalPowCeilMw - totalPowMw) >= 0.005;
+  const powerSection = totalPowCeilMw > 0 ? `
+    <div class="power-overview">
+      <div class="power-overview-label">Power</div>
+      <div class="power-overview-values">
+        <span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
+        ${ceilDiffers ? `<span class="power-ceil-note" title="Power at whole built machine counts (fractional counts rounded up)">/ ${fmtPower(totalPowCeilMw * 1000)} rounded up</span>` : ''}
+      </div>
+    </div>` : '';
+
+  if (!linesSection && !busSection && !powerSection) return `
     <div class="empty-state">
       <p>No production lines for ${esc(loc.label)} yet.</p>
       <p>Ask Claude to plan one in the Chat tab.</p>
     </div>`;
 
-  return powerSection + busSection;
+  return linesSection + logiSection + nextSection + powerSection + busSection;
 }
 
 function renderLinesTab() {
@@ -1611,10 +1736,18 @@ function renderLineCard(line, idx) {
         <div class="step-io-col step-io-col--out"><div class="step-io-sect-label">Outputs</div>${mkItems(outEntries, excessMap)}</div>
       </div></td></tr>` : '';
 
+      // Players build whole machines: lead with the ceil count, exact in parens.
+      const mcExact = s.machine_count ?? 0;
+      const mcCeil  = s.machine_count_ceil ?? Math.ceil(mcExact);
+      const isFrac  = Math.abs(mcExact - Math.round(mcExact)) > 1e-4;
+      const countCell = isFrac
+        ? `${mcCeil} <span style="color:var(--text-dim)">(${fmtMC(mcExact)})</span>`
+        : fmtMC(mcExact);
+
       return `<tr>
         <td>${esc(label(s.recipe))}</td>
         <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
-        <td class="r">${fmtMC(s.machine_count)}</td>
+        <td class="r">${countCell}</td>
         <td class="r" style="color:var(--text-dim)">${powCell}</td>
       </tr>${ioRow}`;
     }).join('');
@@ -1624,11 +1757,11 @@ function renderLineCard(line, idx) {
     const totalPowStr = totalPowCeil != null ? fmtPower(totalPowCeil * 1000) : null;
 
     const throttledBadge = clir.chain_throttled
-      ? ` <span style="color:var(--bad);font-weight:400;font-size:10px;margin-left:8px" title="chain rate throttled to honor a --step-machines constraint below natural demand">⚠ throttled</span>`
+      ? ` <span style="color:var(--bad);font-weight:400;font-size:10px;margin-left:8px" title="chain rate throttled to honor a --step-machines constraint below natural demand">throttled</span>`
       : '';
     const machineSection = steps.length ? `
       <div class="card-section">
-        <div class="section-label">Machines${totalPowStr ? ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px">⚡ ${totalPowStr} total (ceil)</span>` : ''}${throttledBadge}</div>
+        <div class="section-label">Machines${totalPowStr ? ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px" title="Power at whole built machine counts (fractional counts rounded up)">${totalPowStr} total</span>` : ''}${throttledBadge}</div>
         <table>
           <thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Power</th></tr></thead>
           <tbody>${machineRows}</tbody>
@@ -1691,7 +1824,7 @@ function renderLineCard(line, idx) {
       </div>` : '';
     const fromLogiSection = logiOnly.length ? `
       <div class="card-section">
-        <div class="section-label">From Logistics 🤖</div>
+        <div class="section-label">From Logistics</div>
         <div class="chips">${renderInputChips(logiOnly)}</div>
       </div>` : '';
     const fromDirectSection = directOnly.length ? `
@@ -1703,7 +1836,7 @@ function renderLineCard(line, idx) {
     const reserveItems = line.reserve_items ?? [];
     const reserveSection = reserveItems.length ? `
       <div class="card-section">
-        <div class="section-label">Reserve → Logistics 🤖</div>
+        <div class="section-label">Reserve → Logistics</div>
         <div class="chips">${reserveItems.map(item => {
           const rate = reserveRateFor(line, item);
           const isF = FLUID_ITEM_IDS.has(item);
@@ -1735,7 +1868,7 @@ function renderLineCard(line, idx) {
           const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${fmtMC(info.machine_count)}×`;
           const countCl = isYield ? 'var(--warn)' : 'var(--text)';
           const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
-          return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ⚡${powStr}` : ''}</span></span>`;
+          return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ${powStr}` : ''}</span></span>`;
         }).join('')}</div>
       </div>` : '';
 
@@ -1773,38 +1906,54 @@ function renderLineCard(line, idx) {
   const stale = lineStaleTechs(line);
   const cappedHere = line.cli_result?.research_prod_capped === true;
   const chips = [
-    stale.length ? `<span class="card-chip stale" title="Research changed since this line was planned: ${stale.map(t => PRODUCTIVITY_RESEARCH[t]?.label ?? t).join(', ')}">⟳ stale</span>` : '',
+    stale.length ? `<span class="card-chip stale" title="Research changed since this line was planned: ${stale.map(t => PRODUCTIVITY_RESEARCH[t]?.label ?? t).join(', ')}">stale</span>` : '',
     cappedHere    ? `<span class="card-chip capped" title="A step on this line is at the +300% prod cap; more research levels won't reduce its machine count.">@300% cap</span>` : '',
   ].filter(Boolean).join(' ');
+  // The WIP badge already marks in-progress lines — drop a redundant "(WIP)" in the label.
+  const rawTitle  = line.label ?? label(line.item);
+  const titleText = line.wip ? rawTitle.replace(/\s*\(wip\)\s*$/i, '') : rawTitle;
+  // Subtitle only earns its row when it differs from the title.
+  const itemName  = label(line.item);
+  const subtitle  = itemName.trim().toLowerCase() !== titleText.trim().toLowerCase()
+    ? `<span class="card-subtitle">${esc(itemName)}</span>` : '';
+  const target = line.target_rate ?? 0;
   return `
     <div class="line-card ${cardClass}">
-      <div class="card-header ${cardClass}" data-card="${idx}" aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'}">
+      <div class="card-header ${cardClass}" data-card="${idx}" role="button" tabindex="0"
+           aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'}">
         <div class="card-header-left">
           <span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
           <div class="card-title-group">
-            <span class="card-title">${esc(line.label ?? label(line.item))}${line.wip ? '<span class="wip-badge">WIP</span>' : ''}${chips ? ` ${chips}` : ''}</span>
-            <span class="card-subtitle">${esc(label(line.item))}</span>
+            <span class="card-title">${esc(titleText)}${line.wip ? '<span class="wip-badge">WIP</span>' : ''}${chips ? ` ${chips}` : ''}</span>
+            ${subtitle}
           </div>
         </div>
         <div class="card-header-right">
-          <span class="rate-num">${fmtRateOnly(displayRate)}</span>
+          <span class="rate-num">${fmtN(displayRate)}${target ? ` / ${fmtN(target)}` : ''}/min</span>
           <span class="rate-unit">${isFluid ? fmtFluidUnitOnly(displayRate) : fmtUnitOnly(displayRate, belt ?? STATE.preferred_belt)}</span>
         </div>
       </div>
+      <div class="card-progress"><div class="card-progress-fill" style="width:${p}%;background:${line.wip ? 'var(--warn)' : col}"></div></div>
       ${body}
     </div>`;
 }
 
 function renderIssues() {
   const loc = currentLoc();
+  const bn = loc.bottlenecks ?? [];
   const ns = loc.next_steps ?? [];
-  if (!ns.length)
-    return '<div class="no-issues">✓ No next steps.</div>';
-  const nsHtml = [
-    `<div class="group-label" style="margin-bottom:8px">Next Steps</div>`,
-    ...ns.map(s => `<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`),
-  ];
-  return nsHtml.join('');
+  if (!bn.length && !ns.length)
+    return '<div class="no-issues">No bottlenecks or next steps.</div>';
+  const parts = [];
+  if (bn.length) {
+    parts.push(`<div class="group-label" style="margin-bottom:8px">Bottlenecks</div>`);
+    parts.push(...bn.map(b => `<div class="issue-item bad"><span>${esc(humanizeText(b))}</span></div>`));
+  }
+  if (ns.length) {
+    parts.push(`<div class="group-label" style="margin:${bn.length ? '16px' : '0'} 0 8px">Next Steps</div>`);
+    parts.push(...ns.map(s => `<div class="issue-item good"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`));
+  }
+  return parts.join('');
 }
 
 function renderChat() {
@@ -1828,18 +1977,20 @@ function renderChat() {
         placeholder="Ask about your factory… (Enter to send, Shift+Enter for newline)"
         ${chatSending || !avail ? 'disabled' : ''}></textarea>
       <button class="chat-send" id="btn-send" ${chatSending || !avail ? 'disabled' : ''}>
-        ${chatSending ? '<span class="spin">⟳</span>' : '↑'}
+        ${chatSending ? '…' : 'Send'}
       </button>
     </div>`;
 }
 
 function render() {
+  // Full innerHTML replace resets scroll; restore it so interactions don't jump the page.
+  const scrollY = window.scrollY;
+  // Research Bonuses is config input, not status — it lives at the bottom of the page.
   document.getElementById('app').innerHTML = `
     ${renderHeader()}
     <div class="main">
       <div class="main-inner">
         ${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
-        ${renderResearch()}
         ${(STATE.dataset ?? 'vanilla') !== 'vanilla' ? renderLocationBar() : ''}
         ${renderBottlenecks()}
         ${renderTabs()}
@@ -1848,9 +1999,11 @@ function render() {
         <div class="tab-panel${activeTab==='logistics'?' active':''}">${renderLogisticsTab()}</div>
         <div class="tab-panel${activeTab==='issues'   ?' active':''}">${renderIssues()}</div>
         <div class="tab-panel${activeTab==='chat'     ?' active':''}">${renderChat()}</div>
+        <div style="margin-top:16px">${renderResearch()}</div>
       </div>
     </div>`;
   bindEvents();
+  window.scrollTo(0, scrollY);
   if (activeTab === 'chat') scrollChat();
 }
 
@@ -1862,8 +2015,43 @@ function scrollChat() {
 // ── Events ───────────────────────────────────────────────────────────────────
 
 function bindEvents() {
-  document.querySelectorAll('.tab-btn').forEach(btn =>
-    btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); }));
+  const tabBtns = [...document.querySelectorAll('.tab-btn')];
+  tabBtns.forEach((btn, i) => {
+    btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); });
+    btn.addEventListener('keydown', e => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const next = tabBtns[(i + (e.key === 'ArrowRight' ? 1 : tabBtns.length - 1)) % tabBtns.length];
+      next.focus(); next.click();
+    });
+  });
+
+  // Keyboard activation for div-based buttons (card headers, toggles, banner, rollup rows)
+  document.querySelectorAll('[role="button"][tabindex]').forEach(el =>
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
+    }));
+
+  document.getElementById('science-toggle')?.addEventListener('click', () => {
+    scienceOpen = !scienceOpen;
+    localStorage.setItem('science_open', scienceOpen ? '1' : '0');
+    render();
+  });
+
+  document.getElementById('banner-actions')?.addEventListener('click', () => {
+    activeTab = 'issues';
+    render();
+  });
+
+  document.querySelectorAll('[data-goto-tab]').forEach(el =>
+    el.addEventListener('click', () => { activeTab = el.dataset.gotoTab; render(); }));
+
+  document.querySelectorAll('[data-goto-line]').forEach(el =>
+    el.addEventListener('click', () => {
+      activeTab = 'lines';
+      expandedCards.add(+el.dataset.gotoLine);
+      render();
+    }));
 
   document.querySelectorAll('.loc-btn[data-locidx]').forEach(btn =>
     btn.addEventListener('click', () => {

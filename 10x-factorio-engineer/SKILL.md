@@ -244,6 +244,7 @@ working context and update it after every player message.
 ```jsonc
 {
   "save_name": "My Factory",          // player-given name, default "Main Factory"
+  "updated_at": "2026-06-11T12:00:00.000Z",  // ISO timestamp; dashboard-managed (set on every save) — echo it back unchanged, never invent it
   "dataset": "vanilla",               // "vanilla" | "space-age"
   "assembler": 3,                     // player's current assembler tier (shared across all locations)
   "furnace": "electric",              // furnace type (shared)
