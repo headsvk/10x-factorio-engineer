@@ -1663,7 +1663,11 @@ function renderLineCard(line, idx) {
         ? (beaconPow ? `${stepPow} <span style="color:var(--text-dim)">+${beaconPow} beacon</span>` : stepPow)
         : '—';
 
-      const mods    = recModOvr[s.recipe] ?? modCfgs[s.machine]    ?? [];
+      // Use the step's own effective module config (override-resolved AND
+      // allow_productivity-filtered by the CLI) rather than the global
+      // per-machine config — otherwise recipes that can't take prod modules
+      // (e.g. pipe, allow_productivity=False) show phantom prod chips.
+      const mods    = s.module_specs ?? [];
       const beacon  = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? defaultBcn ?? null;
       const modHtml = mods.filter(m => m.count > 0).map(modChip).join(' ');
       const bcnHtml = beacon ? bcnChip(beacon, housingQ) : '';

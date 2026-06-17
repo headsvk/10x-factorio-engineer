@@ -26,6 +26,15 @@ import tempfile
 
 from playwright.async_api import async_playwright
 
+# Progress output uses Unicode box-drawing chars (─, →). On Windows the console
+# defaults to cp1252, which can't encode them and crashes the script on print.
+# Force UTF-8 on our streams so the script runs regardless of the console codec.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 DEV_DIR         = os.path.dirname(os.path.abspath(__file__))
 DASHBOARD_SRC   = os.path.join(DEV_DIR, "dashboard.html")
 SCREENSHOTS_DIR = os.path.join(DEV_DIR, "screenshots")
@@ -152,6 +161,10 @@ def make_state(machine_quality: str, beacon_quality: str, with_beacon: bool) -> 
         "power_kw": 600.0,
         "power_kw_ceil": 600.0,
         "beacon_power_kw": beacon_power_kw,
+        # Real CLI emits effective per-step module_specs (electronic-circuit
+        # allows productivity, so the whole config survives). The dashboard now
+        # renders chips from this field, not the global module_configs.
+        "module_specs": MACHINE_MODULE_CONFIGS[machine_quality],
     }
 
     cli_result = {
