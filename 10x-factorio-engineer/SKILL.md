@@ -526,9 +526,9 @@ with these args reproduces the line exactly.
 
 Some bases route items through bots (logistic network) instead of belts or trains.
 Other items are belt-fed line-to-line without ever touching the main bus.
-The dashboard models the bot network as a parallel pool to the bus (with its own
-supply/demand sheet on the **Logistics** tab) and lets direct belt connections
-net silently against the supplier's reserve.
+The dashboard models the bot network as a parallel pool to the bus (shown as a
+**Logistics Network** card group inside the Overview's **Supply / Demand** section) and
+lets direct belt connections net silently against the supplier's reserve.
 
 **Three opt-in fields per line:**
 
@@ -540,8 +540,9 @@ net silently against the supplier's reserve.
 
 **Routing rules:**
 - `cli_args.logistics_items` and `cli_args.direct_items` are both *replacements* for `cli_args.bus_items` for the items they cover — same CLI flag (`--bus-item`), different dashboard tagging. An item should appear in *one* of the three lists, never multiple.
-- Items in `cli_args.logistics_items` are excluded from Bus Balance demand and added to Logistics Network demand.
-- Items in `cli_args.direct_items` are excluded from Bus Balance demand AND from Logistics demand. Instead they're netted against the supplying line's reserve (which must declare the item in `reserve_items`). When the direct demand fully covers the reserve, the item disappears from the Logistics tab entirely — correctly modelling "no bot traffic, no idle surplus".
+- Items in `cli_args.logistics_items` are excluded from Belt Bus demand and added to Logistics Network demand.
+- Items in `cli_args.direct_items` are excluded from Belt Bus demand AND from Logistics Network demand. Instead they're netted against the supplying line's reserve (which must declare the item in `reserve_items`). When the direct demand fully covers the reserve, the item disappears from the Supply / Demand sheet entirely — correctly modelling "no bot traffic, no idle surplus".
+- **Science packs** in `reserve_items` are additionally treated as consumed by the research labs: the Supply / Demand sheet adds a research demand equal to the pack's science target. So a science pack produced for export (e.g. space science on a platform, shipped down to Nauvis research) reads as fully consumed (100%) rather than idle surplus (0%). Tag a platform's science line with `reserve_items: ["<pack>"]` so it surfaces in that surface's Supply / Demand.
 
 **Reserve auto-rate (per tagged item, per line):**
 - **Primary output** (`item == line.item`): supply = full effective production rate. Caveat: V1 has no per-line "declared local consumers" object, so the primary's reserve number reflects the line's full output rate. The player must mentally subtract whatever fraction is going to local belt-fed consumers (e.g. yellow science).
@@ -722,7 +723,7 @@ For each item in the list:
   3. Add as a line with actual_machines set, target_rate = effective_rate (no separate target)
 ```
 
-These appear in Lines and Overview (grouped under "Other"). Bus Balance reflects their consumption only if their ingredients are bus-fed (`bus_inputs` in cli_result).
+These appear in Lines and Overview. The Supply / Demand section reflects their consumption only if their ingredients are bus-fed (`bus_inputs` in cli_result).
 
 ### "Show dashboard" / "Update factory view"
 

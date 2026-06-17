@@ -642,9 +642,12 @@ def make_state_research() -> dict:
         "lab-research-speed": 6,
         "research-productivity": 2,
     }
+    # Research Bonuses is nested inside the Research Labs card, which only renders when
+    # there are science targets (no research without science) — so give this fixture some.
     state["locations"] = [_loc(
         "nauvis", "Nauvis",
         lines=[make_minimal_line("steel-plate", "Steel Plate", 60, 60)],
+        targets={"automation-science-pack": 60, "logistic-science-pack": 60},
     )]
     return state
 
@@ -745,8 +748,9 @@ SECTION_SCENARIOS = [
     ("section__research-expanded.png",      make_state_research,         ".research-section",  "overview", False,  "#research-toggle"),
     ("tab__overview.png",                   make_state_overview,         ".tab-panel.active",  "overview", False,  None),
     ("tab__lines-collapsed.png",            make_state_lines_statuses,   ".tab-panel.active",  "lines",    False,  None),
-    ("tab__logistics.png",                  make_state_logistics,        ".tab-panel.active",  "logistics", False, None),
-    ("section__logistics-table.png",        make_state_logistics,        ".logi-section",      "logistics", False, None),
+    # Logistics is no longer a separate tab — the network is merged into the Overview's
+    # Supply / Demand section as a "Logistics Network" card group.
+    ("section__logistics-cards.png",        make_state_logistics,        ".bus-section",       "overview", False,  None),
     ("tab__actions.png",                    make_state_with_bottleneck,  ".tab-panel.active",  "issues",   False,  None),
     ("tab__chat.png",                       make_state_chat,             ".tab-panel.active",  "chat",     False,  None),
     ("light__tab-lines-collapsed.png",      make_state_lines_statuses,   ".tab-panel.active",  "lines",    True,   None),
@@ -840,7 +844,7 @@ def make_state_line_holmium_fulgora():
         "--location", "fulgora",
         "--miner", "big",
         "--bus-item", "holmium-ore",
-        "--bus-item", "lava",
+        "--bus-item", "stone",  # Fulgora can't produce stone (holmium-solution needs it); lava is a Vulcanus resource
     )
     return _line_card_state(
         "Fulgora – Holmium Plate", "fulgora", "Fulgora",
@@ -1198,6 +1202,15 @@ async def run():
             viewport={"width": 900, "height": 600},
             device_scale_factor=2,
         )
+        # All scenarios render to file:// temp pages, which share one localStorage origin
+        # within this context, so UI-persistence keys would leak across pages and make
+        # screenshots order-dependent. Reset before each load. We also force science_open=1:
+        # the app now defaults the Science section collapsed, but most section/README shots
+        # need it expanded (the lab card — which nests the Research Bonuses panel — only
+        # renders when science is open). The collapsed default is covered by
+        # section__science-collapsed, which clicks #science-toggle to collapse from here.
+        await context.add_init_script(
+            "try { localStorage.clear(); localStorage.setItem('science_open', '1'); } catch (e) {}")
 
         print("\n── Group 1: quality combinations (30) ──")
         n1 = await run_quality_combinations(context)
