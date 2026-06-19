@@ -1,713 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>10x Factorio Engineer</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-*:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* ── Theme variables: dark (default) ── */
-:root {
---bg:           #100f09;
---bg-card:      #1c1a11;
---bg-input:     #252318;
---border:       #342f1c;
---border-sub:   #28241a;
---text:         #ece7d2;
---text-muted:   #8a7f64;
---text-dim:     #6e6450;
---accent:       #f59e0b;
---accent-hover: #fbbf24;
---accent-contrast: #1c1508;
---ok:           #4ade80;
---ok-bg:        rgba(74,222,128,.07);
---ok-border:    rgba(74,222,128,.2);
---warn:         #fbbf24;
---warn-bg:      rgba(251,191,36,.09);
---warn-border:  rgba(251,191,36,.25);
---bad:          #f87171;
---bad-bg:       rgba(248,113,113,.09);
---bad-border:   rgba(248,113,113,.25);
-font-family: 'Barlow Condensed', system-ui, sans-serif;
-}
-/* ── Light theme ── */
-[data-theme="light"] {
---bg:           #faf9f2;
---bg-card:      #fffcf0;
---bg-input:     #e6dcc0;
---border:       #d4c89e;
---border-sub:   #ebe2c6;
---text:         #1c1608;
---text-muted:   #6b5f42;
---text-dim:     #6b5e40;
---accent:       #b45309;
---accent-hover: #92400e;
---accent-contrast: #fff8eb;
---ok:           #16a34a;
---ok-bg:        rgba(22,163,74,.10);
---ok-border:    rgba(22,163,74,.30);
---warn:         #d97706;
---warn-bg:      rgba(217,119,6,.10);
---warn-border:  rgba(217,119,6,.30);
---bad:          #dc2626;
---bad-bg:       rgba(220,38,38,.10);
---bad-border:   rgba(220,38,38,.28);
-}
-/* ── Respect OS preference when no manual override ── */
-@media (prefers-color-scheme: light) {
-:root:not([data-theme]) {
---bg:           #faf9f2;
---bg-card:      #fffcf0;
---bg-input:     #e6dcc0;
---border:       #d4c89e;
---border-sub:   #ebe2c6;
---text:         #1c1608;
---text-muted:   #6b5f42;
---text-dim:     #6b5e40;
---accent:       #b45309;
---accent-hover: #92400e;
---accent-contrast: #fff8eb;
---ok:           #16a34a;
---ok-bg:        rgba(22,163,74,.10);
---ok-border:    rgba(22,163,74,.30);
---warn:         #d97706;
---warn-bg:      rgba(217,119,6,.10);
---warn-border:  rgba(217,119,6,.30);
---bad:          #dc2626;
---bad-bg:       rgba(220,38,38,.10);
---bad-border:   rgba(220,38,38,.28);
-}
-}
-body { background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; overflow-y: scroll; }
-/* ── Layout ── */
-.header {
-border-bottom: 1px solid var(--border-sub);
-padding: 10px 16px;
-background: var(--bg-card);
-}
-.header-inner {
-max-width: 1280px; margin-inline: auto;
-display: flex; align-items: center; justify-content: space-between;
-flex-wrap: wrap; gap: 8px;
-}
-.header-left { display: flex; flex-direction: column; gap: 2px; }
-.header-title-row { display: flex; align-items: center; gap: 8px; }
-.header-title { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900;
-color: var(--accent); letter-spacing: .06em; text-transform: uppercase; }
-.header-save  { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
-.header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.main { padding: 16px; }
-.main-inner { max-width: 1280px; margin-inline: auto; }
-/* ── Storage pill ── */
-.storage-pill { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 0 8px;
-height: 28px; display: inline-flex; align-items: center; line-height: 1;
-font-family: 'JetBrains Mono', monospace; letter-spacing: .02em; }
-.storage-pill.cloud { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-border); }
-.storage-pill.local { background: transparent; color: var(--text-muted); border-color: var(--border); }
-.storage-pill.none  { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-border); }
-/* ── Badges ── */
-.badges { display: flex; gap: 4px; flex-wrap: wrap; }
-.badge { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
-letter-spacing: .05em; text-transform: uppercase;
-border: 1px solid var(--border); border-radius: 3px; padding: 1px 7px; color: var(--text-muted); }
-.badge.purple { border-color: rgba(139,92,246,.4); color: #c084fc; background: rgba(88,28,135,.15); }
-/* ── Buttons ── */
-button { cursor: pointer; border: none; font-family: 'Barlow Condensed', sans-serif;
-font-size: 13px; font-weight: 700; letter-spacing: .05em;
-display: inline-flex; align-items: center; gap: 4px; transition: background .15s, color .15s; }
-.btn-group { display: flex; gap: 4px; }
-.btn       { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
-border-radius: 3px; padding: 3px 10px; height: 28px; text-transform: uppercase; }
-.btn:hover { background: var(--border); color: var(--text); }
-.btn-ghost { background: transparent; border: none; color: var(--text-dim);
-border-radius: 3px; padding: 3px 8px; height: 28px; }
-.btn-ghost:hover { background: var(--bg-input); color: var(--text); }
-.btn-ghost.danger { text-transform: uppercase; }
-.btn-ghost.danger:hover { background: var(--bad-bg); color: var(--bad); }
-.btn-primary { background: var(--accent); border: none; color: var(--accent-contrast);
-border-radius: 3px; padding: 4px 16px; font-weight: 900; text-transform: uppercase; }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
-.btn-cancel { background: transparent; border: none; color: var(--text-muted);
-border-radius: 3px; padding: 4px 12px; text-transform: uppercase; }
-.btn-cancel:hover { background: var(--bg-input); }
-/* ── Section label (two tiers) ── */
-/* sub-label: column headers, card meta, inline labels */
-.section-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); margin-bottom: 10px; }
-/* group-label: top-level group headings (Science Targets, Bus Balance, Bottlenecks, etc.) */
-.group-label { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted);
-margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-sub); }
-/* ── Science section ── */
-.science-section { background: var(--bg-card); border: 1px solid var(--border-sub);
-border-left: 3px solid var(--accent);
-border-radius: 4px; padding: 14px 16px; margin-bottom: 10px; }
-.loc-divider { border: none; border-top: 1px solid var(--border-sub); margin: 0 0 10px; }
-.science-header { display: flex; align-items: center; justify-content: space-between;
-cursor: pointer; user-select: none;
-font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted);
-margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
-.science-header.open { margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-sub); }
-.science-header-main { display: flex; align-items: center; gap: 8px; }
-.science-summary { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
-letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
-.science-grid.cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
-.science-bar { margin-bottom: 12px; }
-.science-bar:last-child { margin-bottom: 0; }
-.science-bar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.science-name { display: flex; align-items: center; gap: 8px; font-family: 'Barlow Condensed', sans-serif;
-font-size: 14px; font-weight: 700; letter-spacing: .02em; color: var(--text); }
-.sci-swatch   { flex-shrink: 0; width: 10px; height: 10px; border-radius: 2px; }
-.science-meta { display: flex; align-items: center; gap: 12px; }
-.rate-text    { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.pct-text     { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
-/* Bar sizing: --bar-primary (science targets), --bar-unit (all other bars) */
-:root { --bar-primary: 10px; --bar-unit: 4px; }
-.progress-track { height: var(--bar-primary); background: var(--bg-input); border-radius: 3px; overflow: hidden; }
-.progress-fill  { height: 100%; border-radius: 3px; transition: width .5s ease; }
-/* ── Research section ── */
-.research-section { background: var(--bg-card); border: 1px solid var(--border-sub);
-border-left: 3px solid var(--accent);
-border-radius: 4px; padding: 10px 16px; margin-bottom: 10px; }
-.research-header  { display: flex; align-items: center; justify-content: space-between;
-margin-bottom: 0; cursor: pointer; user-select: none;
-font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted); }
-.research-header-main { display: flex; align-items: center; gap: 8px; }
-.research-chevron { color: var(--text-dim); font-size: 10px; }
-.research-count-pill { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
-color: var(--text-dim); background: var(--bg-input); border-radius: 3px;
-padding: 1px 7px; letter-spacing: 0; text-transform: none; }
-.research-body    { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-sub); }
-.research-grid    { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
-.research-row     { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.research-label   { font-family: 'Barlow Condensed', sans-serif; font-size: 13px;
-color: var(--text); letter-spacing: .02em; }
-.research-input   { width: 58px; text-align: right; background: var(--bg-input);
-border: 1px solid var(--border); border-radius: 3px;
-color: var(--text); font-family: 'JetBrains Mono', monospace;
-font-size: 12px; padding: 2px 6px; height: 24px; }
-.research-input:focus { outline: none; border-color: var(--accent); }
-.research-subgroup-label { grid-column: 1 / -1; font-family: 'Barlow Condensed', sans-serif;
-font-size: 10px; font-weight: 800; text-transform: uppercase;
-letter-spacing: .12em; color: var(--text-dim); margin-top: 4px; }
-/* Research Bonuses embedded inside the lab card — strip its own card chrome, separate with a divider */
-.lab-research { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-sub); }
-.lab-research .research-section { background: none; border: none; border-radius: 0;
-padding: 0; margin-bottom: 0; }
-/* Line-card research chips (stale / capped) */
-.card-chip { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .05em; border-radius: 3px;
-padding: 1px 6px; border: 1px solid; display: inline-flex; align-items: center; }
-.card-chip.stale  { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
-.card-chip.capped { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
-/* ── Bottleneck banner (one-line summary; full lists live in the Actions tab) ── */
-.bottleneck-banner { background: var(--bad-bg); border: 1px solid var(--bad-border);
-border-left: 3px solid var(--bad);
-border-radius: 4px; padding: 10px 16px; margin-bottom: 16px;
-display: flex; align-items: center; justify-content: space-between;
-gap: 8px; cursor: pointer; user-select: none; }
-.bottleneck-banner:hover { background: var(--bad-border); }
-.bottleneck-title { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 800;
-letter-spacing: .05em; text-transform: uppercase; color: var(--bad); }
-.bottleneck-go    { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
-letter-spacing: .05em; text-transform: uppercase; color: var(--bad); opacity: .7; }
-/* ── Tabs ── */
-.tab-list { display: flex; flex-wrap: wrap; background: var(--bg-card); border: 1px solid var(--border-sub);
-border-radius: 4px; padding: 2px; margin-bottom: 16px; gap: 2px; }
-.tab-btn  { background: transparent; border: none; color: var(--text-muted);
-border-radius: 3px; padding: 4px 14px; height: 28px;
-font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
-letter-spacing: .05em; text-transform: uppercase; }
-.tab-btn.active             { background: var(--accent); color: var(--accent-contrast); }
-.tab-btn:hover:not(.active) { background: var(--bg-input); }
-.tab-panel                  { display: none; }
-.tab-panel.active           { display: block; }
-/* ── SPM headline ── */
-.spm-headline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px; }
-.spm-number   { font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 700;
-font-variant-numeric: tabular-nums; line-height: 1; }
-.spm-target   { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 500;
-font-variant-numeric: tabular-nums; line-height: 1; color: var(--text-muted); }
-.spm-sep      { font-family: 'JetBrains Mono', monospace; font-size: 24px; color: var(--text-dim); line-height: 1; }
-.spm-label    { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900;
-letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
-.spm-arrow    { font-family: 'JetBrains Mono', monospace; font-size: 18px; color: var(--text-dim); line-height: 1; }
-.spm-espm     { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700;
-font-variant-numeric: tabular-nums; line-height: 1; color: var(--accent); }
-.spm-limiter  { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
-letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted);
-align-self: center; margin-left: 4px; }
-/* ── Research-lab card ── */
-.lab-card   { background: var(--bg-input); border: 1px solid var(--border-sub);
-border-radius: 4px; padding: 10px 12px; margin-top: 12px; }
-.lab-card-head { display: flex; align-items: center; justify-content: space-between;
-gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.lab-card-title { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 800;
-text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
-.lab-card-count { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; color: var(--text); }
-.lab-config-row { display: flex; align-items: center; justify-content: space-between;
-gap: 8px 16px; flex-wrap: wrap; margin-bottom: 10px; }
-.lab-config-summary { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); }
-.lab-stats  { display: flex; flex-wrap: wrap; gap: 8px 16px; }
-.lab-stat   { display: flex; flex-direction: column; gap: 1px; }
-.lab-stat-k { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
-.lab-stat-v { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
-color: var(--text); font-variant-numeric: tabular-nums; }
-.lab-ctl    { display: flex; align-items: center; gap: 5px; }
-.lab-ctl-l  { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
-.lab-select { background: var(--bg-card); border: 1px solid var(--border); border-radius: 3px;
-color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px;
-padding: 2px 5px; height: 24px; }
-.lab-select:focus { outline: none; border-color: var(--accent); }
-/* ── Overview rollups ── */
-.overview-section { margin-bottom: 16px; }
-.overview-rollup { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-.rollup-stat { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700;
-font-variant-numeric: tabular-nums; }
-.overview-link { background: none; border: none; padding: 0; color: var(--text-dim);
-font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
-letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
-.overview-link:hover { color: var(--text); }
-/* ── Bus balance ── */
-.bus-section { margin-bottom: 16px; }
-.bus-group { margin-bottom: 12px; }
-.bus-group:last-child { margin-bottom: 0; }
-.bus-group-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800;
-text-transform: uppercase; letter-spacing: .12em; margin-bottom: 7px;
-padding-left: 2px; }
-.bus-group-label--belt { color: var(--accent); border-bottom: 1px solid var(--border-sub); padding-bottom: 4px; }
-.bus-group-label--pipe { color: #5b9fd4; border-bottom: 1px solid var(--border-sub); padding-bottom: 4px; }
-.bus-group-label--logi { color: #4aa896; border-bottom: 1px solid var(--border-sub); padding-bottom: 4px; }
-/* Dense responsive grid — fills width, rows sorted tightest-first so problems surface top-left */
-.bus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: 6px; }
-.bus-row { padding: 7px 9px 8px; border-radius: 4px; border: 1px solid var(--border-sub);
-border-left: 3px solid var(--ok); background: var(--bg-card); cursor: default;
-transition: border-color .15s; }
-.bus-row--warn { border-left-color: var(--warn); }
-.bus-row--bad  { border-left-color: var(--bad); }
-.bus-row:hover { border-color: var(--border); }
-.bus-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-margin-bottom: 6px; }
-.bus-name { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px;
-letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bus-net { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700;
-font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
-.bus-net-unit { font-family: 'Barlow Condensed', sans-serif; font-size: 9px; font-weight: 800;
-letter-spacing: .06em; text-transform: uppercase; opacity: .5; margin-left: 3px; }
-.bus-row-bot { display: flex; align-items: center; gap: 8px; }
-/* Filled portion = consumption (colored by load severity); track = free headroom */
-.bus-bar-track { flex: 1; height: var(--bar-unit); border-radius: 3px; overflow: hidden;
-background: var(--bg-input); }
-.bus-bar-consumed { height: 100%; border-radius: 3px; transition: width .4s ease, background .4s ease; }
-.bus-loadpct { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
-font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
-.empty-state code { font-family: 'JetBrains Mono', monospace; font-size: 11px;
-background: var(--bg-input); border: 1px solid var(--border-sub);
-border-radius: 2px; padding: 0 4px; color: var(--text-muted); }
-/* ── Line cards ── */
-/* Capped width — the expanded step table only needs ~540px, so a full-width card just
-leaves dead space. Capping it keeps cards tidy and the right-aligned rate close + aligned. */
-.line-card { border-radius: 4px; border: 1px solid; background: var(--bg-card); margin-bottom: 8px;
-overflow: hidden; max-width: 640px; }
-.line-card.ok   { border-color: var(--ok-border);   border-left: 3px solid var(--ok);   }
-.line-card.warn { border-color: var(--warn-border);  border-left: 3px solid var(--warn);  }
-.line-card.bad  { border-color: var(--bad-border);   border-left: 3px solid var(--bad);   }
-.line-card.wip  { border-color: var(--warn-border);  border-left: 3px dashed var(--warn); }
-.line-card.wip .card-header { opacity: .75; }
-.wip-badge { display: inline-flex; align-items: center; font-family: 'Barlow Condensed', sans-serif;
-font-size: 9px; font-weight: 700; letter-spacing: .08em; color: var(--warn);
-background: var(--warn-bg); border: 1px solid var(--warn-border);
-padding: 1px 5px; border-radius: 3px; margin-left: 5px; vertical-align: middle; flex-shrink: 0; }
-.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-padding: 10px 16px; cursor: pointer; user-select: none;
-background: var(--bg-card); transition: background .12s; }
-.card-header:hover { background: var(--bg-input); }
-.card-header-left  { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.card-title-group  { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.card-subtitle     { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600;
-text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); }
-.card-chevron      { color: var(--text-muted); font-size: 12px; width: 14px; transition: transform .15s ease; }
-.card-header:hover .card-chevron { color: var(--text); }
-.card-title        { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px;
-letter-spacing: .02em; color: var(--text); }
-.card-header-rate { display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
-flex-shrink: 0; }
-/* Lines-tab filter box */
-.line-filter { margin-bottom: 4px; }
-.line-filter-input { width: 100%; max-width: 280px; box-sizing: border-box;
-background: var(--bg-input); border: 1px solid var(--border);
-border-radius: 4px; color: var(--text);
-font-family: 'Barlow Condensed', sans-serif; font-size: 14px;
-letter-spacing: .02em; padding: 6px 10px; }
-.line-filter-input:focus { outline: none; border-color: var(--accent); }
-.line-filter-input::placeholder { color: var(--text-dim); }
-.line-filter-empty { margin-top: 10px; color: var(--text-dim);
-font-family: 'Barlow Condensed', sans-serif; font-size: 13px;
-letter-spacing: .04em; }
-/* ── Lines toolbar: search + status filter chips + expand-all ── */
-.lines-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.lines-toolbar .line-filter { margin-bottom: 0; flex: 1 1 220px; min-width: 180px; max-width: 320px; }
-.lines-toolbar .line-filter-input { max-width: none; }
-.lines-filter-chips { display: flex; gap: 4px; flex-wrap: wrap; }
-.filter-chip { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
-border-radius: 3px; padding: 3px 9px; height: 30px;
-font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
-letter-spacing: .05em; text-transform: uppercase; cursor: pointer;
-transition: background .12s, color .12s, border-color .12s;
-display: inline-flex; align-items: center; gap: 5px; }
-.filter-chip:hover:not(.active) { background: var(--border); color: var(--text); }
-.filter-chip.active { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
-.filter-chip-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
-color: var(--text-dim); letter-spacing: 0; }
-.filter-chip.active .filter-chip-count { color: var(--accent-contrast); opacity: .85; }
-.lines-count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
-margin-left: auto; white-space: nowrap; }
-/* ── Sticky Lines group header (visible / total counts) ── */
-.lines-group-header { position: sticky; top: 0; z-index: 2; background: var(--bg);
-margin: 12px 0 8px; padding: 4px 0;
-display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.line-group:first-child .lines-group-header { margin-top: 0; }
-.lines-group-header .group-label { margin: 0; padding-bottom: 4px; flex: 1; }
-.lines-group-count { font-family: 'JetBrains Mono', monospace; font-size: 10px;
-color: var(--text-dim); letter-spacing: 0; padding-bottom: 4px;
-border-bottom: 1px solid var(--border-sub); }
-/* ── Merged Inputs chip: source tag (bus / bot / direct) ── */
-.chip-tag { display: inline-block; margin-right: 5px; font-size: 9px; font-weight: 700;
-text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
-.rate-num  { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted);
-font-variant-numeric: tabular-nums; }
-.rate-unit { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
-font-variant-numeric: tabular-nums; }
-.item-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600;
-text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
-/* Quiet footer stat — not a card; a low-emphasis summary line below Bus Balance */
-.power-overview { display: flex; align-items: baseline; gap: 8px; padding: 2px;
-margin-top: 2px; }
-.power-overview-label { font-family: 'Barlow Condensed', sans-serif; font-size: 11px;
-font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
-color: #c8a840; }
-.power-overview-values { display: flex; align-items: baseline; gap: 6px; }
-.power-exact { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600;
-color: var(--text); }
-.power-ceil-note { font-family: 'JetBrains Mono', monospace; font-size: 11px;
-color: var(--text-dim); }
-.ext-link { color: var(--text-dim); font-size: 11px; text-decoration: none; line-height: 1; }
-.ext-link:hover { color: var(--text-muted); }
-.card-progress      { height: var(--bar-unit); background: var(--bg-input); }
-.card-progress-fill { height: 100%; transition: width .5s; }
-.card-body { padding: 14px 16px; }
-.card-section { margin-bottom: 16px; }
-.card-section:last-child { margin-bottom: 0; }
-table { width: 100%; font-size: 12px; border-collapse: collapse; }
-thead { position: sticky; top: 0; background: var(--bg-card); z-index: 1; }
-thead tr { border-bottom: 1px solid var(--border-sub); }
-th { text-align: left; padding-bottom: 6px; padding-right: 16px; font-weight: 700;
-font-family: 'Barlow Condensed', sans-serif; font-size: 11px;
-letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
-th.r, td.r { text-align: right; }
-th:last-child, td:last-child { padding-right: 0; }
-tbody tr { border-top: 1px solid var(--border-sub); }
-tbody tr.step-io-row { border-top: none; }
-td { padding: 6px 16px 6px 0; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-td.name-col { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; color: var(--text); }
-.step-io-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px;
-padding: 5px 8px 8px; background: var(--bg-input);
-border: 1px solid var(--border); border-top: none;
-border-radius: 0 0 3px 3px; margin-bottom: 2px; }
-.step-io-col { padding: 4px 0 2px 8px; }
-.step-io-col--in  { border-left: 2px solid #5b9fd4; }
-.step-io-col--out { border-left: 2px solid var(--ok); }
-.step-io-sect-label { font-family: 'Barlow Condensed', sans-serif; font-size: 9px; font-weight: 800;
-letter-spacing: .14em; text-transform: uppercase; margin-bottom: 4px; }
-.step-io-col--in  .step-io-sect-label { color: #5b9fd4; opacity: .7; }
-.step-io-col--out .step-io-sect-label { color: var(--ok); opacity: .7; }
-.step-io-item { display: flex; justify-content: space-between; align-items: baseline;
-gap: 8px; margin-bottom: 2px; }
-.step-io-item:last-child { margin-bottom: 0; }
-.step-io-name { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 600;
-white-space: nowrap; }
-.step-io-col--in  .step-io-name { color: #5b9fd4; }
-.step-io-col--out .step-io-name { color: var(--ok); }
-.step-io-rate { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
-white-space: nowrap; flex-shrink: 0; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: var(--bg-input);
-border: 1px solid var(--border); border-radius: 3px; padding: 3px 8px; color: var(--text-muted); }
-/* ── Module & beacon chips ── */
-.mod-chip {
-display: inline-flex; align-items: center; gap: 1px;
-padding: 1px 4px; border-radius: 2px;
-font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
-border: 1px solid; white-space: nowrap; line-height: 1.6; vertical-align: middle;
-}
-.mod-chip.type-prod  { background: rgba(210, 90,  30,.09); border-color: rgba(210, 90,  30,.35);  color: #d06020; }
-.mod-chip.type-speed { background: rgba( 30,130,210,.09); border-color: rgba( 30,130,210,.35);  color: #3a9fd4; }
-.mod-chip.type-eff   { background: rgba( 60,180, 60,.08); border-color: rgba( 60,180, 60,.30); color: #50b850; }
-.bcn-chip {
-display: inline-flex; align-items: center; gap: 1px;
-padding: 1px 4px; border-radius: 2px;
-font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700;
-background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); color: #94a3b8;
-white-space: nowrap; line-height: 1.6; vertical-align: middle;
-}
-/* CSS-drawn diamond — avoids glyph-metric variance across Chromium versions/fallback fonts */
-.qdot { display: inline-block; width: 4px; height: 4px; transform: rotate(45deg);
-background: currentColor; vertical-align: middle; margin: 0 0 .15em .3em;
-text-indent: -9999px; overflow: hidden; color: var(--text-dim); }
-.qdot.q-uncommon  { color: #6DFF6D; }
-.qdot.q-rare      { color: #6DA8FF; }
-.qdot.q-epic      { color: #C87DFF; }
-.qdot.q-legendary { color: #FFB347; }
-.bcn-chip .qdot, .mod-chip .qdot, td.name-col .qdot { width: 5px; height: 5px; }
-.bcn-sep { margin: 0 3px; }
-/* ── Issues ── */
-/* Pending actions use a neutral accent palette — green reads as "done". */
-.issue-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px;
-border-radius: 4px; font-size: 13px; margin-bottom: 8px;
-background: var(--bg-card); border: 1px solid var(--border-sub);
-border-left: 3px solid var(--accent); color: var(--text-muted); }
-.issue-item:last-child { margin-bottom: 0; }
-.issue-item.bad  { background: var(--bad-bg);  border: 1px solid var(--bad-border);
-border-left: 3px solid var(--bad);  color: var(--bad); }
-.issue-item.good { background: var(--ok-bg);   border: 1px solid var(--ok-border);
-border-left: 3px solid var(--ok);   color: var(--text-muted); }
-/* ── Chat ── */
-.chat-warning { background: var(--warn-bg); border: 1px solid var(--warn-border);
-border-left: 3px solid var(--warn);
-border-radius: 4px; padding: 8px 12px; font-size: 11px; color: var(--warn); margin-bottom: 12px; }
-.chat-messages { overflow-y: auto; margin-bottom: 12px; max-height: 380px;
-display: flex; flex-direction: column; gap: 10px; }
-.chat-empty { text-align: center; padding: 32px 0; color: var(--text-dim); font-size: 13px; }
-.chat-msg        { display: flex; }
-.chat-msg.player { justify-content: flex-end; }
-.chat-bubble { max-width: 85%; border-radius: 4px; padding: 8px 12px; font-size: 13px; }
-.chat-bubble.player { background: var(--warn-bg); border: 1px solid var(--warn-border);
-border-left: 3px solid var(--accent); color: var(--text); }
-.chat-bubble.claude { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted); }
-.chat-sender { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700;
-letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; opacity: .5; }
-.chat-text   { line-height: 1.55; white-space: pre-wrap; }
-.chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
-.chat-textarea { flex: 1; background: var(--bg-input); border: 1px solid var(--border);
-border-radius: 4px; color: var(--text); font-family: inherit; font-size: 13px;
-padding: 8px 10px; resize: none; min-height: 40px; max-height: 120px; line-height: 1.4; }
-.chat-textarea::placeholder { color: var(--text-dim); }
-.chat-textarea:focus { outline: none; border-color: var(--accent); }
-.chat-send { background: var(--accent); border: none; color: var(--accent-contrast); border-radius: 4px;
-height: 36px; padding: 0 16px; display: flex; align-items: center; justify-content: center;
-flex-shrink: 0; font-size: 13px; font-weight: 800; text-transform: uppercase; }
-.chat-send:hover:not(:disabled) { background: var(--accent-hover); }
-.chat-send:disabled { opacity: .4; cursor: not-allowed; }
-/* ── Dialog ── */
-dialog { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
-color: var(--text); padding: 20px; width: 480px; max-width: 90vw; font-family: inherit;
-box-shadow: 0 20px 50px rgba(0,0,0,.5); }
-[data-theme="light"] dialog { box-shadow: 0 20px 50px rgba(0,0,0,.18); }
-dialog::backdrop { background: rgba(0,0,0,.6); }
-dialog h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900;
-letter-spacing: .05em; text-transform: uppercase; margin-bottom: 6px; color: var(--text); }
-dialog p.desc { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
-.dialog-textarea { width: 100%; background: var(--bg-input); border: 1px solid var(--border);
-border-radius: 4px; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px;
-padding: 8px 10px; resize: vertical; min-height: 180px; }
-.dialog-textarea:focus { outline: none; border-color: var(--accent); }
-.dialog-error   { font-size: 11px; color: var(--bad); margin-top: 6px; min-height: 16px; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-/* ── Empties ── */
-.empty-state { text-align: center; padding: 48px 0; color: var(--text-dim); font-size: 13px; }
-.empty-state p + p { margin-top: 4px; font-size: 11px; color: var(--text-dim); opacity: .6; }
-.no-issues { text-align: center; padding: 48px 0; font-size: 13px; color: var(--ok); opacity: .6; }
-/* ── Player notes ── */
-.player-notes { font-size: 12px; color: var(--text-dim); font-style: italic;
-border-top: 1px solid var(--border-sub); padding-top: 10px; margin-top: -4px; }
-/* ── Location bar ── */
-.loc-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
-.loc-sep  { color: var(--text-dim); padding: 0 2px; font-size: 13px; }
-.loc-btn  { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
-border-radius: 3px; padding: 3px 12px; height: 28px;
-font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
-letter-spacing: .05em; text-transform: uppercase; cursor: pointer; transition: background .12s, color .12s; }
-.loc-btn:hover:not(.active) { background: var(--border); color: var(--text); }
-.loc-btn.active { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); font-weight: 800; }
-/* ── Science location chips ── */
-.sci-loc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.sci-loc-chip  { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
-color: var(--text-dim); background: var(--bg-input);
-border: 1px solid var(--border-sub); border-radius: 2px; padding: 1px 5px;
-white-space: nowrap; }
-/* ── Narrow screens ── */
-@media (max-width: 720px) {
-.science-grid.cols-2 { grid-template-columns: 1fr; }
-.research-grid       { grid-template-columns: 1fr; }
-.step-io-grid        { grid-template-columns: 1fr; }
-}
-</style>
-</head>
-<body>
-<div id="app"></div>
-<dialog id="export-dialog">
-<h3>Export Factory State</h3>
-<p class="desc">Copy this code to share your factory or import it in another session.</p>
-<textarea class="dialog-textarea" id="export-text" readonly rows="6"></textarea>
-<div class="dialog-actions">
-<button class="btn-cancel" id="export-close">Close</button>
-<button class="btn-primary" id="export-copy">Copy</button>
-</div>
-</dialog>
-<dialog id="import-dialog">
-<h3>Import Factory State</h3>
-<p class="desc">Paste the exported code from another session below.</p>
-<textarea class="dialog-textarea" id="import-text" placeholder="Paste exported code here…" rows="6"></textarea>
-<p class="dialog-error" id="import-error"></p>
-<div class="dialog-actions">
-<button class="btn-cancel" id="import-cancel">Cancel</button>
-<button class="btn-primary" id="import-apply">Apply</button>
-</div>
-</dialog>
-<script>
-// ── Encode / Decode ─────────────────────────────────────────────────────────
-function encodeState(state) {
-const json = JSON.stringify(state);
-const bytes = new TextEncoder().encode(json);
-const binary = Array.from(bytes, b => String.fromCharCode(b)).join('');
-return btoa(binary);
-}
-function decodeState(value) {
-try {
-const binary = atob(value.trim());
-const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-return JSON.parse(new TextDecoder().decode(bytes));
-} catch {
-return JSON.parse(value); // backward compat: plain JSON
-}
-}
+<!doctype html><html lang=en><meta charset=UTF-8><meta content="width=device-width,initial-scale=1.0" name=viewport><title>10x Factorio Engineer</title><link href=https://fonts.googleapis.com rel=preconnect><link crossorigin href=https://fonts.gstatic.com rel=preconnect><link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel=stylesheet><style>*,:before,:after{box-sizing:border-box;margin:0;padding:0}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}:root{--bg:#100f09;--bg-card:#1c1a11;--bg-input:#252318;--border:#342f1c;--border-sub:#28241a;--text:#ece7d2;--text-muted:#8a7f64;--text-dim:#6e6450;--accent:#f59e0b;--accent-hover:#fbbf24;--accent-contrast:#1c1508;--ok:#4ade80;--ok-bg:#4ade8012;--ok-border:#4ade8033;--warn:#fbbf24;--warn-bg:#fbbf2417;--warn-border:#fbbf2440;--bad:#f87171;--bad-bg:#f8717117;--bad-border:#f8717140;font-family:Barlow Condensed,system-ui,sans-serif}[data-theme=light]{--bg:#faf9f2;--bg-card:#fffcf0;--bg-input:#e6dcc0;--border:#d4c89e;--border-sub:#ebe2c6;--text:#1c1608;--text-muted:#6b5f42;--text-dim:#6b5e40;--accent:#b45309;--accent-hover:#92400e;--accent-contrast:#fff8eb;--ok:#16a34a;--ok-bg:#16a34a1a;--ok-border:#16a34a4d;--warn:#d97706;--warn-bg:#d977061a;--warn-border:#d977064d;--bad:#dc2626;--bad-bg:#dc26261a;--bad-border:#dc262647}@media (prefers-color-scheme:light){:root:not([data-theme]){--bg:#faf9f2;--bg-card:#fffcf0;--bg-input:#e6dcc0;--border:#d4c89e;--border-sub:#ebe2c6;--text:#1c1608;--text-muted:#6b5f42;--text-dim:#6b5e40;--accent:#b45309;--accent-hover:#92400e;--accent-contrast:#fff8eb;--ok:#16a34a;--ok-bg:#16a34a1a;--ok-border:#16a34a4d;--warn:#d97706;--warn-bg:#d977061a;--warn-border:#d977064d;--bad:#dc2626;--bad-bg:#dc26261a;--bad-border:#dc262647}}body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;overflow-y:scroll}.header{border-bottom:1px solid var(--border-sub);background:var(--bg-card);padding:10px 16px}.header-inner{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;max-width:1280px;margin-inline:auto;display:flex}.header-left{flex-direction:column;gap:2px;display:flex}.header-title-row{align-items:center;gap:8px;display:flex}.header-title{color:var(--accent);letter-spacing:.06em;text-transform:uppercase;font-family:Barlow Condensed,sans-serif;font-size:17px;font-weight:900}.header-save{color:var(--text-muted);font-family:JetBrains Mono,monospace;font-size:12px}.header-right{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.main{padding:16px}.main-inner{max-width:1280px;margin-inline:auto}.storage-pill{letter-spacing:.02em;border:1px solid;border-radius:3px;align-items:center;height:28px;padding:0 8px;font-family:JetBrains Mono,monospace;font-size:10px;line-height:1;display:inline-flex}.storage-pill.cloud{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-border)}.storage-pill.local{color:var(--text-muted);border-color:var(--border);background:0 0}.storage-pill.none{background:var(--bad-bg);color:var(--bad);border-color:var(--bad-border)}.badges{flex-wrap:wrap;gap:4px;display:flex}.badge{letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:1px 7px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700}.badge.purple{color:#c084fc;background:#581c8726;border-color:#8b5cf666}button{cursor:pointer;letter-spacing:.05em;border:none;align-items:center;gap:4px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;transition:background .15s,color .15s;display:inline-flex}.btn-group{gap:4px;display:flex}.btn{background:var(--bg-input);border:1px solid var(--border);color:var(--text-muted);text-transform:uppercase;border-radius:3px;height:28px;padding:3px 10px}.btn:hover{background:var(--border);color:var(--text)}.btn-ghost{color:var(--text-dim);background:0 0;border:none;border-radius:3px;height:28px;padding:3px 8px}.btn-ghost:hover{background:var(--bg-input);color:var(--text)}.btn-ghost.danger{text-transform:uppercase}.btn-ghost.danger:hover{background:var(--bad-bg);color:var(--bad)}.btn-primary{background:var(--accent);color:var(--accent-contrast);text-transform:uppercase;border:none;border-radius:3px;padding:4px 16px;font-weight:900}.btn-primary:hover{background:var(--accent-hover)}.btn-primary:disabled{opacity:.4;cursor:not-allowed}.btn-cancel{color:var(--text-muted);text-transform:uppercase;background:0 0;border:none;border-radius:3px;padding:4px 12px}.btn-cancel:hover{background:var(--bg-input)}.section-label{text-transform:uppercase;letter-spacing:.1em;color:var(--text-dim);margin-bottom:10px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700}.group-label{text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);border-bottom:1px solid var(--border-sub);margin-bottom:10px;padding-bottom:6px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700}.science-section{background:var(--bg-card);border:1px solid var(--border-sub);border-left:3px solid var(--accent);border-radius:4px;margin-bottom:10px;padding:14px 16px}.loc-divider{border:none;border-top:1px solid var(--border-sub);margin:0 0 10px}.science-header{cursor:pointer;user-select:none;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);border-bottom:none;justify-content:space-between;align-items:center;margin-bottom:0;padding-bottom:0;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;display:flex}.science-header.open{border-bottom:1px solid var(--border-sub);margin-bottom:10px;padding-bottom:6px}.science-header-main{align-items:center;gap:8px;display:flex}.science-summary{letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700}.science-grid.cols-2{grid-template-columns:1fr 1fr;gap:0 24px;display:grid}.science-bar{margin-bottom:12px}.science-bar:last-child{margin-bottom:0}.science-bar-header{justify-content:space-between;align-items:center;margin-bottom:6px;display:flex}.science-name{letter-spacing:.02em;color:var(--text);align-items:center;gap:8px;font-family:Barlow Condensed,sans-serif;font-size:14px;font-weight:700;display:flex}.sci-swatch{border-radius:2px;flex-shrink:0;width:10px;height:10px}.science-meta{align-items:center;gap:12px;display:flex}.rate-text{color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:JetBrains Mono,monospace;font-size:11px}.pct-text{font-variant-numeric:tabular-nums;text-align:right;width:36px;font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700}:root{--bar-primary:10px;--bar-unit:4px}.progress-track{height:var(--bar-primary);background:var(--bg-input);border-radius:3px;overflow:hidden}.progress-fill{border-radius:3px;height:100%;transition:width .5s}.research-section{background:var(--bg-card);border:1px solid var(--border-sub);border-left:3px solid var(--accent);border-radius:4px;margin-bottom:10px;padding:10px 16px}.research-header{cursor:pointer;user-select:none;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);justify-content:space-between;align-items:center;margin-bottom:0;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;display:flex}.research-header-main{align-items:center;gap:8px;display:flex}.research-chevron{color:var(--text-dim);font-size:10px}.research-count-pill{color:var(--text-dim);background:var(--bg-input);letter-spacing:0;text-transform:none;border-radius:3px;padding:1px 7px;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:500}.research-body{border-top:1px solid var(--border-sub);margin-top:10px;padding-top:10px}.research-grid{grid-template-columns:1fr 1fr;gap:6px 16px;display:grid}.research-row{justify-content:space-between;align-items:center;gap:8px;display:flex}.research-label{color:var(--text);letter-spacing:.02em;font-family:Barlow Condensed,sans-serif;font-size:13px}.research-input{text-align:right;background:var(--bg-input);border:1px solid var(--border);width:58px;color:var(--text);border-radius:3px;height:24px;padding:2px 6px;font-family:JetBrains Mono,monospace;font-size:12px}.research-input:focus{border-color:var(--accent);outline:none}.research-subgroup-label{text-transform:uppercase;letter-spacing:.12em;color:var(--text-dim);grid-column:1/-1;margin-top:4px;font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:800}.lab-research{border-top:1px solid var(--border-sub);margin-top:10px;padding-top:10px}.lab-research .research-section{background:0 0;border:none;border-radius:0;margin-bottom:0;padding:0}.card-chip{text-transform:uppercase;letter-spacing:.05em;border:1px solid;border-radius:3px;align-items:center;padding:1px 6px;font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:700;display:inline-flex}.card-chip.stale,.card-chip.capped{color:var(--warn);border-color:var(--warn-border);background:var(--warn-bg)}.bottleneck-banner{background:var(--bad-bg);border:1px solid var(--bad-border);border-left:3px solid var(--bad);cursor:pointer;user-select:none;border-radius:4px;justify-content:space-between;align-items:center;gap:8px;margin-bottom:16px;padding:10px 16px;display:flex}.bottleneck-banner:hover{background:var(--bad-border)}.bottleneck-title{letter-spacing:.05em;text-transform:uppercase;color:var(--bad);font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800}.bottleneck-go{letter-spacing:.05em;text-transform:uppercase;color:var(--bad);opacity:.7;font-family:Barlow Condensed,sans-serif;font-size:12px;font-weight:700}.tab-list{background:var(--bg-card);border:1px solid var(--border-sub);border-radius:4px;flex-wrap:wrap;gap:2px;margin-bottom:16px;padding:2px;display:flex}.tab-btn{color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;background:0 0;border:none;border-radius:3px;height:28px;padding:4px 14px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700}.tab-btn.active{background:var(--accent);color:var(--accent-contrast)}.tab-btn:hover:not(.active){background:var(--bg-input)}.tab-panel{display:none}.tab-panel.active{display:block}.spm-headline{align-items:baseline;gap:8px;margin-bottom:14px;display:flex}.spm-number{font-variant-numeric:tabular-nums;font-family:JetBrains Mono,monospace;font-size:32px;font-weight:700;line-height:1}.spm-target{font-variant-numeric:tabular-nums;color:var(--text-muted);font-family:JetBrains Mono,monospace;font-size:20px;font-weight:500;line-height:1}.spm-sep{color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:24px;line-height:1}.spm-label{letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900}.spm-arrow{color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:18px;line-height:1}.spm-espm{font-variant-numeric:tabular-nums;color:var(--accent);font-family:JetBrains Mono,monospace;font-size:24px;font-weight:700;line-height:1}.spm-limiter{letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);align-self:center;margin-left:4px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700}.lab-card{background:var(--bg-input);border:1px solid var(--border-sub);border-radius:4px;margin-top:12px;padding:10px 12px}.lab-card-head{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;display:flex}.lab-card-title{text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:800}.lab-card-count{color:var(--text);font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700}.lab-config-row{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px;margin-bottom:10px;display:flex}.lab-config-summary{color:var(--text-muted);font-family:JetBrains Mono,monospace;font-size:11px}.lab-stats{flex-wrap:wrap;gap:8px 16px;display:flex}.lab-stat{flex-direction:column;gap:1px;display:flex}.lab-stat-k{text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:700}.lab-stat-v{color:var(--text);font-variant-numeric:tabular-nums;font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700}.lab-ctl{align-items:center;gap:5px;display:flex}.lab-ctl-l{text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700}.lab-select{background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:3px;height:24px;padding:2px 5px;font-family:JetBrains Mono,monospace;font-size:11px}.lab-select:focus{border-color:var(--accent);outline:none}.overview-section{margin-bottom:16px}.overview-rollup{flex-wrap:wrap;align-items:baseline;gap:12px;margin-bottom:10px;display:flex}.rollup-stat{font-variant-numeric:tabular-nums;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700}.overview-link{color:var(--text-dim);letter-spacing:.06em;text-transform:uppercase;cursor:pointer;background:0 0;border:none;padding:0;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700}.overview-link:hover{color:var(--text)}.bus-section{margin-bottom:16px}.bus-group{margin-bottom:12px}.bus-group:last-child{margin-bottom:0}.bus-group-label{text-transform:uppercase;letter-spacing:.12em;margin-bottom:7px;padding-left:2px;font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:800}.bus-group-label--belt{color:var(--accent);border-bottom:1px solid var(--border-sub);padding-bottom:4px}.bus-group-label--pipe{color:#5b9fd4;border-bottom:1px solid var(--border-sub);padding-bottom:4px}.bus-group-label--logi{color:#4aa896;border-bottom:1px solid var(--border-sub);padding-bottom:4px}.bus-grid{grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:6px;display:grid}.bus-row{border:1px solid var(--border-sub);border-left:3px solid var(--ok);background:var(--bg-card);cursor:default;border-radius:4px;padding:7px 9px 8px;transition:border-color .15s}.bus-row--warn{border-left-color:var(--warn)}.bus-row--bad{border-left-color:var(--bad)}.bus-row:hover{border-color:var(--border)}.bus-row-top{justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;display:flex}.bus-name{letter-spacing:.02em;white-space:nowrap;text-overflow:ellipsis;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;overflow:hidden}.bus-net{font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700}.bus-net-unit{letter-spacing:.06em;text-transform:uppercase;opacity:.5;margin-left:3px;font-family:Barlow Condensed,sans-serif;font-size:9px;font-weight:800}.bus-row-bot{align-items:center;gap:8px;display:flex}.bus-bar-track{height:var(--bar-unit);background:var(--bg-input);border-radius:3px;flex:1;overflow:hidden}.bus-bar-consumed{border-radius:3px;height:100%;transition:width .4s,background .4s}.bus-loadpct{font-variant-numeric:tabular-nums;text-align:right;min-width:30px;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700}.empty-state code{background:var(--bg-input);border:1px solid var(--border-sub);color:var(--text-muted);border-radius:2px;padding:0 4px;font-family:JetBrains Mono,monospace;font-size:11px}.line-card{background:var(--bg-card);border:1px solid;border-radius:4px;max-width:640px;margin-bottom:8px;overflow:hidden}.line-card.ok{border-color:var(--ok-border);border-left:3px solid var(--ok)}.line-card.warn{border-color:var(--warn-border);border-left:3px solid var(--warn)}.line-card.bad{border-color:var(--bad-border);border-left:3px solid var(--bad)}.line-card.wip{border-color:var(--warn-border);border-left:3px dashed var(--warn)}.line-card.wip .card-header{opacity:.75}.wip-badge{letter-spacing:.08em;color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn-border);vertical-align:middle;border-radius:3px;flex-shrink:0;align-items:center;margin-left:5px;padding:1px 5px;font-family:Barlow Condensed,sans-serif;font-size:9px;font-weight:700;display:inline-flex}.card-header{cursor:pointer;user-select:none;background:var(--bg-card);justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;transition:background .12s;display:flex}.card-header:hover{background:var(--bg-input)}.card-header-left{align-items:center;gap:10px;min-width:0;display:flex}.card-title-group{flex-direction:column;gap:1px;min-width:0;display:flex}.card-subtitle{text-transform:uppercase;letter-spacing:.1em;color:var(--text-dim);font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:600}.card-chevron{color:var(--text-muted);width:14px;font-size:12px;transition:transform .15s}.card-header:hover .card-chevron{color:var(--text)}.card-title{letter-spacing:.02em;color:var(--text);font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700}.card-header-rate{flex-direction:column;flex-shrink:0;align-items:flex-end;gap:1px;display:flex}.line-filter{margin-bottom:4px}.line-filter-input{box-sizing:border-box;background:var(--bg-input);border:1px solid var(--border);width:100%;max-width:280px;color:var(--text);letter-spacing:.02em;border-radius:4px;padding:6px 10px;font-family:Barlow Condensed,sans-serif;font-size:14px}.line-filter-input:focus{border-color:var(--accent);outline:none}.line-filter-input::placeholder{color:var(--text-dim)}.line-filter-empty{color:var(--text-dim);letter-spacing:.04em;margin-top:10px;font-family:Barlow Condensed,sans-serif;font-size:13px}.lines-toolbar{flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px;display:flex}.lines-toolbar .line-filter{flex:220px;min-width:180px;max-width:320px;margin-bottom:0}.lines-toolbar .line-filter-input{max-width:none}.lines-filter-chips{flex-wrap:wrap;gap:4px;display:flex}.filter-chip{background:var(--bg-input);border:1px solid var(--border);color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;cursor:pointer;border-radius:3px;align-items:center;gap:5px;height:30px;padding:3px 9px;font-family:Barlow Condensed,sans-serif;font-size:12px;font-weight:700;transition:background .12s,color .12s,border-color .12s;display:inline-flex}.filter-chip:hover:not(.active){background:var(--border);color:var(--text)}.filter-chip.active{background:var(--accent);color:var(--accent-contrast);border-color:var(--accent)}.filter-chip-count{color:var(--text-dim);letter-spacing:0;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:500}.filter-chip.active .filter-chip-count{color:var(--accent-contrast);opacity:.85}.lines-count{color:var(--text-dim);white-space:nowrap;margin-left:auto;font-family:JetBrains Mono,monospace;font-size:11px}.lines-group-header{z-index:2;background:var(--bg);justify-content:space-between;align-items:baseline;gap:8px;margin:12px 0 8px;padding:4px 0;display:flex;position:sticky;top:0}.line-group:first-child .lines-group-header{margin-top:0}.lines-group-header .group-label{flex:1;margin:0;padding-bottom:4px}.lines-group-count{color:var(--text-dim);letter-spacing:0;border-bottom:1px solid var(--border-sub);padding-bottom:4px;font-family:JetBrains Mono,monospace;font-size:10px}.chip-tag{text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin-right:5px;font-size:9px;font-weight:700;display:inline-block}.rate-num{color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:JetBrains Mono,monospace;font-size:12px}.rate-unit{color:var(--text-dim);font-variant-numeric:tabular-nums;font-family:JetBrains Mono,monospace;font-size:11px}.item-label{text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:600}.power-overview{align-items:baseline;gap:8px;margin-top:2px;padding:2px;display:flex}.power-overview-label{text-transform:uppercase;letter-spacing:.08em;color:#c8a840;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700}.power-overview-values{align-items:baseline;gap:6px;display:flex}.power-exact{color:var(--text);font-family:JetBrains Mono,monospace;font-size:13px;font-weight:600}.power-ceil-note{color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:11px}.ext-link{color:var(--text-dim);font-size:11px;line-height:1;text-decoration:none}.ext-link:hover{color:var(--text-muted)}.card-progress{height:var(--bar-unit);background:var(--bg-input)}.card-progress-fill{height:100%;transition:width .5s}.card-body{padding:14px 16px}.card-section{margin-bottom:16px}.card-section:last-child{margin-bottom:0}table{border-collapse:collapse;width:100%;font-size:12px}thead{background:var(--bg-card);z-index:1;position:sticky;top:0}thead tr{border-bottom:1px solid var(--border-sub)}th{text-align:left;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);padding-bottom:6px;padding-right:16px;font-family:Barlow Condensed,sans-serif;font-size:11px;font-weight:700}th.r,td.r{text-align:right}th:last-child,td:last-child{padding-right:0}tbody tr{border-top:1px solid var(--border-sub)}tbody tr.step-io-row{border-top:none}td{color:var(--text-muted);padding:6px 16px 6px 0;font-family:JetBrains Mono,monospace;font-size:11px}td.name-col{color:var(--text);font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:600}.step-io-grid{background:var(--bg-input);border:1px solid var(--border);border-top:none;border-radius:0 0 3px 3px;grid-template-columns:1fr 1fr;gap:0 12px;margin-bottom:2px;padding:5px 8px 8px;display:grid}.step-io-col{padding:4px 0 2px 8px}.step-io-col--in{border-left:2px solid #5b9fd4}.step-io-col--out{border-left:2px solid var(--ok)}.step-io-sect-label{letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px;font-family:Barlow Condensed,sans-serif;font-size:9px;font-weight:800}.step-io-col--in .step-io-sect-label{color:#5b9fd4;opacity:.7}.step-io-col--out .step-io-sect-label{color:var(--ok);opacity:.7}.step-io-item{justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:2px;display:flex}.step-io-item:last-child{margin-bottom:0}.step-io-name{white-space:nowrap;font-family:Barlow Condensed,sans-serif;font-size:12px;font-weight:600}.step-io-col--in .step-io-name{color:#5b9fd4}.step-io-col--out .step-io-name{color:var(--ok)}.step-io-rate{color:var(--text-dim);white-space:nowrap;flex-shrink:0;font-family:JetBrains Mono,monospace;font-size:11px}.chips{flex-wrap:wrap;gap:6px;display:flex}.chip{background:var(--bg-input);border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:3px 8px;font-family:JetBrains Mono,monospace;font-size:11px}.mod-chip{white-space:nowrap;vertical-align:middle;border:1px solid;border-radius:2px;align-items:center;gap:1px;padding:1px 4px;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;line-height:1.6;display:inline-flex}.mod-chip.type-prod{color:#d06020;background:#d25a1e17;border-color:#d25a1e59}.mod-chip.type-speed{color:#3a9fd4;background:#1e82d217;border-color:#1e82d259}.mod-chip.type-eff{color:#50b850;background:#3cb43c14;border-color:#3cb43c4d}.bcn-chip{color:#94a3b8;white-space:nowrap;vertical-align:middle;background:#94a3b81a;border:1px solid #94a3b84d;border-radius:2px;align-items:center;gap:1px;padding:1px 4px;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;line-height:1.6;display:inline-flex}.qdot{vertical-align:middle;text-indent:-9999px;width:4px;height:4px;color:var(--text-dim);background:currentColor;margin:0 0 .15em .3em;display:inline-block;overflow:hidden;transform:rotate(45deg)}.qdot.q-uncommon{color:#6dff6d}.qdot.q-rare{color:#6da8ff}.qdot.q-epic{color:#c87dff}.qdot.q-legendary{color:#ffb347}.bcn-chip .qdot,.mod-chip .qdot,td.name-col .qdot{width:5px;height:5px}.bcn-sep{margin:0 3px}.issue-item{background:var(--bg-card);border:1px solid var(--border-sub);border-left:3px solid var(--accent);color:var(--text-muted);border-radius:4px;align-items:flex-start;gap:8px;margin-bottom:8px;padding:10px 12px;font-size:13px;display:flex}.issue-item:last-child{margin-bottom:0}.issue-item.bad{background:var(--bad-bg);border:1px solid var(--bad-border);border-left:3px solid var(--bad);color:var(--bad)}.issue-item.good{background:var(--ok-bg);border:1px solid var(--ok-border);border-left:3px solid var(--ok);color:var(--text-muted)}.chat-warning{background:var(--warn-bg);border:1px solid var(--warn-border);border-left:3px solid var(--warn);color:var(--warn);border-radius:4px;margin-bottom:12px;padding:8px 12px;font-size:11px}.chat-messages{flex-direction:column;gap:10px;max-height:380px;margin-bottom:12px;display:flex;overflow-y:auto}.chat-empty{text-align:center;color:var(--text-dim);padding:32px 0;font-size:13px}.chat-msg{display:flex}.chat-msg.player{justify-content:flex-end}.chat-bubble{border-radius:4px;max-width:85%;padding:8px 12px;font-size:13px}.chat-bubble.player{background:var(--warn-bg);border:1px solid var(--warn-border);border-left:3px solid var(--accent);color:var(--text)}.chat-bubble.claude{background:var(--bg-input);border:1px solid var(--border);color:var(--text-muted)}.chat-sender{letter-spacing:.08em;text-transform:uppercase;opacity:.5;margin-bottom:4px;font-family:Barlow Condensed,sans-serif;font-size:10px;font-weight:700}.chat-text{white-space:pre-wrap;line-height:1.55}.chat-input-row{align-items:flex-end;gap:8px;display:flex}.chat-textarea{background:var(--bg-input);border:1px solid var(--border);color:var(--text);resize:none;border-radius:4px;flex:1;min-height:40px;max-height:120px;padding:8px 10px;font-family:inherit;font-size:13px;line-height:1.4}.chat-textarea::placeholder{color:var(--text-dim)}.chat-textarea:focus{border-color:var(--accent);outline:none}.chat-send{background:var(--accent);color:var(--accent-contrast);text-transform:uppercase;border:none;border-radius:4px;flex-shrink:0;justify-content:center;align-items:center;height:36px;padding:0 16px;font-size:13px;font-weight:800;display:flex}.chat-send:hover:not(:disabled){background:var(--accent-hover)}.chat-send:disabled{opacity:.4;cursor:not-allowed}dialog{background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:6px;width:480px;max-width:90vw;padding:20px;font-family:inherit;box-shadow:0 20px 50px #00000080}[data-theme=light] dialog{box-shadow:0 20px 50px #0000002e}dialog::backdrop{background:#0009}dialog h3{letter-spacing:.05em;text-transform:uppercase;color:var(--text);margin-bottom:6px;font-family:Barlow Condensed,sans-serif;font-size:18px;font-weight:900}dialog p.desc{color:var(--text-muted);margin-bottom:10px;font-size:12px}.dialog-textarea{background:var(--bg-input);border:1px solid var(--border);width:100%;color:var(--text);resize:vertical;border-radius:4px;min-height:180px;padding:8px 10px;font-family:JetBrains Mono,monospace;font-size:11px}.dialog-textarea:focus{border-color:var(--accent);outline:none}.dialog-error{color:var(--bad);min-height:16px;margin-top:6px;font-size:11px}.dialog-actions{justify-content:flex-end;gap:8px;margin-top:12px;display:flex}.empty-state{text-align:center;color:var(--text-dim);padding:48px 0;font-size:13px}.empty-state p+p{color:var(--text-dim);opacity:.6;margin-top:4px;font-size:11px}.no-issues{text-align:center;color:var(--ok);opacity:.6;padding:48px 0;font-size:13px}.player-notes{color:var(--text-dim);border-top:1px solid var(--border-sub);margin-top:-4px;padding-top:10px;font-size:12px;font-style:italic}.loc-bar{flex-wrap:wrap;align-items:center;gap:4px;margin-bottom:12px;display:flex}.loc-sep{color:var(--text-dim);padding:0 2px;font-size:13px}.loc-btn{background:var(--bg-input);border:1px solid var(--border);color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;cursor:pointer;border-radius:3px;height:28px;padding:3px 12px;font-family:Barlow Condensed,sans-serif;font-size:13px;font-weight:700;transition:background .12s,color .12s}.loc-btn:hover:not(.active){background:var(--border);color:var(--text)}.loc-btn.active{background:var(--accent);color:var(--accent-contrast);border-color:var(--accent);font-weight:800}.sci-loc-chips{flex-wrap:wrap;gap:4px;margin-top:4px;display:flex}.sci-loc-chip{color:var(--text-dim);background:var(--bg-input);border:1px solid var(--border-sub);white-space:nowrap;border-radius:2px;padding:1px 5px;font-family:JetBrains Mono,monospace;font-size:10px;font-weight:500}@media (width<=720px){.science-grid.cols-2,.research-grid,.step-io-grid{grid-template-columns:1fr}}</style><body><div id=app></div><dialog id=export-dialog><h3>Export Factory State</h3><p class=desc>Copy this code to share your factory or import it in another session.</p><textarea class=dialog-textarea id=export-text readonly rows=6></textarea><div class=dialog-actions><button class=btn-cancel id=export-close>Close</button><button class=btn-primary id=export-copy>Copy</button></div></dialog><dialog id=import-dialog><h3>Import Factory State</h3><p class=desc>Paste the exported code from another session below.</p><textarea placeholder="Paste exported code here…" class=dialog-textarea id=import-text rows=6></textarea><p class=dialog-error id=import-error><div class=dialog-actions><button class=btn-cancel id=import-cancel>Cancel</button><button class=btn-primary id=import-apply>Apply</button></div></dialog><script>// ── Encode / Decode ─────────────────────────────────────────────────────────
+function encodeState(state){let json=JSON.stringify(state),bytes=new TextEncoder().encode(json),binary=Array.from(bytes,b=>String.fromCharCode(b)).join(``);return btoa(binary)}function decodeState(value){try{let binary=atob(value.trim()),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));return JSON.parse(new TextDecoder().decode(bytes))}catch{return JSON.parse(value)}}
 // ── Constants ────────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'factorio_engineer_state';
-const PLANET_LABELS = { nauvis:'Nauvis', vulcanus:'Vulcanus', fulgora:'Fulgora', gleba:'Gleba', aquilo:'Aquilo' };
-function makeLocation(id, type, labelOverride) {
-const lbl = labelOverride ?? PLANET_LABELS[id] ?? id;
-return { id, type, label: lbl, lines: [], bus_items: [], targets: {}, bottlenecks: [], next_steps: [] };
-}
-const DEFAULT_STATE = {
-save_name: 'My Factory', dataset: 'vanilla', assembler: 3,
-furnace: 'electric', machine_quality: 'normal', beacon_quality: 'normal',
-module_configs: {}, beacon_configs: {}, recipe_overrides: {}, machine_overrides: {},
-research_levels: {},
-preferred_belt: 'blue',
-lab_config: {
-building: 'lab',            // 'lab' | 'biolab'
-quality: 'normal',
-module_type: 'prod',        // 'prod' | 'speed' | 'none'
-module_tier: 2,             // 1 | 2 | 3
-module_quality: 'normal',
-beacon: { count: 0, tier: 3, module_quality: 'normal', beacon_quality: 'normal' },
-research_cycle_time: 60,    // T seconds
-},
-locations: [makeLocation('nauvis', 'planet')],
-chat_log: [],
-};
-// Research-tech → recipe-list map; mirror of PRODUCTIVITY_RESEARCH in cli.py.
-// The empty recipe list for mining-productivity is intentional: it's a miner-
-// wide bonus, not a recipe-keyed bonus.  Used for UI labels, rendering, and
-// staleness detection on line cards.
-const PRODUCTIVITY_RESEARCH = {
-'mining-productivity':                { label: 'Mining Productivity', recipes: [],                                                                  sa: false },
-'steel-productivity':                 { label: 'Steel',               recipes: ['steel-plate', 'casting-steel'],                                    sa: true  },
-'low-density-structure-productivity': { label: 'Low-Density Structure', recipes: ['low-density-structure', 'casting-low-density-structure'],          sa: true  },
-'scrap-recycling-productivity':       { label: 'Scrap Recycling',     recipes: ['scrap-recycling'],                                                 sa: true  },
-'processing-unit-productivity':       { label: 'Processing Unit',     recipes: ['processing-unit'],                                                 sa: true  },
-'plastic-bar-productivity':           { label: 'Plastic Bar',         recipes: ['plastic-bar', 'bioplastic'],                                       sa: true  },
-'rocket-fuel-productivity':           { label: 'Rocket Fuel',         recipes: ['rocket-fuel', 'rocket-fuel-from-jelly', 'ammonia-rocket-fuel'],    sa: true  },
-'asteroid-productivity':              { label: 'Asteroid Crushing',   recipes: [
-'carbonic-asteroid-crushing', 'oxide-asteroid-crushing', 'metallic-asteroid-crushing',
-'advanced-carbonic-asteroid-crushing', 'advanced-oxide-asteroid-crushing', 'advanced-metallic-asteroid-crushing',
-], sa: true },
-'rocket-part-productivity':           { label: 'Rocket Part',         recipes: ['rocket-part'],                                                     sa: true  },
-};
-const SCIENCE_ORDER = [
-'automation-science-pack','logistic-science-pack','military-science-pack',
-'chemical-science-pack','production-science-pack','utility-science-pack',
-'space-science-pack','metallurgic-science-pack','agricultural-science-pack',
-'electromagnetic-science-pack','cryogenic-science-pack','promethium-science-pack',
-];
-// Official Factorio science pack colors (rgb). Edge cases adjusted:
-//   space (255,253,253→near-white), cryogenic (0,20,255→too-dark blue),
-//   promethium (30,26,78→near-black) — all shifted to visible mid-range values.
-const SCIENCE_COLORS = {
-'automation-science-pack':      [255,  0,  0],
-'logistic-science-pack':        [  0,255, 11],
-'military-science-pack':        [146,166,230],
-'chemical-science-pack':        [  0,230,255],
-'production-science-pack':      [168,  0,255],
-'utility-science-pack':         [255,226,  0],
-'space-science-pack':           [175,195,255],  // adjusted from near-white
-'metallurgic-science-pack':     [255,143,  0],
-'electromagnetic-science-pack': [255,  0,145],
-'agricultural-science-pack':    [210,255,  0],
-'cryogenic-science-pack':       [ 50,105,255],  // adjusted from near-black blue
-'promethium-science-pack':      [115, 95,215],  // adjusted from near-black
-};
+const STORAGE_KEY=`factorio_engineer_state`,PLANET_LABELS={nauvis:`Nauvis`,vulcanus:`Vulcanus`,fulgora:`Fulgora`,gleba:`Gleba`,aquilo:`Aquilo`};function makeLocation(id,type,labelOverride){return{id,type,label:labelOverride??PLANET_LABELS[id]??id,lines:[],bus_items:[],targets:{},bottlenecks:[],next_steps:[]}}const DEFAULT_STATE={save_name:`My Factory`,dataset:`vanilla`,assembler:3,furnace:`electric`,machine_quality:`normal`,beacon_quality:`normal`,module_configs:{},beacon_configs:{},recipe_overrides:{},machine_overrides:{},research_levels:{},preferred_belt:`blue`,lab_config:{building:`lab`,quality:`normal`,module_type:`prod`,module_tier:2,module_quality:`normal`,beacon:{count:0,tier:3,module_quality:`normal`,beacon_quality:`normal`},research_cycle_time:60},locations:[makeLocation(`nauvis`,`planet`)],chat_log:[]},PRODUCTIVITY_RESEARCH={"mining-productivity":{label:`Mining Productivity`,recipes:[],sa:!1},"steel-productivity":{label:`Steel`,recipes:[`steel-plate`,`casting-steel`],sa:!0},"low-density-structure-productivity":{label:`Low-Density Structure`,recipes:[`low-density-structure`,`casting-low-density-structure`],sa:!0},"scrap-recycling-productivity":{label:`Scrap Recycling`,recipes:[`scrap-recycling`],sa:!0},"processing-unit-productivity":{label:`Processing Unit`,recipes:[`processing-unit`],sa:!0},"plastic-bar-productivity":{label:`Plastic Bar`,recipes:[`plastic-bar`,`bioplastic`],sa:!0},"rocket-fuel-productivity":{label:`Rocket Fuel`,recipes:[`rocket-fuel`,`rocket-fuel-from-jelly`,`ammonia-rocket-fuel`],sa:!0},"asteroid-productivity":{label:`Asteroid Crushing`,recipes:[`carbonic-asteroid-crushing`,`oxide-asteroid-crushing`,`metallic-asteroid-crushing`,`advanced-carbonic-asteroid-crushing`,`advanced-oxide-asteroid-crushing`,`advanced-metallic-asteroid-crushing`],sa:!0},"rocket-part-productivity":{label:`Rocket Part`,recipes:[`rocket-part`],sa:!0}},SCIENCE_ORDER=[`automation-science-pack`,`logistic-science-pack`,`military-science-pack`,`chemical-science-pack`,`production-science-pack`,`utility-science-pack`,`space-science-pack`,`metallurgic-science-pack`,`agricultural-science-pack`,`electromagnetic-science-pack`,`cryogenic-science-pack`,`promethium-science-pack`],SCIENCE_COLORS={"automation-science-pack":[255,0,0],"logistic-science-pack":[0,255,11],"military-science-pack":[146,166,230],"chemical-science-pack":[0,230,255],"production-science-pack":[168,0,255],"utility-science-pack":[255,226,0],"space-science-pack":[175,195,255],"metallurgic-science-pack":[255,143,0],"electromagnetic-science-pack":[255,0,145],"agricultural-science-pack":[210,255,0],"cryogenic-science-pack":[50,105,255],"promethium-science-pack":[115,95,215]};
 // Pack identity is a color swatch only; bar fill carries status (no icons).
-function sciColor(name) {
-const [r,g,b] = SCIENCE_COLORS[name] || [128,128,128];
-return `rgb(${r},${g},${b})`;
-}
-const MACHINE_NAMES = {
-'assembling-machine-1':'Assembler 1','assembling-machine-2':'Assembler 2',
-'assembling-machine-3':'Assembler 3','stone-furnace':'Stone Furnace',
-'steel-furnace':'Steel Furnace','electric-furnace':'Electric Furnace',
-'chemical-plant':'Chemical Plant','oil-refinery':'Oil Refinery',
-'centrifuge':'Centrifuge','rocket-silo':'Rocket Silo',
-'electric-mining-drill':'Mining Drill','big-mining-drill':'Big Mining Drill',
-'pumpjack':'Pumpjack','offshore-pump':'Offshore Pump',
-'foundry':'Foundry','electromagnetic-plant':'Electromagnetic Plant',
-'cryogenic-plant':'Cryogenic Plant',
-'biochamber':'Biochamber','crusher':'Crusher',
-'agricultural-tower':'Agricultural Tower','captive-spawner':'Captive Spawner',
-};
-const BELT_COLORS = { yellow:'#d4a817', red:'#c84040', blue:'#4060c8', turbo:'#40c8b8' };
-const BELT_THROUGHPUT = { yellow: 900, red: 1800, blue: 2700, turbo: 3600 };
-const PUMP_THROUGHPUT = { normal: 72000, uncommon: 93600, rare: 115200, epic: 136800, legendary: 180000 };
-const FLUID_ITEM_IDS = new Set([
-'crude-oil','petroleum-gas','light-oil','heavy-oil','water','steam',
-'sulfuric-acid','lubricant','heavy-water','fluorine','ammonia',
-'holmium-solution','calcium-chloride','brine','lava',
-]);
-// ── Research-lab modelling (labs are not in the CLI dataset) ──────────────────
-// Base research speed by quality; biolab is ~2× a lab. From wiki Lab.md / Biolab.md.
-const LAB_BASE_SPEED = {
-lab:    { normal: 1, uncommon: 1.3, rare: 1.6, epic: 1.9, legendary: 2.5 },
-biolab: { normal: 2, uncommon: 2.6, rare: 3.2, epic: 3.8, legendary: 5   },
-};
-const LAB_SLOTS    = { lab: 2,  biolab: 4   };
-const LAB_POWER_KW = { lab: 60, biolab: 300 };
-const LAB_DRAIN    = { lab: 1,  biolab: 0.5 };   // biolab consumes half the packs per research
-// Lab research speed (research): finite 6 levels, non-uniform CUMULATIVE % bonus (index = level).
-const LAB_SPEED_CUM = [0, 20, 50, 90, 140, 190, 250];
-const QUALITY_TIERS = ['normal', 'uncommon', 'rare', 'epic', 'legendary'];
-// Module-effect tables — mirror cli.py.
-const MODULE_QUALITY_MULT   = { normal: 1, uncommon: 1.3, rare: 1.6, epic: 1.9, legendary: 2.5 };
-const MODULE_PROD_BONUS     = { 1: 0.04, 2: 0.06, 3: 0.10 };
-const PROD_MODULE_SPEED_PEN = { 1: -0.05, 2: -0.10, 3: -0.15 };
-const SPEED_MODULE_BONUS    = { 1: 0.20, 2: 0.30, 3: 0.50 };
-const BEACON_EFFECTIVITY    = { normal: 1.5, uncommon: 1.7, rare: 1.9, epic: 2.1, legendary: 2.5 };
-const BEACON_SLOTS = 2;
-// Lab-only research techs — kept OUT of PRODUCTIVITY_RESEARCH so the recipe-staleness
-// logic ignores them.  Stored as plain levels in STATE.research_levels.
-const LAB_RESEARCH = {
-'research-productivity': { label: 'Research Productivity', sa: true  },  // +10%/lvl, infinite
-'lab-research-speed':    { label: 'Lab Research Speed',    sa: false, max: 6 },
-};
-const SYSTEM_PROMPT = `You are a Factorio factory co-pilot embedded in a dashboard artifact.
+function sciColor(name){let[r,g,b]=SCIENCE_COLORS[name]||[128,128,128];return`rgb(${r},${g},${b})`}const MACHINE_NAMES={"assembling-machine-1":`Assembler 1`,"assembling-machine-2":`Assembler 2`,"assembling-machine-3":`Assembler 3`,"stone-furnace":`Stone Furnace`,"steel-furnace":`Steel Furnace`,"electric-furnace":`Electric Furnace`,"chemical-plant":`Chemical Plant`,"oil-refinery":`Oil Refinery`,centrifuge:`Centrifuge`,"rocket-silo":`Rocket Silo`,"electric-mining-drill":`Mining Drill`,"big-mining-drill":`Big Mining Drill`,pumpjack:`Pumpjack`,"offshore-pump":`Offshore Pump`,foundry:`Foundry`,"electromagnetic-plant":`Electromagnetic Plant`,"cryogenic-plant":`Cryogenic Plant`,biochamber:`Biochamber`,crusher:`Crusher`,"agricultural-tower":`Agricultural Tower`,"captive-spawner":`Captive Spawner`},BELT_COLORS={yellow:`#d4a817`,red:`#c84040`,blue:`#4060c8`,turbo:`#40c8b8`},BELT_THROUGHPUT={yellow:900,red:1800,blue:2700,turbo:3600},PUMP_THROUGHPUT={normal:72e3,uncommon:93600,rare:115200,epic:136800,legendary:18e4},FLUID_ITEM_IDS=new Set([`crude-oil`,`petroleum-gas`,`light-oil`,`heavy-oil`,`water`,`steam`,`sulfuric-acid`,`lubricant`,`heavy-water`,`fluorine`,`ammonia`,`holmium-solution`,`calcium-chloride`,`brine`,`lava`]),LAB_BASE_SPEED={lab:{normal:1,uncommon:1.3,rare:1.6,epic:1.9,legendary:2.5},biolab:{normal:2,uncommon:2.6,rare:3.2,epic:3.8,legendary:5}},LAB_SLOTS={lab:2,biolab:4},LAB_POWER_KW={lab:60,biolab:300},LAB_DRAIN={lab:1,biolab:.5},LAB_SPEED_CUM=[0,20,50,90,140,190,250],QUALITY_TIERS=[`normal`,`uncommon`,`rare`,`epic`,`legendary`],MODULE_QUALITY_MULT={normal:1,uncommon:1.3,rare:1.6,epic:1.9,legendary:2.5},MODULE_PROD_BONUS={1:.04,2:.06,3:.1},PROD_MODULE_SPEED_PEN={1:-.05,2:-.1,3:-.15},SPEED_MODULE_BONUS={1:.2,2:.3,3:.5},BEACON_EFFECTIVITY={normal:1.5,uncommon:1.7,rare:1.9,epic:2.1,legendary:2.5},BEACON_SLOTS=2,LAB_RESEARCH={"research-productivity":{label:`Research Productivity`,sa:!0},"lab-research-speed":{label:`Lab Research Speed`,sa:!1,max:6}},SYSTEM_PROMPT=`You are a Factorio factory co-pilot embedded in a dashboard artifact.
+
 IMPORTANT: If the player reports a factory change, output the COMPLETE updated FACTORY_STATE as a JSON block at the END of your response:
 \`\`\`json
 {...complete state...}
@@ -716,603 +13,191 @@ Rules: include ALL fields from current state, do NOT include "chat_log".
 If no state change, respond naturally with NO JSON block.
 Keep responses brief and practical.`;
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function label(id) {
-return id.replace(/-science-pack$/, ' Science').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-function machineLabel(id) { return MACHINE_NAMES[id] || label(id); }
-function humanizeText(text) {
-return String(text).replace(
-/\bAM[123]\b|assembling-machine-[123]|\b[a-z]+(?:-[a-z0-9]+)+/g,
-t => MACHINE_NAMES[t] || label(t),
-);
-}
-function pct(actual, target) {
-if (!target) return 100;
-return Math.min(100, Math.max(0, Math.round((actual / target) * 100)));
-}
-function statusClass(p) { return p >= 100 ? 'ok' : p >= 75 ? 'warn' : 'bad'; }
-function statusColor(p) { return p >= 100 ? 'var(--ok)' : p >= 75 ? 'var(--warn)' : 'var(--bad)'; }
-function sortedScienceKeys(keys) {
-return [...keys].sort((a, b) => {
-const ia = SCIENCE_ORDER.indexOf(a), ib = SCIENCE_ORDER.indexOf(b);
-if (ia === -1 && ib === -1) return a.localeCompare(b);
-if (ia === -1) return 1; if (ib === -1) return -1;
-return ia - ib;
-});
-}
-function esc(s) {
-return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function fmtN(n) {
-const v = Number.isInteger(n) ? n : +n.toFixed(1);
-return v.toLocaleString('en-US');
-}
-function fmtMC(n) {
-if (n == null) return '';
-if (Math.abs(n - Math.round(n)) < 1e-4) return Math.round(n).toLocaleString('en-US');
-return (+n.toFixed(2)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function fmtRB(rate, beltName) {
-const n = +rate;
-const tp = BELT_THROUGHPUT[beltName] ?? 1800;
-return `${fmtN(n)}/min <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} ${beltName} belt)</span>`;
-}
-function fmtFluid(rate) {
-const n = +rate;
-const tp = PUMP_THROUGHPUT[STATE.machine_quality] ?? 72000;
-return `${fmtN(n)}/min <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} pump)</span>`;
-}
-function fmtUnitOnly(rate, beltName) {
-const n = +rate;
-const tp = BELT_THROUGHPUT[beltName] ?? 1800;
-return `${(n/tp).toFixed(2)} ${beltName} belt`;
-}
-function fmtFluidUnitOnly(rate) {
-const n = +rate;
-const tp = PUMP_THROUGHPUT[STATE.machine_quality] ?? 72000;
-return `${(n/tp).toFixed(2)} pump`;
-}
-function fmtPower(kw) {
-if (kw == null || kw === 0) return null;
-if (kw < 1000) return `${+kw.toFixed(1)} kW`;
-return `${+(kw / 1000).toFixed(2)} MW`;
-}
-function fmtAgo(iso) {
-const t = Date.parse(iso);
-if (!Number.isFinite(t)) return null;
-const s = Math.max(0, (Date.now() - t) / 1000);
-if (s < 60)    return 'just now';
-if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
-if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-return `${Math.floor(s / 86400)}d ago`;
-}
-function summarizeCliArgs(args) {
-if (!args || typeof args !== 'object') return null;
-const parts = [];
-if (args.rate != null) parts.push(`${args.rate}/min`);
-else if (args.machines != null) parts.push(`${args.machines} machines`);
-else if (args.step_machines && typeof args.step_machines === 'object') {
-const s = Object.entries(args.step_machines)
-.map(([r, n]) => `${n}× ${label(r)}`).join(', ');
-if (s) parts.push(s);
-} else if (Array.isArray(args.targets) && args.targets.length) {
-parts.push(args.targets.map(t => `${label(t.item)} ${t.rate}/min`).join(' + '));
-}
-if (args.assembler != null) parts.push(`AM${args.assembler}`);
-if (args.machine_quality && args.machine_quality !== 'normal') parts.push(args.machine_quality);
-return parts.length ? parts.join(' · ') : null;
-}
-function modChip(m) {
-const abbr = {prod: 'P', speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
-const tCls = {prod: 'type-prod', speed: 'type-speed', efficiency: 'type-eff'}[m.type] ?? '';
-const qdot = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
-return `<span class="mod-chip ${tCls}"><span>${m.count}×${abbr}${m.tier}${qdot}</span></span>`;
-}
-function bcnChip(b, housingQ) {
-const houseDot = housingQ !== 'normal' ? `<span class="qdot q-${housingQ}">◆</span>` : '';
-const modsHtml = (b.modules ?? []).map(m => {
-const abbr = {speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
-const color = {speed: '#009FFF', efficiency: '#4CAF50'}[m.type] ?? '#aaa';
-const qdot  = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
-return `<span style="color:${color}">${m.count}×${abbr}${m.tier}${qdot}</span>`;
-}).join('');
-return `<span class="bcn-chip"><span>${b.count}×beacon${houseDot}</span><span class="bcn-sep">/</span><span style="display:inline-flex;align-items:center;gap:3px">${modsHtml}</span></span>`;
-}
+function label(id){return id.replace(/-science-pack$/,` Science`).replace(/-/g,` `).replace(/\b\w/g,c=>c.toUpperCase())}function machineLabel(id){return MACHINE_NAMES[id]||label(id)}function humanizeText(text){return String(text).replace(/\bAM[123]\b|assembling-machine-[123]|\b[a-z]+(?:-[a-z0-9]+)+/g,t=>MACHINE_NAMES[t]||label(t))}function pct(actual,target){return target?Math.min(100,Math.max(0,Math.round(actual/target*100))):100}function statusClass(p){return p>=100?`ok`:p>=75?`warn`:`bad`}function statusColor(p){return p>=100?`var(--ok)`:p>=75?`var(--warn)`:`var(--bad)`}function sortedScienceKeys(keys){return[...keys].sort((a,b)=>{let ia=SCIENCE_ORDER.indexOf(a),ib=SCIENCE_ORDER.indexOf(b);return ia===-1&&ib===-1?a.localeCompare(b):ia===-1?1:ib===-1?-1:ia-ib})}function esc(s){return String(s).replace(/&/g,`&amp;`).replace(/</g,`&lt;`).replace(/>/g,`&gt;`).replace(/"/g,`&quot;`)}function fmtN(n){return(Number.isInteger(n)?n:+n.toFixed(1)).toLocaleString(`en-US`)}function fmtMC(n){return n==null?``:Math.abs(n-Math.round(n))<1e-4?Math.round(n).toLocaleString(`en-US`):(+n.toFixed(2)).toLocaleString(`en-US`,{minimumFractionDigits:2,maximumFractionDigits:2})}function fmtRB(rate,beltName){let n=+rate,tp=BELT_THROUGHPUT[beltName]??1800;return`${fmtN(n)}/min <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} ${beltName} belt)</span>`}function fmtFluid(rate){let n=+rate,tp=PUMP_THROUGHPUT[STATE.machine_quality]??72e3;return`${fmtN(n)}/min <span style="color:var(--text-dim)">(${(n/tp).toFixed(2)} pump)</span>`}function fmtUnitOnly(rate,beltName){return`${(+rate/(BELT_THROUGHPUT[beltName]??1800)).toFixed(2)} ${beltName} belt`}function fmtFluidUnitOnly(rate){return`${(+rate/(PUMP_THROUGHPUT[STATE.machine_quality]??72e3)).toFixed(2)} pump`}function fmtPower(kw){return kw==null||kw===0?null:kw<1e3?`${+kw.toFixed(1)} kW`:`${+(kw/1e3).toFixed(2)} MW`}function fmtAgo(iso){let t=Date.parse(iso);if(!Number.isFinite(t))return null;let s=Math.max(0,(Date.now()-t)/1e3);return s<60?`just now`:s<3600?`${Math.floor(s/60)}m ago`:s<86400?`${Math.floor(s/3600)}h ago`:`${Math.floor(s/86400)}d ago`}function summarizeCliArgs(args){if(!args||typeof args!=`object`)return null;let parts=[];if(args.rate!=null)parts.push(`${args.rate}/min`);else if(args.machines!=null)parts.push(`${args.machines} machines`);else if(args.step_machines&&typeof args.step_machines==`object`){let s=Object.entries(args.step_machines).map(([r,n])=>`${n}× ${label(r)}`).join(`, `);s&&parts.push(s)}else Array.isArray(args.targets)&&args.targets.length&&parts.push(args.targets.map(t=>`${label(t.item)} ${t.rate}/min`).join(` + `));return args.assembler!=null&&parts.push(`AM${args.assembler}`),args.machine_quality&&args.machine_quality!==`normal`&&parts.push(args.machine_quality),parts.length?parts.join(` · `):null}function modChip(m){let abbr={prod:`P`,speed:`S`,efficiency:`E`}[m.type]??m.type[0].toUpperCase(),tCls={prod:`type-prod`,speed:`type-speed`,efficiency:`type-eff`}[m.type]??``,qdot=m.quality===`normal`?``:`<span class="qdot q-${m.quality}">◆</span>`;return`<span class="mod-chip ${tCls}"><span>${m.count}×${abbr}${m.tier}${qdot}</span></span>`}function bcnChip(b,housingQ){let houseDot=housingQ===`normal`?``:`<span class="qdot q-${housingQ}">◆</span>`,modsHtml=(b.modules??[]).map(m=>{let abbr={speed:`S`,efficiency:`E`}[m.type]??m.type[0].toUpperCase(),color={speed:`#009FFF`,efficiency:`#4CAF50`}[m.type]??`#aaa`,qdot=m.quality===`normal`?``:`<span class="qdot q-${m.quality}">◆</span>`;return`<span style="color:${color}">${m.count}×${abbr}${m.tier}${qdot}</span>`}).join(``);return`<span class="bcn-chip"><span>${b.count}×beacon${houseDot}</span><span class="bcn-sep">/</span><span style="display:inline-flex;align-items:center;gap:3px">${modsHtml}</span></span>`}
 // ── State ────────────────────────────────────────────────────────────────────
-let STATE = { ...DEFAULT_STATE };
-let activeTab = 'overview';
-let activeLocationIdx = 0;
-let expandedCards = new Set();
-let lineFilter = '';  // Lines-tab item filter (live, in-place; not persisted)
-let linesStatusFilter = 'all'; // 'all' | 'bad' | 'warn' | 'wip' | 'stale' | 'capped'
-let storageMode = 'checking';
-let chatSending = false;
-function currentLoc() {
-return STATE.locations?.[activeLocationIdx] ?? STATE.locations?.[0] ?? makeLocation('nauvis', 'planet');
-}
+let STATE={...DEFAULT_STATE},activeTab=`overview`,activeLocationIdx=0,expandedCards=/* @__PURE__ */ new Set,lineFilter=``,linesStatusFilter=`all`,storageMode=`checking`,chatSending=!1;function currentLoc(){return STATE.locations?.[activeLocationIdx]??STATE.locations?.[0]??makeLocation(`nauvis`,`planet`)}
 // ── Migration ─────────────────────────────────────────────────────────────────
-function migrateState(state) {
-// Ensure research_levels exists so older exported states don't crash the UI.
-if (!state.research_levels || typeof state.research_levels !== 'object') {
-state.research_levels = {};
-}
-if (state.locations) return state; // already new format
-const loc = makeLocation('nauvis', 'planet');
-loc.lines       = state.lines       ?? [];
-loc.bus_items   = state.bus_items   ?? [];
-loc.targets     = state.targets     ?? {};
-loc.bottlenecks = state.bottlenecks ?? [];
-loc.next_steps  = state.next_steps  ?? [];
-const migrated  = { ...state, locations: [loc] };
-delete migrated.location;
-delete migrated.lines;
-delete migrated.bus_items;
-delete migrated.targets;
-delete migrated.bottlenecks;
-delete migrated.next_steps;
-return migrated;
-}
+function migrateState(state){if((!state.research_levels||typeof state.research_levels!=`object`)&&(state.research_levels={}),state.locations)return state;let loc=makeLocation(`nauvis`,`planet`);loc.lines=state.lines??[],loc.bus_items=state.bus_items??[],loc.targets=state.targets??{},loc.bottlenecks=state.bottlenecks??[],loc.next_steps=state.next_steps??[];let migrated={...state,locations:[loc]};return delete migrated.location,delete migrated.lines,delete migrated.bus_items,delete migrated.targets,delete migrated.bottlenecks,delete migrated.next_steps,migrated}
 // ── Storage ──────────────────────────────────────────────────────────────────
-async function saveState() {
-STATE.updated_at = new Date().toISOString();
-const encoded = encodeState(STATE);
-try { await window.storage?.set(STORAGE_KEY, encoded); return; } catch {}
-try { localStorage.setItem(STORAGE_KEY, encoded); } catch {}
-}
-async function loadState() {
-try { const r = await window.storage?.get(STORAGE_KEY); if (r?.value) return migrateState(decodeState(r.value)); } catch {}
-try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return migrateState(decodeState(raw)); } catch {}
-return null;
-}
-async function checkStorage() {
-if (!window.storage) { storageMode = localStorage ? 'local' : 'none'; return; }
-try {
-await window.storage.set('__ping__', '1');
-await window.storage.delete('__ping__');
-storageMode = 'cloud';
-} catch { storageMode = localStorage ? 'local' : 'none'; }
-}
+async function saveState(){STATE.updated_at=(/* @__PURE__ */ new Date()).toISOString();let encoded=encodeState(STATE);try{await window.storage?.set(STORAGE_KEY,encoded);return}catch{}try{localStorage.setItem(STORAGE_KEY,encoded)}catch{}}async function loadState(){try{let r=await window.storage?.get(STORAGE_KEY);if(r?.value)return migrateState(decodeState(r.value))}catch{}try{let raw=localStorage.getItem(STORAGE_KEY);if(raw)return migrateState(decodeState(raw))}catch{}return null}async function checkStorage(){if(!window.storage){storageMode=localStorage?`local`:`none`;return}try{await window.storage.set(`__ping__`,`1`),await window.storage.delete(`__ping__`),storageMode=`cloud`}catch{storageMode=localStorage?`local`:`none`}}
 // ── Render ───────────────────────────────────────────────────────────────────
-function renderStoragePill() {
-const map = { checking:['','…'], cloud:['cloud','Cloud sync'], local:['local','Local only'], none:['none','No storage'] };
-const [cls, txt] = map[storageMode] || map.none;
-return `<span class="storage-pill ${cls}">${txt}</span>`;
-}
-function renderHeader() {
-const { save_name, dataset, updated_at } = STATE;
-const ago = updated_at ? fmtAgo(updated_at) : null;
+function renderStoragePill(){let map={checking:[``,`…`],cloud:[`cloud`,`Cloud sync`],local:[`local`,`Local only`],none:[`none`,`No storage`]},[cls,txt]=map[storageMode]||map.none;return`<span class="storage-pill ${cls}">${txt}</span>`}function renderHeader(){let{save_name,dataset,updated_at}=STATE,ago=updated_at?fmtAgo(updated_at):null;
 // Per-line configs make global setup badges misleading — only dataset + SPM here.
-return `
-<div class="header">
-<div class="header-inner">
-<div class="header-left">
-<div class="header-title-row">
-<span class="header-title">10x Factorio Engineer</span>
-</div>
-<div class="header-save">${esc(save_name)}${ago ? ` · updated ${ago}` : ''}</div>
-</div>
-<div class="header-right">
-<div class="badges">
-${dataset === 'space-age' ? '<span class="badge purple">Space Age</span>' : ''}
-${(() => {
-const targets = allSciTargets();
-const sciKeys = Object.keys(targets);
-if (!sciKeys.length) return '';
-const rates = allSciRates();
-const activeKeys = sciKeys.filter(k => !rates[k]?.allWip);
-const eff = activeKeys.length ? Math.min(...activeKeys.map(k => rates[k]?.total ?? 0)) : 0;
-return `<span class="badge">${Math.round(eff)} SPM</span>`;
-})()}
-</div>
-<div class="btn-group">
-<button class="btn" id="btn-export">Export</button>
-<button class="btn" id="btn-import">Import</button>
-<button class="btn" id="btn-theme" title="Toggle light/dark mode">${document.documentElement.getAttribute('data-theme') === 'light' ? 'Dark' : 'Light'}</button>
-${renderStoragePill()}
-<button class="btn-ghost danger" id="btn-reset" title="Reset all factory data">Reset</button>
-</div>
-</div>
-</div>
-</div>`;
-}
+return`
+    <div class="header">
+      <div class="header-inner">
+        <div class="header-left">
+          <div class="header-title-row">
+            <span class="header-title">10x Factorio Engineer</span>
+          </div>
+          <div class="header-save">${esc(save_name)}${ago?` · updated ${ago}`:``}</div>
+        </div>
+        <div class="header-right">
+          <div class="badges">
+            ${dataset===`space-age`?`<span class="badge purple">Space Age</span>`:``}
+            ${(()=>{let targets=allSciTargets(),sciKeys=Object.keys(targets);if(!sciKeys.length)return``;let rates=allSciRates(),activeKeys=sciKeys.filter(k=>!rates[k]?.allWip),eff=activeKeys.length?Math.min(...activeKeys.map(k=>rates[k]?.total??0)):0;return`<span class="badge">${Math.round(eff)} SPM</span>`})()}
+          </div>
+          <div class="btn-group">
+            <button class="btn" id="btn-export">Export</button>
+            <button class="btn" id="btn-import">Import</button>
+            <button class="btn" id="btn-theme" title="Toggle light/dark mode">${document.documentElement.getAttribute(`data-theme`)===`light`?`Dark`:`Light`}</button>
+            ${renderStoragePill()}
+            <button class="btn-ghost danger" id="btn-reset" title="Reset all factory data">Reset</button>
+          </div>
+        </div>
+      </div>
+    </div>`}
 // Aggregate science targets across all locations (max per pack)
-function allSciTargets() {
-const t = {};
-for (const loc of STATE.locations ?? [])
-for (const [k, v] of Object.entries(loc.targets ?? {}))
-t[k] = Math.max(t[k] ?? 0, v);
-return t;
-}
+function allSciTargets(){let t={};for(let loc of STATE.locations??[])for(let[k,v]of Object.entries(loc.targets??{}))t[k]=Math.max(t[k]??0,v);return t}
 // Aggregate science rates across all locations.
 // Returns { packId: { total, allWip, byLoc: [{label, rate}] } }
 // allWip is true when every contributing line has wip:true — used to exclude
 // in-progress lines from the SPM bottleneck headline.
-function allSciRates() {
-const targets = allSciTargets();
-const result = {};
-for (const loc of STATE.locations ?? []) {
-for (const line of loc.lines ?? []) {
-if (!(line.item in targets)) continue;
-const rate = line.effective_rate ?? line.target_rate ?? 0;
-if (!result[line.item]) result[line.item] = { total: 0, allWip: true, byLoc: [] };
-result[line.item].total += rate;
-if (!line.wip) result[line.item].allWip = false;
-const entry = result[line.item].byLoc.find(e => e.label === loc.label);
-if (entry) entry.rate += rate;
-else result[line.item].byLoc.push({ label: loc.label, rate });
-}
-}
-return result;
-}
+function allSciRates(){let targets=allSciTargets(),result={};for(let loc of STATE.locations??[])for(let line of loc.lines??[]){if(!(line.item in targets))continue;let rate=line.effective_rate??line.target_rate??0;result[line.item]||(result[line.item]={total:0,allWip:!0,byLoc:[]}),result[line.item].total+=rate,line.wip||(result[line.item].allWip=!1);let entry=result[line.item].byLoc.find(e=>e.label===loc.label);entry?entry.rate+=rate:result[line.item].byLoc.push({label:loc.label,rate})}return result}
 // Model how many labs are needed to consume `spm` science/min and the effective
 // research throughput (eSPM).  Speed (ERS) sets labs-needed; productivity sets eSPM.
 // See wiki Lab.md §Production requirements.  Pure — no DOM.
-function computeLabLine(spm) {
-const cfg      = STATE.lab_config ?? DEFAULT_STATE.lab_config;
-const building = cfg.building === 'biolab' ? 'biolab' : 'lab';
-const quality  = cfg.quality ?? 'normal';
-const slots    = LAB_SLOTS[building];
-const bls      = LAB_BASE_SPEED[building][quality] ?? 1;
-const drain    = LAB_DRAIN[building];
-const levels   = STATE.research_levels ?? {};
-// Module effects across all slots (one chosen type fills every slot).
-const qmult = MODULE_QUALITY_MULT[cfg.module_quality] ?? 1;
-let modProd = 0, modSpeed = 0;
-if (cfg.module_type === 'prod') {
-modProd  = slots * (MODULE_PROD_BONUS[cfg.module_tier] ?? 0) * qmult;
-modSpeed = slots * (PROD_MODULE_SPEED_PEN[cfg.module_tier] ?? 0);
-} else if (cfg.module_type === 'speed') {
-modSpeed = slots * (SPEED_MODULE_BONUS[cfg.module_tier] ?? 0) * qmult;
-}
+function computeLabLine(spm){let cfg=STATE.lab_config??DEFAULT_STATE.lab_config,building=cfg.building===`biolab`?`biolab`:`lab`,quality=cfg.quality??`normal`,slots=LAB_SLOTS[building],bls=LAB_BASE_SPEED[building][quality]??1,drain=LAB_DRAIN[building],levels=STATE.research_levels??{},qmult=MODULE_QUALITY_MULT[cfg.module_quality]??1,modProd=0,modSpeed=0;cfg.module_type===`prod`?(modProd=slots*(MODULE_PROD_BONUS[cfg.module_tier]??0)*qmult,modSpeed=slots*(PROD_MODULE_SPEED_PEN[cfg.module_tier]??0)):cfg.module_type===`speed`&&(modSpeed=slots*(SPEED_MODULE_BONUS[cfg.module_tier]??0)*qmult);
 // Beacons: speed only (2.0 beacons carry no productivity).
-const bc = cfg.beacon ?? {};
-let beaconSpeed = 0;
-if ((bc.count ?? 0) > 0) {
-beaconSpeed = (BEACON_EFFECTIVITY[bc.beacon_quality] ?? 1.5)
-* Math.sqrt(bc.count) * BEACON_SLOTS
-* (SPEED_MODULE_BONUS[bc.tier] ?? 0) * (MODULE_QUALITY_MULT[bc.module_quality] ?? 1);
-}
-const br  = (LAB_SPEED_CUM[Math.min(levels['lab-research-speed'] ?? 0, 6)] ?? 0) / 100;
-const mr  = modSpeed + beaconSpeed;
-const ers = (1 + br) * (1 + mr) * bls;
-const T   = Number(cfg.research_cycle_time) > 0 ? Number(cfg.research_cycle_time) : 60;
-const perLab     = 60 * ers * drain / T;          // packs/min consumed per lab
-const labsNeeded = perLab > 0 ? spm / perLab : 0;
-const researchProd = 0.10 * (levels['research-productivity'] ?? 0);
-const labProd      = modProd + researchProd;      // additive, uncapped
-const eSPM         = spm * (1 + labProd) / drain;
-const powerKw      = labsNeeded * LAB_POWER_KW[building];   // fractional, matches machine-count display
-return { building, quality, slots, bls, drain, ers, br, mr, beaconSpeed,
-modProd, modSpeed, labProd, researchProd, perLab, labsNeeded, eSPM,
-powerKw, T, moduleType: cfg.module_type ?? 'none', moduleTier: cfg.module_tier ?? 2 };
-}
+let bc=cfg.beacon??{},beaconSpeed=0;(bc.count??0)>0&&(beaconSpeed=(BEACON_EFFECTIVITY[bc.beacon_quality]??1.5)*Math.sqrt(bc.count)*2*(SPEED_MODULE_BONUS[bc.tier]??0)*(MODULE_QUALITY_MULT[bc.module_quality]??1));let br=(LAB_SPEED_CUM[Math.min(levels[`lab-research-speed`]??0,6)]??0)/100,mr=modSpeed+beaconSpeed,ers=(1+br)*(1+mr)*bls,T=Number(cfg.research_cycle_time)>0?Number(cfg.research_cycle_time):60,perLab=60*ers*drain/T,labsNeeded=perLab>0?spm/perLab:0,researchProd=.1*(levels[`research-productivity`]??0),labProd=modProd+researchProd,eSPM=spm*(1+labProd)/drain,powerKw=labsNeeded*LAB_POWER_KW[building];return{building,quality,slots,bls,drain,ers,br,mr,beaconSpeed,modProd,modSpeed,labProd,researchProd,perLab,labsNeeded,eSPM,powerKw,T,moduleType:cfg.module_type??`none`,moduleTier:cfg.module_tier??2}}
 // UI persistence: whether the Science Targets section is expanded.
 // Collapsed by default — only expanded if the user has previously opened it.
-let scienceOpen = localStorage.getItem('science_open') === '1';
-const ESPM_TITLE = 'Effective research throughput: SPM × (1 + lab productivity) ÷ pack drain (biolab consumes half the packs)';
-function renderScience() {
-const targets = allSciTargets();
-const keys = sortedScienceKeys(Object.keys(targets));
-if (!keys.length) return '';
-const rates = allSciRates();
-const activeKeys   = keys.filter(k => !rates[k]?.allWip);
-const effectiveSPM = activeKeys.length ? Math.min(...activeKeys.map(k => rates[k]?.total ?? 0)) : 0;
-const targetSPM    = Math.max(...keys.map(k => targets[k]));
-const spmPct = pct(effectiveSPM, targetSPM);
-const spmCol = statusColor(spmPct);
-// Lab line consumes actual production; fall back to the target when nothing is built yet.
-const sciSPM = effectiveSPM > 0 ? effectiveSPM : targetSPM;
-const lab = computeLabLine(sciSPM);
-const showESPM = lab.labProd > 0 || lab.drain !== 1;   // hide when eSPM == SPM (redundant)
-// Effective SPM = min across active packs; name the pack holding the headline down.
-const limiter = (spmPct < 100 && activeKeys.length > 1)
-? activeKeys.reduce((a, k) => ((rates[k]?.total ?? 0) < (rates[a]?.total ?? 0) ? k : a), activeKeys[0])
-: null;
-const headerRow = `
-<div class="science-header${scienceOpen ? ' open' : ''}" id="science-toggle"
-role="button" tabindex="0" aria-expanded="${scienceOpen}">
-<span class="science-header-main">
-<span class="research-chevron">${scienceOpen ? '▼' : '▶'}</span>
-<span>Science Targets</span>
-${scienceOpen ? '' : `<span class="science-summary">
-<span style="color:${spmCol}">${Math.round(effectiveSPM)}</span><span style="color:var(--text-dim)"> / ${targetSPM} SPM</span>${showESPM ? `<span style="color:var(--text-dim)"> → </span><span style="color:var(--accent)" title="${ESPM_TITLE}">${Math.round(lab.eSPM)} eSPM</span>` : ''}
-</span>`}
-</span>
-</div>`;
-if (!scienceOpen) return `<div class="science-section">${headerRow}</div>`;
-const spmHeadline = `
-<div class="spm-headline">
-<span class="spm-number" style="color:${spmCol}">${Math.round(effectiveSPM)}</span>
-<span class="spm-sep">/</span>
-<span class="spm-target">${targetSPM}</span>
-<span class="spm-label">SPM</span>
-${showESPM ? `<span class="spm-arrow">→</span>
-<span class="spm-espm" title="${ESPM_TITLE}">${Math.round(lab.eSPM)}</span>
-<span class="spm-label" title="${ESPM_TITLE}">eSPM</span>` : ''}
-${limiter ? `<span class="spm-limiter">limited by ${esc(label(limiter))}</span>` : ''}
-</div>`;
-// Bars are normalized to the max target (targetSPM) so they read as overall-SPM
-// fractions — the "actual / targetSPM" label makes the basis explicit.
-const bars = keys.map(name => {
-const info   = rates[name];
-const actual = info?.total ?? 0;
-const p = pct(actual, targetSPM);
-const col = statusColor(p);
-const locCount = (STATE.locations ?? []).length;
-const locChips = locCount <= 1 ? '' : (info?.byLoc ?? []).map(e =>
-`<span class="sci-loc-chip">${esc(e.label)} ${fmtN(e.rate)}/min</span>`
-).join('');
-return `
-<div class="science-bar">
-<div class="science-bar-header">
-<div class="science-name">
-<span class="sci-swatch" style="background:${sciColor(name)}"></span>
-${esc(label(name))}${info?.allWip ? ' <span class="wip-badge">WIP</span>' : ''}
-</div>
-<div class="science-meta">
-<span class="rate-text">${fmtN(actual)} / ${targetSPM}/min</span>
-<span class="pct-text" style="color:${col}">${p}%</span>
-</div>
-</div>
-${locChips ? `<div class="sci-loc-chips">${locChips}</div>` : ''}
-<div class="progress-track" style="margin-top:${locChips ? '6px' : '0'}">
-<div class="progress-fill" style="width:${p}%;background:${col}"></div>
-</div>
-</div>`;
-}).join('');
-return `
-<div class="science-section">
-${headerRow}
-${spmHeadline}
-<div class="science-grid${keys.length >= 4 ? ' cols-2' : ''}">${bars}</div>
-${renderLabCard(lab, sciSPM)}
-</div>`;
-}
+let scienceOpen=localStorage.getItem(`science_open`)===`1`;const ESPM_TITLE=`Effective research throughput: SPM × (1 + lab productivity) ÷ pack drain (biolab consumes half the packs)`;function renderScience(){let targets=allSciTargets(),keys=sortedScienceKeys(Object.keys(targets));if(!keys.length)return``;let rates=allSciRates(),activeKeys=keys.filter(k=>!rates[k]?.allWip),effectiveSPM=activeKeys.length?Math.min(...activeKeys.map(k=>rates[k]?.total??0)):0,targetSPM=Math.max(...keys.map(k=>targets[k])),spmPct=pct(effectiveSPM,targetSPM),spmCol=statusColor(spmPct),sciSPM=effectiveSPM>0?effectiveSPM:targetSPM,lab=computeLabLine(sciSPM),showESPM=lab.labProd>0||lab.drain!==1,limiter=spmPct<100&&activeKeys.length>1?activeKeys.reduce((a,k)=>(rates[k]?.total??0)<(rates[a]?.total??0)?k:a,activeKeys[0]):null,headerRow=`
+    <div class="science-header${scienceOpen?` open`:``}" id="science-toggle"
+         role="button" tabindex="0" aria-expanded="${scienceOpen}">
+      <span class="science-header-main">
+        <span class="research-chevron">${scienceOpen?`▼`:`▶`}</span>
+        <span>Science Targets</span>
+        ${scienceOpen?``:`<span class="science-summary">
+          <span style="color:${spmCol}">${Math.round(effectiveSPM)}</span><span style="color:var(--text-dim)"> / ${targetSPM} SPM</span>${showESPM?`<span style="color:var(--text-dim)"> → </span><span style="color:var(--accent)" title="${ESPM_TITLE}">${Math.round(lab.eSPM)} eSPM</span>`:``}
+        </span>`}
+      </span>
+    </div>`;if(!scienceOpen)return`<div class="science-section">${headerRow}</div>`;let spmHeadline=`
+    <div class="spm-headline">
+      <span class="spm-number" style="color:${spmCol}">${Math.round(effectiveSPM)}</span>
+      <span class="spm-sep">/</span>
+      <span class="spm-target">${targetSPM}</span>
+      <span class="spm-label">SPM</span>
+      ${showESPM?`<span class="spm-arrow">→</span>
+      <span class="spm-espm" title="${ESPM_TITLE}">${Math.round(lab.eSPM)}</span>
+      <span class="spm-label" title="${ESPM_TITLE}">eSPM</span>`:``}
+      ${limiter?`<span class="spm-limiter">limited by ${esc(label(limiter))}</span>`:``}
+    </div>`,bars=keys.map(name=>{let info=rates[name],actual=info?.total??0,p=pct(actual,targetSPM),col=statusColor(p),locChips=(STATE.locations??[]).length<=1?``:(info?.byLoc??[]).map(e=>`<span class="sci-loc-chip">${esc(e.label)} ${fmtN(e.rate)}/min</span>`).join(``);return`
+      <div class="science-bar">
+        <div class="science-bar-header">
+          <div class="science-name">
+            <span class="sci-swatch" style="background:${sciColor(name)}"></span>
+            ${esc(label(name))}${info?.allWip?` <span class="wip-badge">WIP</span>`:``}
+          </div>
+          <div class="science-meta">
+            <span class="rate-text">${fmtN(actual)} / ${targetSPM}/min</span>
+            <span class="pct-text" style="color:${col}">${p}%</span>
+          </div>
+        </div>
+        ${locChips?`<div class="sci-loc-chips">${locChips}</div>`:``}
+        <div class="progress-track" style="margin-top:${locChips?`6px`:`0`}">
+          <div class="progress-fill" style="width:${p}%;background:${col}"></div>
+        </div>
+      </div>`}).join(``);return`
+    <div class="science-section">
+      ${headerRow}
+      ${spmHeadline}
+      <div class="science-grid${keys.length>=4?` cols-2`:``}">${bars}</div>
+      ${renderLabCard(lab,sciSPM)}
+    </div>`}
 // Common research cycle times (seconds) — picker values. Most techs are 30 or 60s.
-const RESEARCH_TIMES = [10, 15, 30, 45, 60, 120];
+const RESEARCH_TIMES=[10,15,30,45,60,120];
 // Read-only summary of the lab setup; players change it by asking Claude to update lab_config.
-function labConfigSummary(lab, cfg) {
-const parts = [label(lab.building)];
-if (lab.quality && lab.quality !== 'normal') parts.push(label(lab.quality));
-if (cfg.module_type && cfg.module_type !== 'none') {
-const mq = cfg.module_quality && cfg.module_quality !== 'normal' ? ` ${cfg.module_quality}` : '';
-parts.push(`${lab.slots}× ${cfg.module_type}-${cfg.module_tier}${mq}`);
-} else {
-parts.push('no modules');
-}
-const bc = cfg.beacon ?? {};
-if ((bc.count ?? 0) > 0) {
-const bq = bc.beacon_quality && bc.beacon_quality !== 'normal' ? ` ${bc.beacon_quality}` : '';
-parts.push(`${bc.count}× beacon (speed-${bc.tier}${bq})`);
-}
-return parts.join(' · ');
-}
+function labConfigSummary(lab,cfg){let parts=[label(lab.building)];if(lab.quality&&lab.quality!==`normal`&&parts.push(label(lab.quality)),cfg.module_type&&cfg.module_type!==`none`){let mq=cfg.module_quality&&cfg.module_quality!==`normal`?` ${cfg.module_quality}`:``;parts.push(`${lab.slots}× ${cfg.module_type}-${cfg.module_tier}${mq}`)}else parts.push(`no modules`);let bc=cfg.beacon??{};if((bc.count??0)>0){let bq=bc.beacon_quality&&bc.beacon_quality!==`normal`?` ${bc.beacon_quality}`:``;parts.push(`${bc.count}× beacon (speed-${bc.tier}${bq})`)}return parts.join(` · `)}
 // Research-lab card: labs needed to consume the science. Config is state-driven
 // (player asks Claude to update lab_config); only research cycle time is a picker.
-function renderLabCard(lab, sciSPM) {
-const cfg = STATE.lab_config ?? DEFAULT_STATE.lab_config;
-const power = fmtPower(lab.powerKw);
-const stats = [
-['eSPM',      fmtN(+lab.eSPM.toFixed(1))],
-['Lab speed', `${+lab.ers.toFixed(2)}×`],
-['Lab prod',  `+${Math.round(lab.labProd*100)}%`],
-['Packs/lab', `${+lab.perLab.toFixed(2)}/min`],
-];
-if (lab.beaconSpeed > 0) stats.push(['Beacon spd', `+${Math.round(lab.beaconSpeed*100)}%`]);
-if (power) stats.push(['Power', power]);
-const statsHtml = stats.map(([k,v]) =>
-`<div class="lab-stat"><span class="lab-stat-k">${k}</span><span class="lab-stat-v">${esc(v)}</span></div>`).join('');
-const curT = +cfg.research_cycle_time || 60;
-const timeOpts = RESEARCH_TIMES.map(t => `<option value="${t}"${t===curT?' selected':''}>${t}s</option>`).join('');
-return `
-<div class="lab-card">
-<div class="lab-card-head">
-<span class="lab-card-title">Research Labs</span>
-<span class="lab-card-count">${fmtMC(lab.labsNeeded)} × ${label(lab.building)} · consume ${fmtN(Math.round(sciSPM))} SPM</span>
-</div>
-<div class="lab-config-row">
-<span class="lab-config-summary">${esc(labConfigSummary(lab, cfg))}</span>
-<div class="lab-ctl"><span class="lab-ctl-l">Research time</span>
-<select class="lab-select" data-lab="research_cycle_time">${timeOpts}</select></div>
-</div>
-<div class="lab-stats">${statsHtml}</div>
-<div class="lab-research">${renderResearch()}</div>
-</div>`;
-}
-function renderLocationBar() {
-const locs = STATE.locations ?? [];
-const planets   = locs.filter(l => l.type === 'planet');
-const platforms = locs.filter(l => l.type === 'space-platform');
-const btnFor = (loc) => {
-const i = locs.indexOf(loc);
-return `<button class="loc-btn${i === activeLocationIdx ? ' active' : ''}" data-locidx="${i}">${esc(loc.label)}</button>`;
-};
-const planetBtns   = planets.map(btnFor).join('');
-const platformBtns = platforms.map(btnFor).join('');
-const sep = planets.length && platforms.length ? '<span class="loc-sep">|</span>' : '';
-return `
-<div class="loc-bar">
-${planetBtns}${sep}${platformBtns}
-</div>`;
-}
+function renderLabCard(lab,sciSPM){let cfg=STATE.lab_config??DEFAULT_STATE.lab_config,power=fmtPower(lab.powerKw),stats=[[`eSPM`,fmtN(+lab.eSPM.toFixed(1))],[`Lab speed`,`${+lab.ers.toFixed(2)}×`],[`Lab prod`,`+${Math.round(lab.labProd*100)}%`],[`Packs/lab`,`${+lab.perLab.toFixed(2)}/min`]];lab.beaconSpeed>0&&stats.push([`Beacon spd`,`+${Math.round(lab.beaconSpeed*100)}%`]),power&&stats.push([`Power`,power]);let statsHtml=stats.map(([k,v])=>`<div class="lab-stat"><span class="lab-stat-k">${k}</span><span class="lab-stat-v">${esc(v)}</span></div>`).join(``),curT=+cfg.research_cycle_time||60,timeOpts=RESEARCH_TIMES.map(t=>`<option value="${t}"${t===curT?` selected`:``}>${t}s</option>`).join(``);return`
+    <div class="lab-card">
+      <div class="lab-card-head">
+        <span class="lab-card-title">Research Labs</span>
+        <span class="lab-card-count">${fmtMC(lab.labsNeeded)} × ${label(lab.building)} · consume ${fmtN(Math.round(sciSPM))} SPM</span>
+      </div>
+      <div class="lab-config-row">
+        <span class="lab-config-summary">${esc(labConfigSummary(lab,cfg))}</span>
+        <div class="lab-ctl"><span class="lab-ctl-l">Research time</span>
+          <select class="lab-select" data-lab="research_cycle_time">${timeOpts}</select></div>
+      </div>
+      <div class="lab-stats">${statsHtml}</div>
+      <div class="lab-research">${renderResearch()}</div>
+    </div>`}function renderLocationBar(){let locs=STATE.locations??[],planets=locs.filter(l=>l.type===`planet`),platforms=locs.filter(l=>l.type===`space-platform`),btnFor=loc=>{let i=locs.indexOf(loc);return`<button class="loc-btn${i===activeLocationIdx?` active`:``}" data-locidx="${i}">${esc(loc.label)}</button>`},planetBtns=planets.map(btnFor).join(``),platformBtns=platforms.map(btnFor).join(``);return`
+    <div class="loc-bar">
+      ${planetBtns}${planets.length&&platforms.length?`<span class="loc-sep">|</span>`:``}${platformBtns}
+    </div>`}
 // ── Research productivity ────────────────────────────────────────────────────
 // UI persistence: whether the collapsible Research section is expanded.
-let researchOpen = false;
-function renderResearch() {
-const isSA = (STATE.dataset ?? 'vanilla') === 'space-age';
-const levels = STATE.research_levels ?? {};
-const activeCount = Object.values(levels).filter(v => v && v > 0).length;
-const countPill = activeCount
-? `<span class="research-count-pill">${activeCount} active</span>`
-: '<span class="research-count-pill">none</span>';
-const rowHtml = (key, entry, max) => {
-const val = levels[key] ?? 0;
-return `
-<div class="research-row">
-<span class="research-label">${esc(entry.label)}</span>
-<input type="number" class="research-input" data-research="${key}"
-min="0" step="1"${max ? ` max="${max}"` : ''} value="${val}" placeholder="0" />
-</div>`;
-};
-const mining = rowHtml('mining-productivity', PRODUCTIVITY_RESEARCH['mining-productivity']);
-const saRows = isSA
-? Object.entries(PRODUCTIVITY_RESEARCH)
-.filter(([, entry]) => entry.sa)
-.map(([k, entry]) => rowHtml(k, entry))
-.join('')
-: '';
-// Lab techs feed the Research-lab card (speed → labs-needed, productivity → eSPM).
-const labRows = Object.entries(LAB_RESEARCH)
-.filter(([, entry]) => isSA || !entry.sa)
-.map(([k, entry]) => rowHtml(k, entry, entry.max))
-.join('');
-const body = researchOpen ? `
-<div class="research-body">
-<div class="research-grid">
-${mining}
-${isSA ? `<div class="research-subgroup-label">Space Age — Recipe Productivity (capped at +300%)</div>${saRows}` : ''}
-<div class="research-subgroup-label">Labs</div>${labRows}
-</div>
-</div>` : '';
-return `
-<div class="research-section">
-<div class="research-header" id="research-toggle" role="button" tabindex="0" aria-expanded="${researchOpen}">
-<span class="research-header-main">
-<span class="research-chevron">${researchOpen ? '▼' : '▶'}</span>
-<span>Research Bonuses</span>
-</span>
-${countPill}
-</div>
-${body}
-</div>`;
-}
+let researchOpen=!1;function renderResearch(){let isSA=(STATE.dataset??`vanilla`)===`space-age`,levels=STATE.research_levels??{},activeCount=Object.values(levels).filter(v=>v&&v>0).length,countPill=activeCount?`<span class="research-count-pill">${activeCount} active</span>`:`<span class="research-count-pill">none</span>`,rowHtml=(key,entry,max)=>{let val=levels[key]??0;return`
+      <div class="research-row">
+        <span class="research-label">${esc(entry.label)}</span>
+        <input type="number" class="research-input" data-research="${key}"
+               min="0" step="1"${max?` max="${max}"`:``} value="${val}" placeholder="0" />
+      </div>`},mining=rowHtml(`mining-productivity`,PRODUCTIVITY_RESEARCH[`mining-productivity`]),saRows=isSA?Object.entries(PRODUCTIVITY_RESEARCH).filter(([,entry])=>entry.sa).map(([k,entry])=>rowHtml(k,entry)).join(``):``,labRows=Object.entries(LAB_RESEARCH).filter(([,entry])=>isSA||!entry.sa).map(([k,entry])=>rowHtml(k,entry,entry.max)).join(``),body=researchOpen?`
+    <div class="research-body">
+      <div class="research-grid">
+        ${mining}
+        ${isSA?`<div class="research-subgroup-label">Space Age — Recipe Productivity (capped at +300%)</div>${saRows}`:``}
+        <div class="research-subgroup-label">Labs</div>${labRows}
+      </div>
+    </div>`:``;return`
+    <div class="research-section">
+      <div class="research-header" id="research-toggle" role="button" tabindex="0" aria-expanded="${researchOpen}">
+        <span class="research-header-main">
+          <span class="research-chevron">${researchOpen?`▼`:`▶`}</span>
+          <span>Research Bonuses</span>
+        </span>
+        ${countPill}
+      </div>
+      ${body}
+    </div>`}
 // Decide whether a line's cli_result is stale w.r.t. the current STATE.research_levels.
 // Returns an array of tech names whose current level differs from what the line was
 // calculated against, restricted to techs actually relevant to the line's recipes.
-function lineStaleTechs(line) {
-const live = STATE.research_levels ?? {};
-const saved = line.cli_result?.research_levels ?? {};
-const steps = line.cli_result?.production_steps ?? [];
-const recipeKeys = new Set(steps.map(s => s.recipe));
-// A line uses miners if miners_needed has any non-offshore-pump entry.
-const miners = line.cli_result?.miners_needed ?? {};
-const usesMiners = Object.values(miners).some(m => m && m.machine && m.machine !== 'offshore-pump');
-const stale = [];
-for (const [tech, entry] of Object.entries(PRODUCTIVITY_RESEARCH)) {
-const relevant = tech === 'mining-productivity'
-? usesMiners
-: entry.recipes.some(r => recipeKeys.has(r));
-if (!relevant) continue;
-const liveLvl  = live[tech]  ?? 0;
-const savedLvl = saved[tech] ?? 0;
-if (liveLvl !== savedLvl) stale.push(tech);
-}
-return stale;
-}
+function lineStaleTechs(line){let live=STATE.research_levels??{},saved=line.cli_result?.research_levels??{},steps=line.cli_result?.production_steps??[],recipeKeys=new Set(steps.map(s=>s.recipe)),miners=line.cli_result?.miners_needed??{},usesMiners=Object.values(miners).some(m=>m&&m.machine&&m.machine!==`offshore-pump`),stale=[];for(let[tech,entry]of Object.entries(PRODUCTIVITY_RESEARCH))(tech===`mining-productivity`?usesMiners:entry.recipes.some(r=>recipeKeys.has(r)))&&(live[tech]??0)!==(saved[tech]??0)&&stale.push(tech);return stale}
 // One-line alarm summary; the full lists live in the Actions tab.
-function renderBottlenecks() {
-const loc = currentLoc();
-const bn = loc.bottlenecks ?? [];
-if (!bn.length) return '';
-const ns = loc.next_steps ?? [];
-const parts = [`${bn.length} bottleneck${bn.length !== 1 ? 's' : ''}`];
-if (ns.length) parts.push(`${ns.length} next step${ns.length !== 1 ? 's' : ''}`);
-return `
-<div class="bottleneck-banner" id="banner-actions" role="button" tabindex="0"
-title="Open the Actions tab">
-<span class="bottleneck-title">${parts.join(' · ')} on ${esc(loc.label)}</span>
-<span class="bottleneck-go">View →</span>
-</div>`;
-}
-function renderBusBalance() {
-const loc = currentLoc();
-// Supply: explicitly declared bus_items (player-declared rates)
-const supply = {};
-const busItemMap = {};
-for (const src of loc.bus_items ?? []) {
-supply[src.item] = (supply[src.item] ?? 0) + src.rate;
-busItemMap[src.item] = src;
-}
+function renderBottlenecks(){let loc=currentLoc(),bn=loc.bottlenecks??[];if(!bn.length)return``;let ns=loc.next_steps??[],parts=[`${bn.length} bottleneck${bn.length===1?``:`s`}`];return ns.length&&parts.push(`${ns.length} next step${ns.length===1?``:`s`}`),`
+    <div class="bottleneck-banner" id="banner-actions" role="button" tabindex="0"
+         title="Open the Actions tab">
+      <span class="bottleneck-title">${parts.join(` · `)} on ${esc(loc.label)}</span>
+      <span class="bottleneck-go">View →</span>
+    </div>`}function renderBusBalance(){let loc=currentLoc(),supply={},busItemMap={};for(let src of loc.bus_items??[])supply[src.item]=(supply[src.item]??0)+src.rate,busItemMap[src.item]=src;
 // Demand: read bus_inputs from cli_result (set when --bus-item was used for this line)
 // Items present in a line's cli_args.logistics_items are routed via bots — exclude from bus.
 // Items present in a line's cli_args.direct_items are belt-fed from another line — also exclude.
-const demand = {};
-for (const line of loc.lines ?? []) {
-const offBusSet = new Set([
-...(line.cli_args?.logistics_items ?? []),
-...(line.cli_args?.direct_items ?? []),
-]);
-for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {})) {
-if (offBusSet.has(item)) continue;
-demand[item] = (demand[item] ?? 0) + rate;
-}
-}
+let demand={};for(let line of loc.lines??[]){let offBusSet=new Set([...line.cli_args?.logistics_items??[],...line.cli_args?.direct_items??[]]);for(let[item,rate]of Object.entries(line.cli_result?.bus_inputs??{}))offBusSet.has(item)||(demand[item]=(demand[item]??0)+rate)}
 // Show all items with supply OR demand
-const busItems = [...new Set([...Object.keys(supply), ...Object.keys(demand)])];
-// Logistics network (bot-routed items): same supply/demand/net model, shown as a third
-// transport group alongside Belt Bus and Pipe Network.
-const { supply: lSupply, demand: lDemand } = computeLogisticsBalance(loc);
-const logiItems = [...new Set([...Object.keys(lSupply), ...Object.keys(lDemand)])]
-.filter(i => (lSupply[i] ?? 0) > 0 || (lDemand[i] ?? 0) > 0);
-if (!busItems.length && !logiItems.length) return '';
+let busItems=[...new Set([...Object.keys(supply),...Object.keys(demand)])],{supply:lSupply,demand:lDemand}=computeLogisticsBalance(loc),logiItems=[...new Set([...Object.keys(lSupply),...Object.keys(lDemand)])].filter(i=>(lSupply[i]??0)>0||(lDemand[i]??0)>0);if(!busItems.length&&!logiItems.length)return``;
 // Shared compact card used by all three transport groups (belt / pipe / bots).
 // Every group displays net items/min + a supply/demand tooltip — one uniform format.
-const card = ({ rowLabel, net, usedPct, tip }) => {
+let card=({rowLabel,net,usedPct,tip})=>{
 // Red only for a real deficit (demand exceeds supply, net < 0); a balanced/maxed
 // line (net >= 0, up to 100% load) is amber "at capacity", green below 80%.
-const sev = net < -1e-9 ? 'bad' : usedPct >= 80 ? 'warn' : 'ok';
-const loadCol = `var(--${sev})`;
-const netCol = net >= 0 ? 'var(--ok)' : 'var(--bad)';
-const netDisplay = `${net >= 0 ? '+' : ''}${fmtN(net)}`;
-return `
-<div class="bus-row bus-row--${sev}" title="${esc(tip)}">
-<div class="bus-row-top">
-<span class="bus-name">${esc(rowLabel)}</span>
-<span class="bus-net" style="color:${netCol}">${netDisplay}<span class="bus-net-unit">/min</span></span>
-</div>
-<div class="bus-row-bot">
-<div class="bus-bar-track">
-<div class="bus-bar-consumed" style="width:${usedPct}%;background:${loadCol}"></div>
-</div>
-<span class="bus-loadpct" style="color:${loadCol}">${Math.round(usedPct)}%</span>
-</div>
-</div>`;
-};
-const rowFor = (sup, dem, labelFn) => (item) => {
-const s = sup[item] ?? 0;
-const d = dem[item] ?? 0;
-const net = s - d;
-const usedPct = s > 0 ? Math.min(100, (d / s) * 100) : 100;
-const tip = `${fmtN(s)}/min supply  ·  ${fmtN(d)}/min demand`;
-return card({ rowLabel: labelFn(item), net, usedPct, tip });
-};
-const busRow  = rowFor(supply, demand, (i) => busItemMap[i]?.label ?? label(i));
-const logiRow = rowFor(lSupply, lDemand, (i) => label(i));
-// Sort tightest-first within each group so constrained/deficit items surface top-left.
-const loadIn = (sup, dem) => (item) => {
-const s = sup[item] ?? 0, d = dem[item] ?? 0;
-return s > 0 ? Math.min(100, (d / s) * 100) : 100;
-};
-const busLoad  = loadIn(supply, demand);
-const logiLoad = loadIn(lSupply, lDemand);
-const solids = busItems.filter(i => !(busItemMap[i]?.fluid)).sort((a, b) => busLoad(b) - busLoad(a));
-const fluids = busItems.filter(i =>  !!(busItemMap[i]?.fluid)).sort((a, b) => busLoad(b) - busLoad(a));
-const logi   = logiItems.sort((a, b) => logiLoad(b) - logiLoad(a));
-// Show sub-group labels only when more than one transport group is present.
-const showLabels = [solids.length, fluids.length, logi.length].filter(n => n > 0).length > 1;
-const group = (items, rowFn, labelClass, labelText) => items.length ? `
-<div class="bus-group">
-${showLabels ? `<div class="bus-group-label ${labelClass}">${labelText}</div>` : ''}
-<div class="bus-grid">${items.map(rowFn).join('')}</div>
-</div>` : '';
-return `
-<div class="bus-section">
-<div class="group-label">Supply / Demand</div>
-${group(solids, busRow, 'bus-group-label--belt', 'Belt Bus')}
-${group(fluids, busRow, 'bus-group-label--pipe', 'Pipe Network')}
-${group(logi, logiRow, 'bus-group-label--logi', 'Logistics Network')}
-</div>`;
-}
+let sev=net<-1e-9?`bad`:usedPct>=80?`warn`:`ok`,loadCol=`var(--${sev})`,netCol=net>=0?`var(--ok)`:`var(--bad)`,netDisplay=`${net>=0?`+`:``}${fmtN(net)}`;return`
+      <div class="bus-row bus-row--${sev}" title="${esc(tip)}">
+        <div class="bus-row-top">
+          <span class="bus-name">${esc(rowLabel)}</span>
+          <span class="bus-net" style="color:${netCol}">${netDisplay}<span class="bus-net-unit">/min</span></span>
+        </div>
+        <div class="bus-row-bot">
+          <div class="bus-bar-track">
+            <div class="bus-bar-consumed" style="width:${usedPct}%;background:${loadCol}"></div>
+          </div>
+          <span class="bus-loadpct" style="color:${loadCol}">${Math.round(usedPct)}%</span>
+        </div>
+      </div>`},rowFor=(sup,dem,labelFn)=>item=>{let s=sup[item]??0,d=dem[item]??0,net=s-d,usedPct=s>0?Math.min(100,d/s*100):100,tip=`${fmtN(s)}/min supply  ·  ${fmtN(d)}/min demand`;return card({rowLabel:labelFn(item),net,usedPct,tip})},busRow=rowFor(supply,demand,i=>busItemMap[i]?.label??label(i)),logiRow=rowFor(lSupply,lDemand,i=>label(i)),loadIn=(sup,dem)=>item=>{let s=sup[item]??0,d=dem[item]??0;return s>0?Math.min(100,d/s*100):100},busLoad=loadIn(supply,demand),logiLoad=loadIn(lSupply,lDemand),solids=busItems.filter(i=>!busItemMap[i]?.fluid).sort((a,b)=>busLoad(b)-busLoad(a)),fluids=busItems.filter(i=>!!busItemMap[i]?.fluid).sort((a,b)=>busLoad(b)-busLoad(a)),logi=logiItems.sort((a,b)=>logiLoad(b)-logiLoad(a)),showLabels=[solids.length,fluids.length,logi.length].filter(n=>n>0).length>1,group=(items,rowFn,labelClass,labelText)=>items.length?`
+    <div class="bus-group">
+      ${showLabels?`<div class="bus-group-label ${labelClass}">${labelText}</div>`:``}
+      <div class="bus-grid">${items.map(rowFn).join(``)}</div>
+    </div>`:``;return`
+    <div class="bus-section">
+      <div class="group-label">Supply / Demand</div>
+      ${group(solids,busRow,`bus-group-label--belt`,`Belt Bus`)}
+      ${group(fluids,busRow,`bus-group-label--pipe`,`Pipe Network`)}
+      ${group(logi,logiRow,`bus-group-label--logi`,`Logistics Network`)}
+    </div>`}
 // ── Logistics network ─────────────────────────────────────────────────────────
 //
 // Each line may declare:
@@ -1329,802 +214,185 @@ ${group(logi, logiRow, 'bus-group-label--logi', 'Logistics Network')}
 //                          × (cli_step.outputs[item] / cli_step.machine_count)
 //
 // Supply contributions accumulate per item across all lines.
-function findStepProducing(steps, item) {
-for (const s of steps) {
-const out = s.outputs?.[item];
-if (typeof out === 'number' && out > 0) return s;
-}
-return null;
-}
-function reserveRateFor(line, item) {
-const steps = line.cli_result?.production_steps ?? [];
-const step  = findStepProducing(steps, item);
-if (!step) return 0;
+function findStepProducing(steps,item){for(let s of steps){let out=s.outputs?.[item];if(typeof out==`number`&&out>0)return s}return null}function reserveRateFor(line,item){let step=findStepProducing(line.cli_result?.production_steps??[],item);if(!step)return 0;
 // Primary: full effective production rate of this step.
-if (item === line.item) {
-const out = step.outputs?.[item];
-return typeof out === 'number' ? out : 0;
-}
+if(item===line.item){let out=step.outputs?.[item];return typeof out==`number`?out:0}
 // Intermediate: surplus comes from over-sizing via --step-machines RECIPE=N.
 // The CLI is now authoritative — it emits step.excess_output_per_min directly.
 // New format: dict {item: rate} (per-co-product). Old format: scalar number
 // (assumed to apply to the step's primary output). Saved cli_results from
 // before this field shipped will report 0 — the correct fallback.
-const excess = step.excess_output_per_min;
-if (excess == null) return 0;
-if (typeof excess === 'number') return excess;
-return excess[item] ?? 0;
-}
-function computeLogisticsBalance(loc) {
-const supply = {};        // item → items/min from this location's reserves
-const demand = {};        // item → items/min drawn from bots
-const directDemand = {};  // item → items/min belt-fed from another line (nets against supply)
-for (const line of loc.lines ?? []) {
-for (const item of line.reserve_items ?? []) {
-const rate = reserveRateFor(line, item);
-supply[item] = (supply[item] ?? 0) + rate;
-}
-const logiSet = new Set(line.cli_args?.logistics_items ?? []);
-const directSet = new Set(line.cli_args?.direct_items ?? []);
-for (const [item, rate] of Object.entries(line.cli_result?.bus_inputs ?? {})) {
-if (logiSet.has(item)) {
-demand[item] = (demand[item] ?? 0) + rate;
-} else if (directSet.has(item)) {
-directDemand[item] = (directDemand[item] ?? 0) + rate;
-}
-}
-}
+let excess=step.excess_output_per_min;return excess==null?0:typeof excess==`number`?excess:excess[item]??0}function computeLogisticsBalance(loc){let supply={},demand={},directDemand={};for(let line of loc.lines??[]){for(let item of line.reserve_items??[]){let rate=reserveRateFor(line,item);supply[item]=(supply[item]??0)+rate}let logiSet=new Set(line.cli_args?.logistics_items??[]),directSet=new Set(line.cli_args?.direct_items??[]);for(let[item,rate]of Object.entries(line.cli_result?.bus_inputs??{}))logiSet.has(item)?demand[item]=(demand[item]??0)+rate:directSet.has(item)&&(directDemand[item]=(directDemand[item]??0)+rate)}
 // Net direct demand against the supplying line's reserve. If a direct
 // consumer fully covers the reserve, the item drops out of logistics
 // entirely (no bot traffic, no idle surplus).
-for (const [item, rate] of Object.entries(directDemand)) {
-if (supply[item] == null) continue;
-supply[item] = Math.max(0, supply[item] - rate);
-if (supply[item] === 0 && (demand[item] ?? 0) === 0) delete supply[item];
-}
+for(let[item,rate]of Object.entries(directDemand))supply[item]!=null&&(supply[item]=Math.max(0,supply[item]-rate),supply[item]===0&&(demand[item]??0)===0&&delete supply[item]);
 // Research consumption: any science pack supplied into the network is requested by the
 // labs (e.g. space science shipped down to Nauvis research). Model that draw as demand at
 // the science target rate so a reserved pack reads as consumed (100%), not idle surplus (0%).
-const sciTargets = allSciTargets();
-for (const item of Object.keys(supply)) {
-if (SCIENCE_ITEM_SET.has(item) && (sciTargets[item] ?? 0) > 0)
-demand[item] = (demand[item] ?? 0) + sciTargets[item];
-}
-return { supply, demand };
-}
-function renderTabs() {
-const loc = currentLoc();
-const actionCount = (loc.bottlenecks?.length ?? 0) + (loc.next_steps?.length ?? 0);
-const tabs = [
-['overview',  'Overview'],
-['lines',     `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
-['issues',    `Steps${actionCount ? ` (${actionCount})` : ''}`],
-['chat',      'Chat'],
-];
-return `
-<div class="tab-list" role="tablist">
-${tabs.map(([id, txt]) => `<button class="tab-btn${activeTab===id?' active':''}" role="tab" aria-selected="${activeTab===id}" data-tab="${id}">${esc(txt)}</button>`).join('')}
-</div>`;
-}
-const SMELTING_MACHINES = new Set(['electric-furnace','stone-furnace','steel-furnace','foundry']);
-const CIRCUIT_ITEMS     = new Set(['electronic-circuit','advanced-circuit','processing-unit']);
-const SCIENCE_ITEM_SET  = new Set(SCIENCE_ORDER);
-const CHEMICAL_MACHINES = new Set(['chemical-plant','oil-refinery','cryogenic-plant']);
-// Item-id substring matches for semantic line groups (assembler-made goods the machine
-// heuristic can't separate). Logistics is checked before Military.
-const LOGISTICS_KEYS = ['transport-belt','underground-belt','splitter','inserter','loader',
-'rail','locomotive','cargo-wagon','fluid-wagon','roboport','logistic-robot',
-'construction-robot','robot-frame','pipe','offshore-pump','pump','train-stop'];
-const MILITARY_KEYS = ['magazine','cannon-shell','shotgun-shell','artillery','grenade','turret',
-'flamethrower','rocket-launcher','land-mine','capsule','wall','gate','spidertron',
-'atomic-bomb','combat-robot','defender','distractor','destroyer','tank'];
-// Lines-tab grouping. Order of checks is the precedence; "Other" is the residual.
-const LINE_CATEGORY_ORDER = ['Science','Mining','Smelting','Chemical','Circuits','Logistics','Military','Other'];
-function lineCategory(line) {
-if (SCIENCE_ITEM_SET.has(line.item)) return 'Science';
-const steps = line.cli_result?.production_steps ?? [];
-if (!steps.length) return 'Mining';            // raw resource — no crafting step
-if (CIRCUIT_ITEMS.has(line.item)) return 'Circuits';
-const m = steps[0]?.machine;
-if (m && SMELTING_MACHINES.has(m)) return 'Smelting';
-if (m && CHEMICAL_MACHINES.has(m)) return 'Chemical';
-const id = line.item;
-if (LOGISTICS_KEYS.some(k => id.includes(k))) return 'Logistics';
-if (MILITARY_KEYS.some(k => id.includes(k)))  return 'Military';
-return 'Other';
-}
-function renderOverview() {
-const loc = currentLoc();
-const lines = loc.lines ?? [];
-const busSection = renderBusBalance();
-// ── Top next step teaser ──
-const ns = loc.next_steps ?? [];
-const nextSection = ns.length ? `
-<div class="overview-section">
-<div class="group-label">Next Step</div>
-<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(ns[0]))}</span>
-${ns.length > 1 ? `<button class="overview-link" style="margin-left:auto;flex-shrink:0" data-goto-tab="issues">+${ns.length - 1} more →</button>` : ''}
-</div>
-</div>` : '';
-// ── Power ──
-const totalPowCeilMw = lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw_ceil ?? 0), 0);
-const totalPowMw     = lines.reduce((acc, l) => acc + (l.cli_result?.total_power_mw ?? 0), 0);
-const ceilDiffers = Math.abs(totalPowCeilMw - totalPowMw) >= 0.005;
-const powerSection = totalPowCeilMw > 0 ? `
-<div class="power-overview">
-<div class="power-overview-label">Power</div>
-<div class="power-overview-values">
-<span class="power-exact">${fmtPower(totalPowMw * 1000)}</span>
-${ceilDiffers ? `<span class="power-ceil-note" title="Power at whole built machine counts (fractional counts rounded up)">/ ${fmtPower(totalPowCeilMw * 1000)} rounded up</span>` : ''}
-</div>
-</div>` : '';
-if (!busSection && !powerSection && !nextSection) return `
-<div class="empty-state">
-<p>No production lines for ${esc(loc.label)} yet.</p>
-<p>Ask Claude to plan one in the Chat tab.</p>
-</div>`;
-return nextSection + busSection + powerSection;
-}
-function renderLinesTab() {
-const loc = currentLoc();
-const lines = loc.lines ?? [];
-if (!lines.length) return `
-<div class="empty-state">
-<p>No production lines yet.</p>
-<p>Ask Claude to plan one in the Chat tab.</p>
-</div>`;
-const idxMap = new Map(lines.map((l, i) => [l, i]));
-const buckets = Object.fromEntries(LINE_CATEGORY_ORDER.map(n => [n, []]));
-for (const line of lines) buckets[lineCategory(line)].push(line);
-const groups = LINE_CATEGORY_ORDER.map(name => [name, buckets[name]]);
-// Status filter counts (over all lines on this location, ignoring the search
-// box — chips are reset-to-status switches, not search refinements).
-const counts = {
-all:    lines.length,
-bad:    lines.filter(l => lineStatusBucket(l) === 'bad').length,
-warn:   lines.filter(l => lineStatusBucket(l) === 'warn').length,
-wip:    lines.filter(l => lineStatusBucket(l) === 'wip').length,
-stale:  lines.filter(l => lineStaleTechs(l).length > 0).length,
-capped: lines.filter(l => l.cli_result?.research_prod_capped === true).length,
-};
-const chip = (key, lbl) => {
-const n = counts[key];
-if (key !== 'all' && n === 0) return '';
-return `<button class="filter-chip${linesStatusFilter === key ? ' active' : ''}" data-status="${key}">${lbl}<span class="filter-chip-count">${n}</span></button>`;
-};
-// Expand/collapse-all label reflects current state.
-const toggleAllLabel = expandedCards.size > 0 ? 'Collapse all' : 'Expand all';
-const toolbar = `
-<div class="lines-toolbar">
-<div class="line-filter">
-<input type="text" id="line-filter-input" class="line-filter-input" autocomplete="off"
-placeholder="Filter lines… (press / to focus)" value="${esc(lineFilter)}" />
-</div>
-<div class="lines-filter-chips">
-${chip('all',    'All')}
-${chip('bad',    'Bad')}
-${chip('warn',   'Warn')}
-${chip('wip',    'WIP')}
-${chip('stale',  'Stale')}
-${chip('capped', '@300%')}
-</div>
-<button class="btn" id="btn-toggle-all">${toggleAllLabel}</button>
-<span class="lines-count" id="lines-count">${lines.length} ${lines.length === 1 ? 'line' : 'lines'}</span>
-</div>
-<div class="line-filter-empty" id="line-filter-empty" style="display:none">No lines match.</div>`;
-let html = toolbar;
-for (const [name, groupLines] of groups) {
-if (!groupLines.length) continue;
-html += `<div class="line-group" data-group="${esc(name)}" data-total="${groupLines.length}">
-<div class="lines-group-header">
-<div class="group-label">${name}</div>
-<span class="lines-group-count">${groupLines.length}</span>
-</div>
-${groupLines.map(l => renderLineCard(l, idxMap.get(l))).join('')}
-</div>`;
-}
-return html;
-}
+let sciTargets=allSciTargets();for(let item of Object.keys(supply))SCIENCE_ITEM_SET.has(item)&&(sciTargets[item]??0)>0&&(demand[item]=(demand[item]??0)+sciTargets[item]);return{supply,demand}}function renderTabs(){let loc=currentLoc(),actionCount=(loc.bottlenecks?.length??0)+(loc.next_steps?.length??0);return`
+    <div class="tab-list" role="tablist">
+      ${[[`overview`,`Overview`],[`lines`,`Lines${loc.lines?.length?` (${loc.lines.length})`:``}`],[`issues`,`Steps${actionCount?` (${actionCount})`:``}`],[`chat`,`Chat`]].map(([id,txt])=>`<button class="tab-btn${activeTab===id?` active`:``}" role="tab" aria-selected="${activeTab===id}" data-tab="${id}">${esc(txt)}</button>`).join(``)}
+    </div>`}const SMELTING_MACHINES=new Set([`electric-furnace`,`stone-furnace`,`steel-furnace`,`foundry`]),CIRCUIT_ITEMS=new Set([`electronic-circuit`,`advanced-circuit`,`processing-unit`]),SCIENCE_ITEM_SET=new Set(SCIENCE_ORDER),CHEMICAL_MACHINES=new Set([`chemical-plant`,`oil-refinery`,`cryogenic-plant`]),LOGISTICS_KEYS=[`transport-belt`,`underground-belt`,`splitter`,`inserter`,`loader`,`rail`,`locomotive`,`cargo-wagon`,`fluid-wagon`,`roboport`,`logistic-robot`,`construction-robot`,`robot-frame`,`pipe`,`offshore-pump`,`pump`,`train-stop`],MILITARY_KEYS=[`magazine`,`cannon-shell`,`shotgun-shell`,`artillery`,`grenade`,`turret`,`flamethrower`,`rocket-launcher`,`land-mine`,`capsule`,`wall`,`gate`,`spidertron`,`atomic-bomb`,`combat-robot`,`defender`,`distractor`,`destroyer`,`tank`],LINE_CATEGORY_ORDER=[`Science`,`Mining`,`Smelting`,`Chemical`,`Circuits`,`Logistics`,`Military`,`Other`];function lineCategory(line){if(SCIENCE_ITEM_SET.has(line.item))return`Science`;let steps=line.cli_result?.production_steps??[];if(!steps.length)return`Mining`;if(CIRCUIT_ITEMS.has(line.item))return`Circuits`;let m=steps[0]?.machine;if(m&&SMELTING_MACHINES.has(m))return`Smelting`;if(m&&CHEMICAL_MACHINES.has(m))return`Chemical`;let id=line.item;return LOGISTICS_KEYS.some(k=>id.includes(k))?`Logistics`:MILITARY_KEYS.some(k=>id.includes(k))?`Military`:`Other`}function renderOverview(){let loc=currentLoc(),lines=loc.lines??[],busSection=renderBusBalance(),ns=loc.next_steps??[],nextSection=ns.length?`
+    <div class="overview-section">
+      <div class="group-label">Next Step</div>
+      <div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(ns[0]))}</span>
+        ${ns.length>1?`<button class="overview-link" style="margin-left:auto;flex-shrink:0" data-goto-tab="issues">+${ns.length-1} more →</button>`:``}
+      </div>
+    </div>`:``,totalPowCeilMw=lines.reduce((acc,l)=>acc+(l.cli_result?.total_power_mw_ceil??0),0),totalPowMw=lines.reduce((acc,l)=>acc+(l.cli_result?.total_power_mw??0),0),ceilDiffers=Math.abs(totalPowCeilMw-totalPowMw)>=.005,powerSection=totalPowCeilMw>0?`
+    <div class="power-overview">
+      <div class="power-overview-label">Power</div>
+      <div class="power-overview-values">
+        <span class="power-exact">${fmtPower(totalPowMw*1e3)}</span>
+        ${ceilDiffers?`<span class="power-ceil-note" title="Power at whole built machine counts (fractional counts rounded up)">/ ${fmtPower(totalPowCeilMw*1e3)} rounded up</span>`:``}
+      </div>
+    </div>`:``;return!busSection&&!powerSection&&!nextSection?`
+    <div class="empty-state">
+      <p>No production lines for ${esc(loc.label)} yet.</p>
+      <p>Ask Claude to plan one in the Chat tab.</p>
+    </div>`:nextSection+busSection+powerSection}function renderLinesTab(){let lines=currentLoc().lines??[];if(!lines.length)return`
+    <div class="empty-state">
+      <p>No production lines yet.</p>
+      <p>Ask Claude to plan one in the Chat tab.</p>
+    </div>`;let idxMap=new Map(lines.map((l,i)=>[l,i])),buckets=Object.fromEntries(LINE_CATEGORY_ORDER.map(n=>[n,[]]));for(let line of lines)buckets[lineCategory(line)].push(line);let groups=LINE_CATEGORY_ORDER.map(name=>[name,buckets[name]]),counts={all:lines.length,bad:lines.filter(l=>lineStatusBucket(l)===`bad`).length,warn:lines.filter(l=>lineStatusBucket(l)===`warn`).length,wip:lines.filter(l=>lineStatusBucket(l)===`wip`).length,stale:lines.filter(l=>lineStaleTechs(l).length>0).length,capped:lines.filter(l=>l.cli_result?.research_prod_capped===!0).length},chip=(key,lbl)=>{let n=counts[key];return key!==`all`&&n===0?``:`<button class="filter-chip${linesStatusFilter===key?` active`:``}" data-status="${key}">${lbl}<span class="filter-chip-count">${n}</span></button>`},toggleAllLabel=expandedCards.size>0?`Collapse all`:`Expand all`,html=`
+    <div class="lines-toolbar">
+      <div class="line-filter">
+        <input type="text" id="line-filter-input" class="line-filter-input" autocomplete="off"
+               placeholder="Filter lines… (press / to focus)" value="${esc(lineFilter)}" />
+      </div>
+      <div class="lines-filter-chips">
+        ${chip(`all`,`All`)}
+        ${chip(`bad`,`Bad`)}
+        ${chip(`warn`,`Warn`)}
+        ${chip(`wip`,`WIP`)}
+        ${chip(`stale`,`Stale`)}
+        ${chip(`capped`,`@300%`)}
+      </div>
+      <button class="btn" id="btn-toggle-all">${toggleAllLabel}</button>
+      <span class="lines-count" id="lines-count">${lines.length} ${lines.length===1?`line`:`lines`}</span>
+    </div>
+    <div class="line-filter-empty" id="line-filter-empty" style="display:none">No lines match.</div>`;for(let[name,groupLines]of groups)groupLines.length&&(html+=`<div class="line-group" data-group="${esc(name)}" data-total="${groupLines.length}">
+      <div class="lines-group-header">
+        <div class="group-label">${name}</div>
+        <span class="lines-group-count">${groupLines.length}</span>
+      </div>
+      ${groupLines.map(l=>renderLineCard(l,idxMap.get(l))).join(``)}
+    </div>`);return html}
 // Status bucket for a line — drives both the status filter chips and the inline
 // dot. 'wip' takes precedence; otherwise the rate-vs-target status applies.
-function lineStatusBucket(line) {
-if (line.wip) return 'wip';
-const actual = line.effective_rate ?? line.target_rate ?? 0;
-return statusClass(pct(actual, line.target_rate ?? 0));
-}
-function lineCardMatchesStatus(card, filter) {
-if (filter === 'all')    return true;
-if (filter === 'stale')  return card.dataset.stale === '1';
-if (filter === 'capped') return card.dataset.capped === '1';
-return card.dataset.status === filter; // bad | warn | wip
-}
+function lineStatusBucket(line){return line.wip?`wip`:statusClass(pct(line.effective_rate??line.target_rate??0,line.target_rate??0))}function lineCardMatchesStatus(card,filter){return filter===`all`?!0:filter===`stale`?card.dataset.stale===`1`:filter===`capped`?card.dataset.capped===`1`:card.dataset.status===filter}
 // In-place Lines-tab filter — hides non-matching cards (and emptied groups)
 // without re-rendering, so the search input keeps focus while typing. Applies
 // both the text search and the active status filter, and refreshes the group /
 // total counts.
-function applyLineFilter() {
-const q = (lineFilter || '').trim().toLowerCase();
-let totalVisible = 0;
-let totalCards = 0;
-document.querySelectorAll('.line-group').forEach(group => {
-let groupVisible = 0;
-const cards = group.querySelectorAll('.line-card');
-cards.forEach(card => {
-const match = (!q || (card.dataset.filter || '').includes(q))
-&& lineCardMatchesStatus(card, linesStatusFilter);
-card.style.display = match ? '' : 'none';
-if (match) groupVisible++;
-});
-totalCards += cards.length;
-totalVisible += groupVisible;
-group.style.display = groupVisible ? '' : 'none';
-const countEl = group.querySelector('.lines-group-count');
-if (countEl) {
-const total = +group.dataset.total || cards.length;
-countEl.textContent = groupVisible === total ? `${total}` : `${groupVisible} / ${total}`;
-}
-});
-const empty = document.getElementById('line-filter-empty');
-if (empty) empty.style.display = (totalCards && !totalVisible) ? 'block' : 'none';
-const countCap = document.getElementById('lines-count');
-if (countCap) {
-const filtering = q || linesStatusFilter !== 'all';
-countCap.textContent = filtering
-? `${totalVisible} of ${totalCards}`
-: `${totalCards} ${totalCards === 1 ? 'line' : 'lines'}`;
-}
-}
-function renderLineCard(line, idx) {
-const actual = line.effective_rate ?? line.target_rate ?? 0;
-const p = pct(actual, line.target_rate ?? 0);
-const sc  = statusClass(p);
-const col = statusColor(p);
-const isOpen = expandedCards.has(idx);
-const steps  = line.cli_result?.production_steps ?? [];
-const belt       = line.cli_result?.belt;
-const beltsNeeded = line.cli_result?.belts_needed;
-const raw    = line.cli_result?.raw_resources ?? {};
-const miners = line.cli_result?.miners_needed ?? {};
-const isFluid = !!(line.fluid) || FLUID_ITEM_IDS.has(line.item);
-const fmtRate = (rate, beltName) => isFluid ? fmtFluid(rate) : fmtRB(rate, beltName);
-let body = '';
-if (isOpen) {
-const clir       = line.cli_result ?? {};
-const modCfgs      = clir.module_configs          ?? {};
-const beaconCfgs   = clir.beacon_configs          ?? {};
-const defaultBcn   = clir.default_beacon          ?? null;
-const recModOvr    = clir.recipe_module_overrides ?? {};
-const recBcnOvr    = clir.recipe_beacon_overrides ?? {};
-const housingQ     = clir.beacon_quality  ?? 'normal';
-const machineQ     = clir.machine_quality ?? 'normal';
-const machineRows = steps.map(s => {
-const stepPow = fmtPower(s.power_kw);
-const beaconPow = s.beacon_power_kw > 0 ? fmtPower(s.beacon_power_kw) : null;
-const powCell = stepPow
-? (beaconPow ? `${stepPow} <span style="color:var(--text-dim)">+${beaconPow} beacon</span>` : stepPow)
-: '—';
-// Use the step's own effective module config (override-resolved AND
-// allow_productivity-filtered by the CLI) rather than the global
-// per-machine config — otherwise recipes that can't take prod modules
-// (e.g. pipe, allow_productivity=False) show phantom prod chips.
-const mods    = s.module_specs ?? [];
-const beacon  = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? defaultBcn ?? null;
-const modHtml = mods.filter(m => m.count > 0).map(modChip).join(' ');
-const bcnHtml = beacon ? bcnChip(beacon, housingQ) : '';
-const bonusHtml = s.beacon_speed_bonus > 0
-? `<span style="font-size:9px;color:var(--text-dim)">+${(s.beacon_speed_bonus * 100).toFixed(1)}%</span>`
-: '';
-const chipRow = [modHtml, bcnHtml, bonusHtml].filter(Boolean).join(' ');
-const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}">◆</span>` : '';
-const belt = STATE.preferred_belt;
-const inEntries = Object.entries(s.inputs ?? {});
-const outEntries = Object.entries(s.outputs ?? {});
-// Amber buffer badge per output: shown next to each output when --step-machines over-sizes a step.
-// excess_output_per_min is now a dict {item: rate} mirroring outputs, covering co-products too.
-const excessMap = s.excess_output_per_min ?? {};
-const mkItems = (entries, exMap) => entries.map(([item, rate]) => {
-const isF = FLUID_ITEM_IDS.has(item);
-const rateStr = isF ? fmtFluid(rate) : fmtRB(rate, belt);
-const ex = exMap?.[item] ?? 0;
-const ann = ex > 0
-? `<span style="color:var(--warn);font-size:10px;font-weight:600;opacity:0.85;margin-left:4px" title="excess output buffered (forced ${s.forced_min_machines} machines)">+${fmtN(ex)}/m buf</span>`
-: '';
-return `<div class="step-io-item"><span class="step-io-name">${esc(label(item))}</span><span class="step-io-rate">${rateStr}${ann}</span></div>`;
-}).join('');
-const ioRow = (inEntries.length || outEntries.length) ? `<tr class="step-io-row"><td colspan="4" style="padding-top:0;padding-right:0"><div class="step-io-grid">
-<div class="step-io-col step-io-col--in"><div class="step-io-sect-label">Inputs</div>${mkItems(inEntries, {})}</div>
-<div class="step-io-col step-io-col--out"><div class="step-io-sect-label">Outputs</div>${mkItems(outEntries, excessMap)}</div>
-</div></td></tr>` : '';
-// Players build whole machines: lead with the ceil count, exact in parens.
-const mcExact = s.machine_count ?? 0;
-const mcCeil  = s.machine_count_ceil ?? Math.ceil(mcExact);
-const isFrac  = Math.abs(mcExact - Math.round(mcExact)) > 1e-4;
-const countCell = isFrac
-? `${mcCeil} <span style="color:var(--text-dim)">(${fmtMC(mcExact)})</span>`
-: fmtMC(mcExact);
-return `<tr>
-<td>${esc(label(s.recipe))}</td>
-<td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow ? `<div style="margin-top:3px;line-height:1.8">${chipRow}</div>` : ''}</td>
-<td class="r">${countCell}</td>
-<td class="r" style="color:var(--text-dim)">${powCell}</td>
-</tr>${ioRow}`;
-}).join('');
-const totalPow = line.cli_result?.total_power_mw;
-const totalPowCeil = line.cli_result?.total_power_mw_ceil;
-const totalPowStr = totalPowCeil != null ? fmtPower(totalPowCeil * 1000) : null;
-const throttledBadge = clir.chain_throttled
-? ` <span style="color:var(--bad);font-weight:400;font-size:10px;margin-left:8px" title="chain rate throttled to honor a --step-machines constraint below natural demand">throttled</span>`
-: '';
-const machineSection = steps.length ? `
-<div class="card-section">
-<div class="section-label">Machines${totalPowStr ? ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px" title="Power at whole built machine counts (fractional counts rounded up)">${totalPowStr} total</span>` : ''}${throttledBadge}</div>
-<table>
-<thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Power</th></tr></thead>
-<tbody>${machineRows}</tbody>
-</table>
-</div>` : '';
-// Aggregate machine, module and beacon totals across all steps
-const _machTotals = {};      // machine_key → total ceil count
-const _modTotals  = {};      // "type-tier-quality" → {m, total}
-const _bcnTotals  = {};      // machine_key → {bcn, machineTotal}
-for (const s of steps) {
-const mc = s.machine_count_ceil ?? 0;
-_machTotals[s.machine] = (_machTotals[s.machine] ?? 0) + mc;
-const sMods = (recModOvr[s.recipe] ?? modCfgs[s.machine] ?? []).filter(m => m.count > 0);
-for (const m of sMods) {
-const k = `${m.type}-${m.tier}-${m.quality ?? 'normal'}`;
-if (!_modTotals[k]) _modTotals[k] = { m, total: 0 };
-_modTotals[k].total += mc * m.count;
-}
-const bcn = recBcnOvr[s.recipe] ?? beaconCfgs[s.machine] ?? defaultBcn ?? null;
-if (bcn) {
-if (!_bcnTotals[s.machine]) _bcnTotals[s.machine] = { bcn, machineTotal: 0 };
-_bcnTotals[s.machine].machineTotal += mc;
-}
-}
-const _totChips = [
-...Object.entries(_machTotals).map(([m, n]) =>
-`<span class="chip"><span style="font-weight:600;color:var(--text)">${n}×</span> <span style="color:var(--text-dim)">${esc(machineLabel(m))}</span></span>`),
-...Object.values(_modTotals).map(({m, total}) => {
-const name = {prod:'Productivity',speed:'Speed',efficiency:'Efficiency'}[m.type] ?? m.type;
-const qStr = m.quality !== 'normal' ? ` (${m.quality})` : '';
-return `<span class="chip"><span style="font-weight:600;color:var(--text)">${total}×</span> <span style="color:var(--text-dim)">${name}-${m.tier}${qStr}</span></span>`;
-}),
-...(Object.keys(_bcnTotals).length ? [(() => {
-const totalBcn = Object.values(_bcnTotals).reduce((s, {bcn, machineTotal}) => s + bcn.count * machineTotal, 0);
-return `<span class="chip"><span style="font-weight:600;color:var(--text)">${totalBcn}×</span> <span style="color:var(--text-dim)">Beacon</span></span>`;
-})()] : []),
-].join('');
-const totalsSection = _totChips ? `
-<div class="card-section">
-<div class="section-label">Totals</div>
-<div class="chips">${_totChips}</div>
-</div>` : '';
-const busInputs = line.cli_result?.bus_inputs ?? {};
-const logiSet   = new Set(line.cli_args?.logistics_items ?? []);
-const directSet = new Set(line.cli_args?.direct_items ?? []);
-// Merged Inputs section — one row, each chip tagged with its source
-// (bus / bot / direct). Replaces the three sibling sections.
-const inputEntries = Object.entries(busInputs);
-const renderInputChip = ([r, rate]) => {
-const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
-const tag = logiSet.has(r)   ? '<span class="chip-tag" title="From logistics bots">bot</span>'
-: directSet.has(r) ? '<span class="chip-tag" title="Belt-fed directly from another line">direct</span>'
-: '<span class="chip-tag" title="From the main bus">bus</span>';
-return `<span class="chip">${tag}${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
-};
-const inputsSection = inputEntries.length ? `
-<div class="card-section">
-<div class="section-label">Inputs</div>
-<div class="chips">${inputEntries.map(renderInputChip).join('')}</div>
-</div>` : '';
-const reserveItems = line.reserve_items ?? [];
-const reserveSection = reserveItems.length ? `
-<div class="card-section">
-<div class="section-label">Reserve → Logistics</div>
-<div class="chips">${reserveItems.map(item => {
-const rate = reserveRateFor(line, item);
-const isF = FLUID_ITEM_IDS.has(item);
-const rateStr = rate > 0
-? (isF ? fmtFluid(rate) : `${fmtN(rate)}/min`)
-: '0/min';
-const dim = rate > 0 ? '' : ' style="opacity:.5"';
-return `<span class="chip"${dim}>${esc(label(item))}: <span style="color:var(--ok)">+${rateStr}</span></span>`;
-}).join('')}</div>
-</div>` : '';
-// Merged Raws section — one chip per resource: rate · miner count · machine
-// · power. Items present in both raw_resources and miners_needed combine;
-// an item in only one still renders with whatever datum is available.
-const ownRaw    = Object.entries(raw);
-const ownMiners = Object.entries(miners);
-const allRawKeys = [...new Set([...ownRaw.map(([k]) => k), ...ownMiners.map(([k]) => k)])];
-const rawsSection = allRawKeys.length ? `
-<div class="card-section">
-<div class="section-label">Raws</div>
-<div class="chips">${allRawKeys.map(r => {
-const rate = raw[r];
-const info = miners[r];
-const rateFmt = rate != null
-? (FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt))
-: null;
-let minerStr = '';
-if (info) {
-const isYield = info.required_yield_pct != null;
-const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${fmtMC(info.machine_count)}×`;
-const countCl = isYield ? 'var(--warn)' : 'var(--text)';
-const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
-const sep     = rateFmt ? ' · ' : '';
-minerStr = `${sep}<span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ${powStr}` : ''}</span>`;
-}
-const rateStr = rateFmt ? `<span style="color:var(--text)">${rateFmt}</span>` : '';
-return `<span class="chip">${esc(label(r))}: ${rateStr}${minerStr}</span>`;
-}).join('')}</div>
-</div>` : '';
-// Outputs section — only render when there are co-products; the primary
-// rate is already shown in the card header.
-const coProds = Object.entries(line.cli_result?.co_products ?? {});
-const primaryRate = line.effective_rate ?? line.target_rate ?? 0;
-const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, STATE.preferred_belt);
-const coProductSection = coProds.length ? `
-<div class="card-section">
-<div class="section-label">Outputs</div>
-<div class="chips">${[
-`<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
-...coProds.map(([r, rate]) => {
-const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
-return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
-})
-].join('')}</div>
-</div>` : '';
-const noteSection = line.player_notes ? `
-<div class="player-notes">${esc(line.player_notes)}</div>` : '';
-const cliArgsSummary = summarizeCliArgs(line.cli_args);
-const cliArgsSection = cliArgsSummary ? `
-<div class="card-section">
-<div class="section-label">Sized by</div>
-<div class="chips"><span class="chip" style="font-family:var(--mono,monospace);color:var(--text-dim)">${esc(cliArgsSummary)}</span></div>
-</div>` : '';
-body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${inputsSection}${rawsSection}${cliArgsSection}${noteSection}</div>`;
-}
-const cardClass   = line.wip ? 'wip' : sc;
-const displayRate = actual;
-const stale = lineStaleTechs(line);
-const cappedHere = line.cli_result?.research_prod_capped === true;
-const chips = [
-stale.length ? `<span class="card-chip stale" title="Research changed since this line was planned: ${stale.map(t => PRODUCTIVITY_RESEARCH[t]?.label ?? t).join(', ')}">stale</span>` : '',
-cappedHere    ? `<span class="card-chip capped" title="A step on this line is at the +300% prod cap; more research levels won't reduce its machine count.">@300% cap</span>` : '',
-].filter(Boolean).join(' ');
-// The WIP badge already marks in-progress lines — drop a redundant "(WIP)" in the label.
-const rawTitle  = line.label ?? label(line.item);
-const titleText = line.wip ? rawTitle.replace(/\s*\(wip\)\s*$/i, '') : rawTitle;
-// Subtitle only earns its row when it differs from the title.
-const itemName  = label(line.item);
-const subtitle  = itemName.trim().toLowerCase() !== titleText.trim().toLowerCase()
-? `<span class="card-subtitle">${esc(itemName)}</span>` : '';
-// Show the target only when it differs from actual — "30 / 30/min" is noise.
-const target = line.target_rate ?? 0;
-const showTarget = target > 0 && Math.abs(displayRate - target) > 1e-9;
-// Filter key also covers machine + recipe names so "foundry" / "plastic" find lines.
-const filterKey = [
-titleText, itemName, line.item,
-...steps.map(s => machineLabel(s.machine)),
-...steps.map(s => label(s.recipe)),
-].join(' ').toLowerCase();
-// Status bucket for the data-status attribute (drives the status filter chips).
-const dotClass = line.wip ? 'wip' : sc;
-return `
-<div class="line-card ${cardClass}" data-filter="${esc(filterKey)}"
-data-status="${dotClass}" data-stale="${stale.length ? 1 : 0}" data-capped="${cappedHere ? 1 : 0}">
-<div class="card-header ${cardClass}" data-card="${idx}" role="button" tabindex="0"
-aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'}">
-<div class="card-header-left">
-<span class="card-chevron">${isOpen ? '▼' : '▶'}</span>
-<div class="card-title-group">
-<span class="card-title">${esc(titleText)}${line.wip ? '<span class="wip-badge">WIP</span>' : ''}${chips ? ` ${chips}` : ''}</span>
-${subtitle}
-</div>
-</div>
-<div class="card-header-rate">
-<span class="rate-num">${fmtN(displayRate)}${showTarget ? ` / ${fmtN(target)}` : ''}/min</span>
-<span class="rate-unit">${isFluid ? fmtFluidUnitOnly(displayRate) : fmtUnitOnly(displayRate, belt ?? STATE.preferred_belt)}</span>
-</div>
-</div>
-<div class="card-progress"><div class="card-progress-fill" style="width:${p}%;background:${line.wip ? 'var(--warn)' : col}"></div></div>
-${body}
-</div>`;
-}
-function renderIssues() {
-const loc = currentLoc();
-const bn = loc.bottlenecks ?? [];
-const ns = loc.next_steps ?? [];
-if (!bn.length && !ns.length)
-return '<div class="no-issues">No bottlenecks or next steps.</div>';
-const parts = [];
-if (bn.length) {
-parts.push(`<div class="group-label" style="margin-bottom:8px">Bottlenecks</div>`);
-parts.push(...bn.map(b => `<div class="issue-item bad"><span>${esc(humanizeText(b))}</span></div>`));
-}
-if (ns.length) {
-parts.push(`<div class="group-label" style="margin:${bn.length ? '16px' : '0'} 0 8px">Next Steps</div>`);
-parts.push(...ns.map(s => `<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`));
-}
-return parts.join('');
-}
-function renderChat() {
-const avail = typeof window.claude?.complete === 'function';
-const warnDismissed = localStorage.getItem('chat_warn_dismissed') === '1';
-const warning = (avail || warnDismissed) ? '' : `<div class="chat-warning" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><span>window.claude.complete is not available — sign into Claude.ai for chat to work.</span><button class="btn-cancel" style="padding:0 6px;height:auto;font-size:10px;flex-shrink:0" id="btn-dismiss-chat-warn">✕</button></div>`;
-const msgs = STATE.chat_log.length
-? STATE.chat_log.map(e => `
-<div class="chat-msg ${e.from}">
-<div class="chat-bubble ${e.from}">
-<div class="chat-sender">${e.from === 'player' ? 'You' : 'Claude'}</div>
-<div class="chat-text">${esc(humanizeText(e.text))}</div>
-</div>
-</div>`).join('')
-: '<div class="chat-empty">No messages yet. Ask about your factory — strategy, machine counts, next steps.</div>';
-return `
-${warning}
-<div class="chat-messages" id="chat-messages">${msgs}</div>
-<div class="chat-input-row">
-<textarea class="chat-textarea" id="chat-input" rows="2"
-placeholder="Ask about your factory… (Enter to send, Shift+Enter for newline)"
-${chatSending || !avail ? 'disabled' : ''}></textarea>
-<button class="chat-send" id="btn-send" ${chatSending || !avail ? 'disabled' : ''}>
-${chatSending ? '…' : 'Send'}
-</button>
-</div>`;
-}
-function render() {
+function applyLineFilter(){let q=(lineFilter||``).trim().toLowerCase(),totalVisible=0,totalCards=0;document.querySelectorAll(`.line-group`).forEach(group=>{let groupVisible=0,cards=group.querySelectorAll(`.line-card`);cards.forEach(card=>{let match=(!q||(card.dataset.filter||``).includes(q))&&lineCardMatchesStatus(card,linesStatusFilter);card.style.display=match?``:`none`,match&&groupVisible++}),totalCards+=cards.length,totalVisible+=groupVisible,group.style.display=groupVisible?``:`none`;let countEl=group.querySelector(`.lines-group-count`);if(countEl){let total=+group.dataset.total||cards.length;countEl.textContent=groupVisible===total?`${total}`:`${groupVisible} / ${total}`}});let empty=document.getElementById(`line-filter-empty`);empty&&(empty.style.display=totalCards&&!totalVisible?`block`:`none`);let countCap=document.getElementById(`lines-count`);countCap&&(countCap.textContent=q||linesStatusFilter!==`all`?`${totalVisible} of ${totalCards}`:`${totalCards} ${totalCards===1?`line`:`lines`}`)}function renderLineCard(line,idx){let actual=line.effective_rate??line.target_rate??0,p=pct(actual,line.target_rate??0),sc=statusClass(p),col=statusColor(p),isOpen=expandedCards.has(idx),steps=line.cli_result?.production_steps??[],belt=line.cli_result?.belt,beltsNeeded=line.cli_result?.belts_needed,raw=line.cli_result?.raw_resources??{},miners=line.cli_result?.miners_needed??{},isFluid=!!line.fluid||FLUID_ITEM_IDS.has(line.item),fmtRate=(rate,beltName)=>isFluid?fmtFluid(rate):fmtRB(rate,beltName),body=``;if(isOpen){let clir=line.cli_result??{},modCfgs=clir.module_configs??{},beaconCfgs=clir.beacon_configs??{},defaultBcn=clir.default_beacon??null,recModOvr=clir.recipe_module_overrides??{},recBcnOvr=clir.recipe_beacon_overrides??{},housingQ=clir.beacon_quality??`normal`,machineQ=clir.machine_quality??`normal`,machineRows=steps.map(s=>{let stepPow=fmtPower(s.power_kw),beaconPow=s.beacon_power_kw>0?fmtPower(s.beacon_power_kw):null,powCell=stepPow?beaconPow?`${stepPow} <span style="color:var(--text-dim)">+${beaconPow} beacon</span>`:stepPow:`—`,mods=s.module_specs??[],beacon=recBcnOvr[s.recipe]??beaconCfgs[s.machine]??defaultBcn??null,chipRow=[mods.filter(m=>m.count>0).map(modChip).join(` `),beacon?bcnChip(beacon,housingQ):``,s.beacon_speed_bonus>0?`<span style="font-size:9px;color:var(--text-dim)">+${(s.beacon_speed_bonus*100).toFixed(1)}%</span>`:``].filter(Boolean).join(` `),qualDot=machineQ===`normal`?``:`<span class="qdot q-${machineQ}">◆</span>`,belt=STATE.preferred_belt,inEntries=Object.entries(s.inputs??{}),outEntries=Object.entries(s.outputs??{}),excessMap=s.excess_output_per_min??{},mkItems=(entries,exMap)=>entries.map(([item,rate])=>{let rateStr=FLUID_ITEM_IDS.has(item)?fmtFluid(rate):fmtRB(rate,belt),ex=exMap?.[item]??0,ann=ex>0?`<span style="color:var(--warn);font-size:10px;font-weight:600;opacity:0.85;margin-left:4px" title="excess output buffered (forced ${s.forced_min_machines} machines)">+${fmtN(ex)}/m buf</span>`:``;return`<div class="step-io-item"><span class="step-io-name">${esc(label(item))}</span><span class="step-io-rate">${rateStr}${ann}</span></div>`}).join(``),ioRow=inEntries.length||outEntries.length?`<tr class="step-io-row"><td colspan="4" style="padding-top:0;padding-right:0"><div class="step-io-grid">
+        <div class="step-io-col step-io-col--in"><div class="step-io-sect-label">Inputs</div>${mkItems(inEntries,{})}</div>
+        <div class="step-io-col step-io-col--out"><div class="step-io-sect-label">Outputs</div>${mkItems(outEntries,excessMap)}</div>
+      </div></td></tr>`:``,mcExact=s.machine_count??0,mcCeil=s.machine_count_ceil??Math.ceil(mcExact),countCell=Math.abs(mcExact-Math.round(mcExact))>1e-4?`${mcCeil} <span style="color:var(--text-dim)">(${fmtMC(mcExact)})</span>`:fmtMC(mcExact);return`<tr>
+        <td>${esc(label(s.recipe))}</td>
+        <td class="name-col"><span style="display:inline-flex;align-items:center;gap:3px;line-height:1">${esc(machineLabel(s.machine))}${qualDot}</span>${chipRow?`<div style="margin-top:3px;line-height:1.8">${chipRow}</div>`:``}</td>
+        <td class="r">${countCell}</td>
+        <td class="r" style="color:var(--text-dim)">${powCell}</td>
+      </tr>${ioRow}`}).join(``),totalPow=line.cli_result?.total_power_mw,totalPowCeil=line.cli_result?.total_power_mw_ceil,totalPowStr=totalPowCeil==null?null:fmtPower(totalPowCeil*1e3),throttledBadge=clir.chain_throttled?` <span style="color:var(--bad);font-weight:400;font-size:10px;margin-left:8px" title="chain rate throttled to honor a --step-machines constraint below natural demand">throttled</span>`:``,machineSection=steps.length?`
+      <div class="card-section">
+        <div class="section-label">Machines${totalPowStr?` <span style="color:var(--text-dim);font-weight:400;font-size:10px;margin-left:8px" title="Power at whole built machine counts (fractional counts rounded up)">${totalPowStr} total</span>`:``}${throttledBadge}</div>
+        <table>
+          <thead><tr><th>Recipe</th><th>Machine</th><th class="r">Count</th><th class="r">Power</th></tr></thead>
+          <tbody>${machineRows}</tbody>
+        </table>
+      </div>`:``,_machTotals={},_modTotals={},_bcnTotals={};for(let s of steps){let mc=s.machine_count_ceil??0;_machTotals[s.machine]=(_machTotals[s.machine]??0)+mc;let sMods=(recModOvr[s.recipe]??modCfgs[s.machine]??[]).filter(m=>m.count>0);for(let m of sMods){let k=`${m.type}-${m.tier}-${m.quality??`normal`}`;_modTotals[k]||(_modTotals[k]={m,total:0}),_modTotals[k].total+=mc*m.count}let bcn=recBcnOvr[s.recipe]??beaconCfgs[s.machine]??defaultBcn??null;bcn&&(_bcnTotals[s.machine]||(_bcnTotals[s.machine]={bcn,machineTotal:0}),_bcnTotals[s.machine].machineTotal+=mc)}let _totChips=[...Object.entries(_machTotals).map(([m,n])=>`<span class="chip"><span style="font-weight:600;color:var(--text)">${n}×</span> <span style="color:var(--text-dim)">${esc(machineLabel(m))}</span></span>`),...Object.values(_modTotals).map(({m,total})=>{let name={prod:`Productivity`,speed:`Speed`,efficiency:`Efficiency`}[m.type]??m.type,qStr=m.quality===`normal`?``:` (${m.quality})`;return`<span class="chip"><span style="font-weight:600;color:var(--text)">${total}×</span> <span style="color:var(--text-dim)">${name}-${m.tier}${qStr}</span></span>`}),...Object.keys(_bcnTotals).length?[(()=>`<span class="chip"><span style="font-weight:600;color:var(--text)">${Object.values(_bcnTotals).reduce((s,{bcn,machineTotal})=>s+bcn.count*machineTotal,0)}×</span> <span style="color:var(--text-dim)">Beacon</span></span>`)()]:[]].join(``),totalsSection=_totChips?`
+      <div class="card-section">
+        <div class="section-label">Totals</div>
+        <div class="chips">${_totChips}</div>
+      </div>`:``,busInputs=line.cli_result?.bus_inputs??{},logiSet=new Set(line.cli_args?.logistics_items??[]),directSet=new Set(line.cli_args?.direct_items??[]),inputEntries=Object.entries(busInputs),renderInputChip=([r,rate])=>{let fmt=FLUID_ITEM_IDS.has(r)?fmtFluid(rate):fmtRB(rate,STATE.preferred_belt);return`<span class="chip">${logiSet.has(r)?`<span class="chip-tag" title="From logistics bots">bot</span>`:directSet.has(r)?`<span class="chip-tag" title="Belt-fed directly from another line">direct</span>`:`<span class="chip-tag" title="From the main bus">bus</span>`}${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`},inputsSection=inputEntries.length?`
+      <div class="card-section">
+        <div class="section-label">Inputs</div>
+        <div class="chips">${inputEntries.map(renderInputChip).join(``)}</div>
+      </div>`:``,reserveItems=line.reserve_items??[],reserveSection=reserveItems.length?`
+      <div class="card-section">
+        <div class="section-label">Reserve → Logistics</div>
+        <div class="chips">${reserveItems.map(item=>{let rate=reserveRateFor(line,item),isF=FLUID_ITEM_IDS.has(item),rateStr=rate>0?isF?fmtFluid(rate):`${fmtN(rate)}/min`:`0/min`;return`<span class="chip"${rate>0?``:` style="opacity:.5"`}>${esc(label(item))}: <span style="color:var(--ok)">+${rateStr}</span></span>`}).join(``)}</div>
+      </div>`:``,ownRaw=Object.entries(raw),ownMiners=Object.entries(miners),allRawKeys=[...new Set([...ownRaw.map(([k])=>k),...ownMiners.map(([k])=>k)])],rawsSection=allRawKeys.length?`
+      <div class="card-section">
+        <div class="section-label">Raws</div>
+        <div class="chips">${allRawKeys.map(r=>{let rate=raw[r],info=miners[r],rateFmt=rate==null?null:FLUID_ITEM_IDS.has(r)?fmtFluid(rate):fmtRB(rate,STATE.preferred_belt),minerStr=``;if(info){let isYield=info.required_yield_pct!=null,count=isYield?`${info.required_yield_pct.toFixed(1)}% yield`:`${fmtMC(info.machine_count)}×`,countCl=isYield?`var(--warn)`:`var(--text)`,powStr=info.power_kw?fmtPower(info.power_kw):null;minerStr=`${rateFmt?` · `:``}<span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr?` · ${powStr}`:``}</span>`}let rateStr=rateFmt?`<span style="color:var(--text)">${rateFmt}</span>`:``;return`<span class="chip">${esc(label(r))}: ${rateStr}${minerStr}</span>`}).join(``)}</div>
+      </div>`:``,coProds=Object.entries(line.cli_result?.co_products??{}),primaryRate=line.effective_rate??line.target_rate??0,primaryFmt=isFluid?fmtFluid(primaryRate):fmtRB(primaryRate,STATE.preferred_belt),coProductSection=coProds.length?`
+      <div class="card-section">
+        <div class="section-label">Outputs</div>
+        <div class="chips">${[`<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,...coProds.map(([r,rate])=>{let fmt=FLUID_ITEM_IDS.has(r)?fmtFluid(rate):fmtRB(rate,STATE.preferred_belt);return`<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`})].join(``)}</div>
+      </div>`:``,noteSection=line.player_notes?`
+      <div class="player-notes">${esc(line.player_notes)}</div>`:``,cliArgsSummary=summarizeCliArgs(line.cli_args);body=`<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${inputsSection}${rawsSection}${cliArgsSummary?`
+      <div class="card-section">
+        <div class="section-label">Sized by</div>
+        <div class="chips"><span class="chip" style="font-family:var(--mono,monospace);color:var(--text-dim)">${esc(cliArgsSummary)}</span></div>
+      </div>`:``}${noteSection}</div>`}let cardClass=line.wip?`wip`:sc,displayRate=actual,stale=lineStaleTechs(line),cappedHere=line.cli_result?.research_prod_capped===!0,chips=[stale.length?`<span class="card-chip stale" title="Research changed since this line was planned: ${stale.map(t=>PRODUCTIVITY_RESEARCH[t]?.label??t).join(`, `)}">stale</span>`:``,cappedHere?`<span class="card-chip capped" title="A step on this line is at the +300% prod cap; more research levels won't reduce its machine count.">@300% cap</span>`:``].filter(Boolean).join(` `),rawTitle=line.label??label(line.item),titleText=line.wip?rawTitle.replace(/\s*\(wip\)\s*$/i,``):rawTitle,itemName=label(line.item),subtitle=itemName.trim().toLowerCase()===titleText.trim().toLowerCase()?``:`<span class="card-subtitle">${esc(itemName)}</span>`,target=line.target_rate??0,showTarget=target>0&&Math.abs(displayRate-target)>1e-9,filterKey=[titleText,itemName,line.item,...steps.map(s=>machineLabel(s.machine)),...steps.map(s=>label(s.recipe))].join(` `).toLowerCase(),dotClass=line.wip?`wip`:sc;return`
+    <div class="line-card ${cardClass}" data-filter="${esc(filterKey)}"
+         data-status="${dotClass}" data-stale="${stale.length?1:0}" data-capped="${cappedHere?1:0}">
+      <div class="card-header ${cardClass}" data-card="${idx}" role="button" tabindex="0"
+           aria-expanded="${isOpen}" title="${isOpen?`Collapse`:`Expand`}">
+        <div class="card-header-left">
+          <span class="card-chevron">${isOpen?`▼`:`▶`}</span>
+          <div class="card-title-group">
+            <span class="card-title">${esc(titleText)}${line.wip?`<span class="wip-badge">WIP</span>`:``}${chips?` ${chips}`:``}</span>
+            ${subtitle}
+          </div>
+        </div>
+        <div class="card-header-rate">
+          <span class="rate-num">${fmtN(displayRate)}${showTarget?` / ${fmtN(target)}`:``}/min</span>
+          <span class="rate-unit">${isFluid?fmtFluidUnitOnly(displayRate):fmtUnitOnly(displayRate,belt??STATE.preferred_belt)}</span>
+        </div>
+      </div>
+      <div class="card-progress"><div class="card-progress-fill" style="width:${p}%;background:${line.wip?`var(--warn)`:col}"></div></div>
+      ${body}
+    </div>`}function renderIssues(){let loc=currentLoc(),bn=loc.bottlenecks??[],ns=loc.next_steps??[];if(!bn.length&&!ns.length)return`<div class="no-issues">No bottlenecks or next steps.</div>`;let parts=[];return bn.length&&(parts.push(`<div class="group-label" style="margin-bottom:8px">Bottlenecks</div>`),parts.push(...bn.map(b=>`<div class="issue-item bad"><span>${esc(humanizeText(b))}</span></div>`))),ns.length&&(parts.push(`<div class="group-label" style="margin:${bn.length?`16px`:`0`} 0 8px">Next Steps</div>`),parts.push(...ns.map(s=>`<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`))),parts.join(``)}function renderChat(){let avail=typeof window.claude?.complete==`function`,warnDismissed=localStorage.getItem(`chat_warn_dismissed`)===`1`;return`
+    ${avail||warnDismissed?``:`<div class="chat-warning" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><span>window.claude.complete is not available — sign into Claude.ai for chat to work.</span><button class="btn-cancel" style="padding:0 6px;height:auto;font-size:10px;flex-shrink:0" id="btn-dismiss-chat-warn">✕</button></div>`}
+    <div class="chat-messages" id="chat-messages">${STATE.chat_log.length?STATE.chat_log.map(e=>`
+        <div class="chat-msg ${e.from}">
+          <div class="chat-bubble ${e.from}">
+            <div class="chat-sender">${e.from===`player`?`You`:`Claude`}</div>
+            <div class="chat-text">${esc(humanizeText(e.text))}</div>
+          </div>
+        </div>`).join(``):`<div class="chat-empty">No messages yet. Ask about your factory — strategy, machine counts, next steps.</div>`}</div>
+    <div class="chat-input-row">
+      <textarea class="chat-textarea" id="chat-input" rows="2"
+        placeholder="Ask about your factory… (Enter to send, Shift+Enter for newline)"
+        ${chatSending||!avail?`disabled`:``}></textarea>
+      <button class="chat-send" id="btn-send" ${chatSending||!avail?`disabled`:``}>
+        ${chatSending?`…`:`Send`}
+      </button>
+    </div>`}function render(){
 // Full innerHTML replace resets scroll; restore it so interactions don't jump the page.
-const scrollY = window.scrollY;
-// Research Bonuses is global config (applies to all surfaces/calcs), not per-location
-// status — it's embedded inside the Research Labs card (renderLabCard), since the lab
-// research levels directly drive that card's eSPM / lab-speed / lab-prod numbers.
-document.getElementById('app').innerHTML = `
-${renderHeader()}
-<div class="main">
-<div class="main-inner">
-${(s => s + (s ? '<hr class="loc-divider">' : ''))(renderScience())}
-${(STATE.dataset ?? 'vanilla') !== 'vanilla' ? renderLocationBar() : ''}
-${renderBottlenecks()}
-${renderTabs()}
-<div class="tab-panel${activeTab==='overview' ?' active':''}">${renderOverview()}</div>
-<div class="tab-panel${activeTab==='lines'    ?' active':''}">${renderLinesTab()}</div>
-<div class="tab-panel${activeTab==='issues'   ?' active':''}">${renderIssues()}</div>
-<div class="tab-panel${activeTab==='chat'     ?' active':''}">${renderChat()}</div>
-</div>
-</div>`;
-bindEvents();
-applyLineFilter();  // re-apply Lines-tab filter after a full re-render (e.g. card expand)
-window.scrollTo(0, scrollY);
-if (activeTab === 'chat') scrollChat();
-}
-function scrollChat() {
-const el = document.getElementById('chat-messages');
-if (el) el.scrollTop = el.scrollHeight;
-}
+let scrollY=window.scrollY;document.getElementById(`app`).innerHTML=`
+    ${renderHeader()}
+    <div class="main">
+      <div class="main-inner">
+        ${(s=>s+(s?`<hr class="loc-divider">`:``))(renderScience())}
+        ${(STATE.dataset??`vanilla`)===`vanilla`?``:renderLocationBar()}
+        ${renderBottlenecks()}
+        ${renderTabs()}
+        <div class="tab-panel${activeTab===`overview`?` active`:``}">${renderOverview()}</div>
+        <div class="tab-panel${activeTab===`lines`?` active`:``}">${renderLinesTab()}</div>
+        <div class="tab-panel${activeTab===`issues`?` active`:``}">${renderIssues()}</div>
+        <div class="tab-panel${activeTab===`chat`?` active`:``}">${renderChat()}</div>
+      </div>
+    </div>`,bindEvents(),applyLineFilter(),window.scrollTo(0,scrollY),activeTab===`chat`&&scrollChat()}function scrollChat(){let el=document.getElementById(`chat-messages`);el&&(el.scrollTop=el.scrollHeight)}
 // ── Events ───────────────────────────────────────────────────────────────────
-function bindEvents() {
-const tabBtns = [...document.querySelectorAll('.tab-btn')];
-tabBtns.forEach((btn, i) => {
-btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); });
-btn.addEventListener('keydown', e => {
-if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-e.preventDefault();
-const next = tabBtns[(i + (e.key === 'ArrowRight' ? 1 : tabBtns.length - 1)) % tabBtns.length];
-next.focus(); next.click();
-});
-});
-// Keyboard activation for div-based buttons (card headers, toggles, banner, rollup rows)
-document.querySelectorAll('[role="button"][tabindex]').forEach(el =>
-el.addEventListener('keydown', e => {
-if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
-}));
-document.getElementById('science-toggle')?.addEventListener('click', () => {
-scienceOpen = !scienceOpen;
-localStorage.setItem('science_open', scienceOpen ? '1' : '0');
-render();
-});
-document.getElementById('banner-actions')?.addEventListener('click', () => {
-activeTab = 'issues';
-render();
-});
-document.querySelectorAll('[data-goto-tab]').forEach(el =>
-el.addEventListener('click', () => { activeTab = el.dataset.gotoTab; render(); }));
-document.querySelectorAll('.loc-btn[data-locidx]').forEach(btn =>
-btn.addEventListener('click', () => {
-activeLocationIdx = +btn.dataset.locidx;
-expandedCards = new Set();
-render();
-}));
-document.querySelectorAll('.card-header[data-card]').forEach(hdr =>
-hdr.addEventListener('click', e => {
-const idx = +hdr.dataset.card;
-expandedCards.has(idx) ? expandedCards.delete(idx) : expandedCards.add(idx);
-render();
-}));
+function bindEvents(){let tabBtns=[...document.querySelectorAll(`.tab-btn`)];tabBtns.forEach((btn,i)=>{btn.addEventListener(`click`,()=>{activeTab=btn.dataset.tab,render()}),btn.addEventListener(`keydown`,e=>{if(e.key!==`ArrowLeft`&&e.key!==`ArrowRight`)return;e.preventDefault();let next=tabBtns[(i+(e.key===`ArrowRight`?1:tabBtns.length-1))%tabBtns.length];next.focus(),next.click()})}),document.querySelectorAll(`[role="button"][tabindex]`).forEach(el=>el.addEventListener(`keydown`,e=>{(e.key===`Enter`||e.key===` `)&&(e.preventDefault(),el.click())})),document.getElementById(`science-toggle`)?.addEventListener(`click`,()=>{scienceOpen=!scienceOpen,localStorage.setItem(`science_open`,scienceOpen?`1`:`0`),render()}),document.getElementById(`banner-actions`)?.addEventListener(`click`,()=>{activeTab=`issues`,render()}),document.querySelectorAll(`[data-goto-tab]`).forEach(el=>el.addEventListener(`click`,()=>{activeTab=el.dataset.gotoTab,render()})),document.querySelectorAll(`.loc-btn[data-locidx]`).forEach(btn=>btn.addEventListener(`click`,()=>{activeLocationIdx=+btn.dataset.locidx,expandedCards=/* @__PURE__ */ new Set,render()})),document.querySelectorAll(`.card-header[data-card]`).forEach(hdr=>hdr.addEventListener(`click`,e=>{let idx=+hdr.dataset.card;expandedCards.has(idx)?expandedCards.delete(idx):expandedCards.add(idx),render()}));
 // Lines-tab filter: filter in place (no re-render) so the input keeps focus while typing.
-const filterInput = document.getElementById('line-filter-input');
-if (filterInput) {
-filterInput.addEventListener('input', () => {
-lineFilter = filterInput.value;
-applyLineFilter();
-});
-filterInput.addEventListener('keydown', e => {
-if (e.key === 'Escape') { lineFilter = ''; filterInput.value = ''; applyLineFilter(); }
-});
-}
-// Status filter chips — toggle on/off (re-click the active chip to clear).
-document.querySelectorAll('.filter-chip[data-status]').forEach(btn =>
-btn.addEventListener('click', () => {
-const key = btn.dataset.status;
-linesStatusFilter = linesStatusFilter === key ? 'all' : key;
-render();
-}));
-// Expand-all / collapse-all toggle over every line on the current location.
-document.getElementById('btn-toggle-all')?.addEventListener('click', () => {
-const lns = currentLoc().lines ?? [];
-expandedCards = expandedCards.size > 0 ? new Set() : new Set(lns.map((_, i) => i));
-render();
-});
-document.getElementById('research-toggle')?.addEventListener('click', () => {
-researchOpen = !researchOpen;
-render();
-});
-document.querySelectorAll('.research-input[data-research]').forEach(input =>
-input.addEventListener('change', () => {
-const key = input.dataset.research;
-const lvl = Math.max(0, parseInt(input.value, 10) || 0);
-STATE.research_levels = STATE.research_levels ?? {};
-if (lvl > 0) STATE.research_levels[key] = lvl;
-else         delete STATE.research_levels[key];
-saveState();
-render();
-}));
+let filterInput=document.getElementById(`line-filter-input`);
 // Research cycle time picker — the only interactive lab control. The rest of
 // lab_config is state-driven (player asks Claude to update it).
-document.querySelectorAll('select[data-lab="research_cycle_time"]').forEach(el =>
-el.addEventListener('change', () => {
-STATE.lab_config = STATE.lab_config ?? { ...DEFAULT_STATE.lab_config };
-STATE.lab_config.research_cycle_time = Math.max(1, parseInt(el.value, 10) || 60);
-saveState();
-render();
-}));
-const btnExport = document.getElementById('btn-export');
-if (btnExport) btnExport.addEventListener('click', () => {
-document.getElementById('export-text').value = encodeState(STATE);
-document.getElementById('export-dialog').showModal();
-});
-const btnImport = document.getElementById('btn-import');
-if (btnImport) btnImport.addEventListener('click', () => {
-document.getElementById('import-text').value = '';
-document.getElementById('import-error').textContent = '';
-document.getElementById('import-dialog').showModal();
-});
-const btnTheme = document.getElementById('btn-theme');
-if (btnTheme) btnTheme.addEventListener('click', () => {
-const cur = document.documentElement.getAttribute('data-theme')
-|| (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-const next = cur === 'light' ? 'dark' : 'light';
-document.documentElement.setAttribute('data-theme', next);
-localStorage.setItem('theme', next);
-render();
-});
-const btnReset = document.getElementById('btn-reset');
-if (btnReset) btnReset.addEventListener('click', () => {
-if (confirm('Reset all factory data? This cannot be undone.')) {
-STATE = { ...DEFAULT_STATE }; activeLocationIdx = 0; saveState(); render();
-}
-});
-const btnDismissChatWarn = document.getElementById('btn-dismiss-chat-warn');
-if (btnDismissChatWarn) btnDismissChatWarn.addEventListener('click', () => {
-localStorage.setItem('chat_warn_dismissed', '1');
-render();
-});
-const btnSend  = document.getElementById('btn-send');
-const chatArea = document.getElementById('chat-input');
-if (btnSend)  btnSend.addEventListener('click', sendChat);
-if (chatArea) chatArea.addEventListener('keydown', e => {
-if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
-});
-}
+filterInput&&(filterInput.addEventListener(`input`,()=>{lineFilter=filterInput.value,applyLineFilter()}),filterInput.addEventListener(`keydown`,e=>{e.key===`Escape`&&(lineFilter=``,filterInput.value=``,applyLineFilter())})),document.querySelectorAll(`.filter-chip[data-status]`).forEach(btn=>btn.addEventListener(`click`,()=>{let key=btn.dataset.status;linesStatusFilter=linesStatusFilter===key?`all`:key,render()})),document.getElementById(`btn-toggle-all`)?.addEventListener(`click`,()=>{let lns=currentLoc().lines??[];expandedCards=expandedCards.size>0?/* @__PURE__ */ new Set:new Set(lns.map((_,i)=>i)),render()}),document.getElementById(`research-toggle`)?.addEventListener(`click`,()=>{researchOpen=!researchOpen,render()}),document.querySelectorAll(`.research-input[data-research]`).forEach(input=>input.addEventListener(`change`,()=>{let key=input.dataset.research,lvl=Math.max(0,parseInt(input.value,10)||0);STATE.research_levels=STATE.research_levels??{},lvl>0?STATE.research_levels[key]=lvl:delete STATE.research_levels[key],saveState(),render()})),document.querySelectorAll(`select[data-lab="research_cycle_time"]`).forEach(el=>el.addEventListener(`change`,()=>{STATE.lab_config=STATE.lab_config??{...DEFAULT_STATE.lab_config},STATE.lab_config.research_cycle_time=Math.max(1,parseInt(el.value,10)||60),saveState(),render()}));let btnExport=document.getElementById(`btn-export`);btnExport&&btnExport.addEventListener(`click`,()=>{document.getElementById(`export-text`).value=encodeState(STATE),document.getElementById(`export-dialog`).showModal()});let btnImport=document.getElementById(`btn-import`);btnImport&&btnImport.addEventListener(`click`,()=>{document.getElementById(`import-text`).value=``,document.getElementById(`import-error`).textContent=``,document.getElementById(`import-dialog`).showModal()});let btnTheme=document.getElementById(`btn-theme`);btnTheme&&btnTheme.addEventListener(`click`,()=>{let next=(document.documentElement.getAttribute(`data-theme`)||(window.matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`))===`light`?`dark`:`light`;document.documentElement.setAttribute(`data-theme`,next),localStorage.setItem(`theme`,next),render()});let btnReset=document.getElementById(`btn-reset`);btnReset&&btnReset.addEventListener(`click`,()=>{confirm(`Reset all factory data? This cannot be undone.`)&&(STATE={...DEFAULT_STATE},activeLocationIdx=0,saveState(),render())});let btnDismissChatWarn=document.getElementById(`btn-dismiss-chat-warn`);btnDismissChatWarn&&btnDismissChatWarn.addEventListener(`click`,()=>{localStorage.setItem(`chat_warn_dismissed`,`1`),render()});let btnSend=document.getElementById(`btn-send`),chatArea=document.getElementById(`chat-input`);btnSend&&btnSend.addEventListener(`click`,sendChat),chatArea&&chatArea.addEventListener(`keydown`,e=>{e.key===`Enter`&&!e.shiftKey&&(e.preventDefault(),sendChat())})}
 // ── Chat ─────────────────────────────────────────────────────────────────────
-function buildPrompt(userMessage) {
-const { chat_log: _, ...stateForPrompt } = STATE;
-const history = STATE.chat_log.slice(-10).map(m => `${m.from === 'player' ? 'PLAYER' : 'CLAUDE'}: ${m.text}`).join('\n');
-return `${SYSTEM_PROMPT}\n\nCURRENT FACTORY STATE:\n${JSON.stringify(stateForPrompt, null, 2)}\n\nCONVERSATION:\n${history}\nPLAYER: ${userMessage}\n\nCLAUDE:`;
-}
-function parseResponse(response) {
-const match = response.match(/```json\s*([\s\S]*?)\s*```/);
-if (!match) return { text: response.trim(), newState: null };
-const text = response.replace(/```json[\s\S]*?```/, '').trim();
-try { return { text, newState: JSON.parse(match[1]) }; } catch { return { text: response.trim(), newState: null }; }
-}
-async function sendChat() {
-if (chatSending) return;
-const input = document.getElementById('chat-input');
-const text = input?.value.trim();
-if (!text) return;
-input.value = '';
-chatSending = true;
-const fullLog = [...STATE.chat_log, { from: 'player', text }];
-STATE = { ...STATE, chat_log: fullLog };
-render(); scrollChat();
-try {
-if (!window.claude?.complete) throw new Error('window.claude.complete not available');
-const response = await window.claude.complete(buildPrompt(text));
-const { text: replyText, newState } = parseResponse(response);
-const replyLog = [...fullLog, { from: 'claude', text: replyText || '(state updated)' }];
-STATE = newState ? { ...newState, chat_log: replyLog } : { ...STATE, chat_log: replyLog };
-await saveState();
-} catch (e) {
-STATE = { ...STATE, chat_log: [...fullLog, { from: 'claude', text: `Error: ${e.message}` }] };
-} finally {
-chatSending = false;
-render(); scrollChat();
-}
-}
-// ── Export / Import dialogs (outside render cycle) ───────────────────────────
-document.getElementById('export-close').addEventListener('click', () =>
-document.getElementById('export-dialog').close());
-document.getElementById('export-copy').addEventListener('click', () =>
-navigator.clipboard.writeText(document.getElementById('export-text').value));
-document.getElementById('import-cancel').addEventListener('click', () =>
-document.getElementById('import-dialog').close());
-document.getElementById('import-apply').addEventListener('click', () => {
-const text = document.getElementById('import-text').value.trim();
-try {
-STATE = migrateState(decodeState(text));
-activeLocationIdx = 0;
-saveState();
-document.getElementById('import-dialog').close();
-render();
-} catch (e) {
-document.getElementById('import-error').textContent = 'Invalid data: ' + e.message;
-}
-});
+function buildPrompt(userMessage){let{chat_log:_,...stateForPrompt}=STATE,history=STATE.chat_log.slice(-10).map(m=>`${m.from===`player`?`PLAYER`:`CLAUDE`}: ${m.text}`).join(`
+`);return`You are a Factorio factory co-pilot embedded in a dashboard artifact.
+
+IMPORTANT: If the player reports a factory change, output the COMPLETE updated FACTORY_STATE as a JSON block at the END of your response:
+\`\`\`json
+{...complete state...}
+\`\`\`
+Rules: include ALL fields from current state, do NOT include "chat_log".
+If no state change, respond naturally with NO JSON block.
+Keep responses brief and practical.\n\nCURRENT FACTORY STATE:\n${JSON.stringify(stateForPrompt,null,2)}\n\nCONVERSATION:\n${history}\nPLAYER: ${userMessage}\n\nCLAUDE:`}function parseResponse(response){let match=response.match(/```json\s*([\s\S]*?)\s*```/);if(!match)return{text:response.trim(),newState:null};let text=response.replace(/```json[\s\S]*?```/,``).trim();try{return{text,newState:JSON.parse(match[1])}}catch{return{text:response.trim(),newState:null}}}async function sendChat(){if(chatSending)return;let input=document.getElementById(`chat-input`),text=input?.value.trim();if(!text)return;input.value=``,chatSending=!0;let fullLog=[...STATE.chat_log,{from:`player`,text}];STATE={...STATE,chat_log:fullLog},render(),scrollChat();try{if(!window.claude?.complete)throw Error(`window.claude.complete not available`);let{text:replyText,newState}=parseResponse(await window.claude.complete(buildPrompt(text))),replyLog=[...fullLog,{from:`claude`,text:replyText||`(state updated)`}];STATE=newState?{...newState,chat_log:replyLog}:{...STATE,chat_log:replyLog},await saveState()}catch(e){STATE={...STATE,chat_log:[...fullLog,{from:`claude`,text:`Error: ${e.message}`}]}}finally{chatSending=!1,render(),scrollChat()}}
 // ── Init ─────────────────────────────────────────────────────────────────────
-(async () => {
-const savedTheme = localStorage.getItem('theme');
-if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
-await checkStorage();
-const saved = await loadState();
-if (saved) STATE = saved;
-const params = new URLSearchParams(location.search);
-const tabParam = params.get('tab');
-if (tabParam && ['overview','lines','issues','chat'].includes(tabParam)) activeTab = tabParam;
-if (params.get('expand') === 'all') {
-expandedCards = new Set((currentLoc().lines ?? []).map((_, i) => i));
-}
-// Global keyboard shortcuts (bound once; ignored while typing in a field).
-//   /      focus the Lines-tab filter (switches to Lines if elsewhere)
-//   n / j  scroll the next visible card into view; p / k previous
-document.addEventListener('keydown', e => {
-if (e.ctrlKey || e.metaKey || e.altKey) return;
-const tag = (e.target?.tagName || '').toLowerCase();
-if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
-if (e.key === '/') {
-e.preventDefault();
-if (activeTab !== 'lines') { activeTab = 'lines'; render(); }
-document.getElementById('line-filter-input')?.focus();
-return;
-}
-if (activeTab === 'lines' && (e.key === 'n' || e.key === 'j' || e.key === 'p' || e.key === 'k')) {
-const cards = [...document.querySelectorAll('.line-card')].filter(c => c.style.display !== 'none');
-if (!cards.length) return;
-e.preventDefault();
-const dir = (e.key === 'n' || e.key === 'j') ? 1 : -1;
-const tops = cards.map(c => c.getBoundingClientRect().top + window.scrollY);
-const cy = window.scrollY + 24;
-let cur = -1;
-for (let i = 0; i < tops.length; i++) { if (tops[i] <= cy + 4) cur = i; else break; }
-const targetIdx = Math.max(0, Math.min(cards.length - 1, cur + dir));
-cards[targetIdx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-});
-render();
-})();
-</script>
-</body>
-</html>
+document.getElementById(`export-close`).addEventListener(`click`,()=>document.getElementById(`export-dialog`).close()),document.getElementById(`export-copy`).addEventListener(`click`,()=>navigator.clipboard.writeText(document.getElementById(`export-text`).value)),document.getElementById(`import-cancel`).addEventListener(`click`,()=>document.getElementById(`import-dialog`).close()),document.getElementById(`import-apply`).addEventListener(`click`,()=>{let text=document.getElementById(`import-text`).value.trim();try{STATE=migrateState(decodeState(text)),activeLocationIdx=0,saveState(),document.getElementById(`import-dialog`).close(),render()}catch(e){document.getElementById(`import-error`).textContent=`Invalid data: `+e.message}}),(async()=>{let savedTheme=localStorage.getItem(`theme`);savedTheme&&document.documentElement.setAttribute(`data-theme`,savedTheme),await checkStorage();let saved=await loadState();saved&&(STATE=saved);let params=new URLSearchParams(location.search),tabParam=params.get(`tab`);tabParam&&[`overview`,`lines`,`issues`,`chat`].includes(tabParam)&&(activeTab=tabParam),params.get(`expand`)===`all`&&(expandedCards=new Set((currentLoc().lines??[]).map((_,i)=>i))),document.addEventListener(`keydown`,e=>{if(e.ctrlKey||e.metaKey||e.altKey)return;let tag=(e.target?.tagName||``).toLowerCase();if(!(tag===`input`||tag===`textarea`||e.target?.isContentEditable)){if(e.key===`/`){e.preventDefault(),activeTab!==`lines`&&(activeTab=`lines`,render()),document.getElementById(`line-filter-input`)?.focus();return}if(activeTab===`lines`&&(e.key===`n`||e.key===`j`||e.key===`p`||e.key===`k`)){let cards=[...document.querySelectorAll(`.line-card`)].filter(c=>c.style.display!==`none`);if(!cards.length)return;e.preventDefault();let dir=e.key===`n`||e.key===`j`?1:-1,tops=cards.map(c=>c.getBoundingClientRect().top+window.scrollY),cy=window.scrollY+24,cur=-1;for(let i=0;i<tops.length&&tops[i]<=cy+4;i++)cur=i;cards[Math.max(0,Math.min(cards.length-1,cur+dir))]?.scrollIntoView({behavior:`smooth`,block:`start`})}}}),render()})();</script>

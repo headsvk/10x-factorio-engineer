@@ -23,8 +23,8 @@ A Factorio factory co-pilot built on three components:
   references/
     *.md                    # Split strategy reference files (11 topics: early-game, factory-layouts, trains, megabase, planets, space-platforms, power, combat-defense, logistics-circuits, quality, resources)
 dev/
-  dashboard.html            # Dashboard source — single vanilla HTML, no build deps
-  build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html
+  dashboard.html            # Dashboard source — single vanilla HTML, no runtime deps
+  build_dashboard.py        # Minifies dashboard.html → assets/dashboard.html (uses minify-html)
   preview.py                # Generates preview.tmp.html with factory state pre-loaded; use Claude Preview MCP to view
   sample/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
@@ -258,6 +258,9 @@ See [SKILL.md §3](10x-factorio-engineer/SKILL.md) for the factory state schema 
 | ![Dashboard dark](dev/screenshots/readme__dark.png) | ![Dashboard light](dev/screenshots/readme__light.png) |
 
 ### Building the dashboard
+
+Requires the `minify-html` dev dependency (`python -m pip install minify-html`).
+The built artifact stays dependency-free in the browser.
 
 ```bash
 python dev/build_dashboard.py    # minify dev/dashboard.html → assets/dashboard.html

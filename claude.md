@@ -23,7 +23,7 @@ A `SKILL.md` that tells Claude how to behave as a planning assistant: when and
 how to call the CLI, how to track the player's factory conversationally, and how
 to output a `FACTORY_STATE` for import into the dashboard. The dashboard is a
 published `application/vnd.ant.html` artifact — a single vanilla HTML file with
-no build dependencies. State is encoded as base64 and stored in `window.storage`
+no runtime dependencies. State is encoded as base64 and stored in `window.storage`
 (Anthropic server-side, cross-device) with `localStorage` fallback. An in-artifact
 chat panel is powered by `window.claude.complete()`. Strategy references
 in `10x-factorio-engineer/references/` are loaded on demand per topic.
@@ -36,7 +36,7 @@ in `10x-factorio-engineer/references/` are loaded on demand per topic.
 
 | Trigger | Required follow-up action |
 |---------|--------------------------|
-| `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. To preview: run `python dev/preview.py` (defaults to sample state) **or** `python dev/preview.py --state dev/my-factory.json` to render the user's working factory; then use the Claude Preview MCP tool (server name `dashboard-preview`, config at `.claude/launch.json`) and reload the page after each preview.py rerun — **never** open the file in a browser via `--open` or `subprocess`. If the change is visually observable (new section, restyled chip, new render path), also re-run `python dev/screenshot_tests.py` so the regenerated PNGs in `dev/screenshots/` match the new dashboard. When the new feature requires fixture data the existing scenarios don't cover (e.g. a new `cli_args` field), add or extend the synthetic state factories in `screenshot_tests.py` so at least one screenshot exercises it. |
+| `dev/dashboard.html` is modified | Run `python dev/build_dashboard.py` from the repo root to rebuild `10x-factorio-engineer/assets/dashboard.html`. Never edit the built artifact directly — it is overwritten on every build. To preview: run `python dev/preview.py` (defaults to sample state) **or** `python dev/preview.py --state dev/my-factory.json` to render the user's working factory; then use the Claude Preview MCP tool (server name `dashboard-preview`, config at `.claude/launch.json`) and reload the page after each preview.py rerun — **never** open the file in a browser via `--open` or `subprocess`. If the change is visually observable (new section, restyled chip, new render path), also re-run `python dev/screenshot_tests.py` so the regenerated PNGs in `dev/screenshots/` match the new dashboard. **`screenshot_tests.py` renders the shipped artifact (`assets/dashboard.html`), not the source — so always run `build_dashboard.py` first; the script errors out if the artifact is missing or older than the source.** A clean rebuild that changes zero PNGs confirms minification is faithful (a render bug would show up as a diff). When the new feature requires fixture data the existing scenarios don't cover (e.g. a new `cli_args` field), add or extend the synthetic state factories in `screenshot_tests.py` so at least one screenshot exercises it. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) | Update the JSON output example and field table in `10x-factorio-engineer/SKILL.md` §2. The JSON example must include every field that appears in real CLI output — run the CLI and copy actual values rather than inventing them. Then check whether the factory-state schema (SKILL.md §3) needs updating — if yes, follow the factory-state rule below. Verify by grepping SKILL.md for each new field name and confirming it appears in both the example block and the field table. |
 | `cli.py` (`10x-factorio-engineer/assets/cli.py`) flag added, removed, or changed | This is the general-purpose calculator — NOT the quality planner. 1. Update the module-level docstring at the top of `cli.py` (Usage block). 2. Update the flags table in `10x-factorio-engineer/SKILL.md` §2. If it affects factory-state tracking, also update `10x-factorio-engineer/SKILL.md` §3 schema and follow the factory-state rule below. |
 | `10x-factorio-engineer/assets/cli.py` output shape changes (new fields, renamed keys) OR `--format human` output layout changes | Update the sample `--format human` output block in `README.md`. Run the CLI with `--format human` and copy actual output rather than editing manually. |
@@ -116,7 +116,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
 | `10x-factorio-engineer/references/` | Split strategy reference files (11 topic files): early-game, factory-layouts, trains, megabase, planets, space-platforms, power, combat-defense, logistics-circuits, quality, resources |
 | `dev/dashboard.html` | Dashboard source — single vanilla HTML file, no build dependencies |
-| `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` |
+| `dev/build_dashboard.py` | Build script — minifies `dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html` via the `minify-html` library (dev-time dependency: `pip install minify-html`) |
 | `dev/preview.py` | Generates `dev/preview.tmp.html` with factory state pre-loaded; defaults to `dev/sample/state.json`; use `--state PATH` for a custom JSON file; use `--no-min` for the unminified source dashboard |
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
@@ -605,13 +605,16 @@ See `10x-factorio-engineer/SKILL.md` §3 for the canonical factory-state schema 
 
 ### Dashboard (`dev/dashboard.html` → `10x-factorio-engineer/assets/dashboard.html`)
 
-A single self-contained vanilla HTML file — no React, no build toolchain, no
-external dependencies beyond the browser. State is encoded as base64 (minified
-JSON → UTF-8 bytes → `btoa`) for compact storage and portability.
+A single self-contained vanilla HTML file — no React, no framework, no
+external dependencies beyond the browser at runtime. State is encoded as base64
+(minified JSON → UTF-8 bytes → `btoa`) for compact storage and portability.
 
-**Build:** `python dev/build_dashboard.py` — strips HTML comments and blank
-lines, writes `10x-factorio-engineer/assets/dashboard.html`. Use `--open` to open
-the result in a browser immediately.
+**Build:** `python dev/build_dashboard.py` — minifies HTML/CSS/JS (strips all
+comments, collapses whitespace) via the `minify-html` library and writes
+`10x-factorio-engineer/assets/dashboard.html` (~24% smaller than source). Use
+`--open` to open the result in a browser immediately. `minify-html` is a
+**dev-time build dependency** (`python -m pip install minify-html`); the produced
+artifact remains dependency-free in the browser.
 
 **Header:** compact one-line brand label (`10x Factorio Engineer`) left, badges
 right (`[Space Age]` when applicable + current `[N SPM]`). Global config badges

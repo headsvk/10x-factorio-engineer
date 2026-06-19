@@ -5,12 +5,15 @@ Build 10x-factorio-engineer/assets/dashboard.html from the vanilla-HTML source.
 Reads  : dev/dashboard.html
 Writes : 10x-factorio-engineer/assets/dashboard.html  (minified)
 
-Minification (stdlib only, no external tools):
-  - Strips HTML comments
-  - Strips leading/trailing whitespace from every line
-  - Drops blank lines
-  Script/style content is NOT parsed — whitespace inside <script> and <style>
-  blocks is collapsed only at the line level, which is safe for well-formed JS.
+Minification uses the `minify-html` library (pip install minify-html), a
+tokenizer-based minifier that safely handles the dashboard's multi-line
+template literals, regex literals, and embedded URLs:
+  - Strips HTML, CSS, and JS comments
+  - Collapses whitespace inside <script> and <style> blocks (not just per-line)
+  - Minifies HTML structure
+
+This is a dev-time build dependency only; the produced artifact remains a
+single self-contained vanilla HTML file with no runtime dependencies.
 
 Usage:
     python dev/build_dashboard.py          # minify → assets/dashboard.html
@@ -19,8 +22,15 @@ Usage:
 
 import argparse
 import os
-import re
 import webbrowser
+
+try:
+    import minify_html
+except ImportError:
+    raise SystemExit(
+        "build_dashboard.py requires the 'minify-html' package.\n"
+        "Install it with:  python -m pip install minify-html"
+    )
 
 parser = argparse.ArgumentParser(description="Build 10x-factorio-engineer/assets/dashboard.html")
 parser.add_argument("--open", action="store_true", help="Open bundle.html in browser after build")
@@ -34,11 +44,7 @@ OUT  = os.path.join(REPO_ROOT, "10x-factorio-engineer", "assets", "dashboard.htm
 with open(SRC, encoding="utf-8") as f:
     html = f.read()
 
-# 1. Strip HTML comments (not inside script/style — safe because our file has none)
-html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
-# 2. Strip leading/trailing whitespace from each line and drop blank lines
-lines = [ln.strip() for ln in html.splitlines()]
-html  = "\n".join(ln for ln in lines if ln)
+html = minify_html.minify(html, minify_css=True, minify_js=True)
 
 with open(OUT, "w", encoding="utf-8") as f:
     f.write(html)

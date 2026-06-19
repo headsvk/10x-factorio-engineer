@@ -13,6 +13,11 @@ Usage:
     playwright install chromium
     python dev/screenshot_tests.py
 
+Renders the SHIPPED artifact (10x-factorio-engineer/assets/dashboard.html), so the
+regression PNGs catch bugs introduced by minification. Run
+`python dev/build_dashboard.py` first; the script errors if the artifact is
+missing or older than the source.
+
 Output: dev/screenshots/
 """
 
@@ -36,9 +41,13 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 DEV_DIR         = os.path.dirname(os.path.abspath(__file__))
-DASHBOARD_SRC   = os.path.join(DEV_DIR, "dashboard.html")
+ASSETS_DIR      = os.path.join(os.path.dirname(DEV_DIR), "10x-factorio-engineer", "assets")
+# Screenshots render the SHIPPED (built + minified) artifact, not the source, so
+# the regression PNGs surface any bug introduced by minification. Run
+# `python dev/build_dashboard.py` first — this guard fires if you forget.
+DASHBOARD_SRC   = os.path.join(ASSETS_DIR, "dashboard.html")
 SCREENSHOTS_DIR = os.path.join(DEV_DIR, "screenshots")
-CLI_PATH        = os.path.join(os.path.dirname(DEV_DIR), "10x-factorio-engineer", "assets", "cli.py")
+CLI_PATH        = os.path.join(ASSETS_DIR, "cli.py")
 
 QUALITIES = ["normal", "uncommon", "rare", "epic", "legendary"]
 
@@ -89,6 +98,19 @@ def encode_state(state: dict) -> str:
 def build_html(state: dict, light_theme: bool = False) -> str:
     """Inject state (and optional theme) into localStorage before the first <script> tag."""
     encoded = encode_state(state)
+    if not os.path.exists(DASHBOARD_SRC):
+        raise SystemExit(
+            f"Built dashboard not found: {DASHBOARD_SRC}\n"
+            "Run `python dev/build_dashboard.py` first — screenshots render the "
+            "shipped artifact."
+        )
+    src = os.path.join(DEV_DIR, "dashboard.html")
+    if os.path.exists(src) and os.path.getmtime(src) > os.path.getmtime(DASHBOARD_SRC):
+        raise SystemExit(
+            "dev/dashboard.html is newer than the built artifact — the screenshots "
+            "would be stale.\nRun `python dev/build_dashboard.py` before regenerating "
+            "screenshots."
+        )
     with open(DASHBOARD_SRC, encoding="utf-8") as f:
         html = f.read()
     theme_line = f"localStorage.setItem('theme', '{'light' if light_theme else 'dark'}');\n"
