@@ -704,46 +704,40 @@ def make_state_line_research_stale() -> dict:
 
 
 def make_state_line_research_capped() -> dict:
-    """Line card showing @300% cap chip — a recipe step is at the prod cap."""
-    state = _base_state("Capped Research", dataset="space-age")
-    state["research_levels"] = {"steel-productivity": 50}
-    step = {
-        "recipe": "steel-plate",
-        "machine": "electric-furnace",
-        "machine_count": 4.0,
-        "machine_count_ceil": 4,
-        "outputs": {"steel-plate": 30.0},
-        "inputs": {"iron-plate": 150.0},
-        "machine_quality": "normal",
-        "beacon_speed_bonus": 0.0,
-        "power_kw": 360.0,
-        "power_kw_ceil": 360.0,
-        "beacon_power_kw": 0.0,
+    """Line card showing @300% cap chip — a realistic prod-capped line.
+
+    Low Density Structure cast in a foundry on Vulcanus with 4× legendary
+    Productivity Module 3. Total machine productivity is the foundry's +50 %
+    inherent bonus + the modules + Low-Density-Structure-Productivity research,
+    which exceeds the +300 % crafting cap, so the CLI flags
+    research_prod_capped. This is the textbook case the chip is meant for —
+    far more faithful than a normal electric furnace, which can't get close.
+    """
+    cli = run_cli(
+        "--item", "low-density-structure", "--rate", "60", "--location", "vulcanus",
+        "--recipe", "low-density-structure=casting-low-density-structure",
+        "--machine-quality", "legendary",
+        "--modules", "foundry=4:prod:3:legendary",
+        "--research", "low-density-structure-productivity=16",
+        "--bus-item", "plastic-bar",
+    )
+    cli_args = {
+        "item": "low-density-structure",
+        "rate": 60,
+        "machine_quality": "legendary",
+        "recipe": {"low-density-structure": "casting-low-density-structure"},
+        "modules": {"foundry": [{"count": 4, "type": "prod", "tier": 3, "quality": "legendary"}]},
+        "research": {"low-density-structure-productivity": 16},
+        "bus_items": ["plastic-bar"],
     }
-    cli_result = {
-        "item": "steel-plate",
-        "rate_per_min": 30.0,
-        "production_steps": [step],
-        "raw_resources": {"iron-plate": 150.0},
-        "co_products": {},
-        "miners_needed": {},
-        "total_power_mw": 0.36,
-        "total_power_mw_ceil": 0.36,
-        "bus_inputs": {},
-        "research_levels": {"steel-productivity": 50},
-        "research_prod_capped": True,
-    }
-    state["locations"] = [_loc(
-        "nauvis", "Nauvis",
-        lines=[{
-            "item": "steel-plate",
-            "label": "Steel Plate",
-            "target_rate": 30,
-            "effective_rate": 30,
-            "cli_args": {"item": "steel-plate", "rate": 30},
-            "cli_result": cli_result,
-        }],
-    )]
+    state = _line_card_state(
+        "Vulcanus – Legendary LDS", "vulcanus", "Vulcanus",
+        "low-density-structure", "Low Density Structure", 60, cli,
+        cli_args=cli_args,
+    )
+    # Match line + account research so the line reads "capped", not "stale".
+    state["machine_quality"] = "legendary"
+    state["research_levels"] = {"low-density-structure-productivity": 16}
     return state
 
 
@@ -1072,6 +1066,11 @@ async def capture_section(context, state, selector, tab, out_path,
         if pre_click:
             await page.locator(pre_click).first.click()
             await page.wait_for_timeout(150)
+        # Sticky Lines group headers pin to the viewport top, so an element
+        # screenshot of a tall card would scroll the card up and capture the
+        # header painted over the card's title row. Neutralize sticky for the
+        # capture only — the live dashboard keeps the headers sticky.
+        await page.add_style_tag(content=".lines-group-header{position:static !important}")
         await page.locator(selector).first.screenshot(path=out_path)
         await page.close()
     finally:
@@ -1122,6 +1121,8 @@ async def run_quality_combinations(context):
             await page.wait_for_selector(".line-card", timeout=10_000)
             await page.evaluate("document.fonts.ready")
             await page.wait_for_timeout(200)
+            # See note in capture_section: drop sticky for the element capture.
+            await page.add_style_tag(content=".lines-group-header{position:static !important}")
 
             card = page.locator(".line-card").first
             out_path = os.path.join(SCREENSHOTS_DIR, filename)

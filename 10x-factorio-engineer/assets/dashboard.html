@@ -38,9 +38,9 @@ font-family: 'Barlow Condensed', system-ui, sans-serif;
 [data-theme="light"] {
 --bg:           #faf9f2;
 --bg-card:      #fffcf0;
---bg-input:     #f0e8d5;
---border:       #e8dfc5;
---border-sub:   #f0e8d5;
+--bg-input:     #e6dcc0;
+--border:       #d4c89e;
+--border-sub:   #ebe2c6;
 --text:         #1c1608;
 --text-muted:   #6b5f42;
 --text-dim:     #6b5e40;
@@ -48,23 +48,23 @@ font-family: 'Barlow Condensed', system-ui, sans-serif;
 --accent-hover: #92400e;
 --accent-contrast: #fff8eb;
 --ok:           #16a34a;
---ok-bg:        rgba(22,163,74,.07);
---ok-border:    rgba(22,163,74,.22);
---warn:         #b45309;
---warn-bg:      rgba(180,83,9,.07);
---warn-border:  rgba(180,83,9,.22);
+--ok-bg:        rgba(22,163,74,.10);
+--ok-border:    rgba(22,163,74,.30);
+--warn:         #d97706;
+--warn-bg:      rgba(217,119,6,.10);
+--warn-border:  rgba(217,119,6,.30);
 --bad:          #dc2626;
---bad-bg:       rgba(220,38,38,.07);
---bad-border:   rgba(220,38,38,.2);
+--bad-bg:       rgba(220,38,38,.10);
+--bad-border:   rgba(220,38,38,.28);
 }
 /* ── Respect OS preference when no manual override ── */
 @media (prefers-color-scheme: light) {
 :root:not([data-theme]) {
 --bg:           #faf9f2;
 --bg-card:      #fffcf0;
---bg-input:     #f0e8d5;
---border:       #e8dfc5;
---border-sub:   #f0e8d5;
+--bg-input:     #e6dcc0;
+--border:       #d4c89e;
+--border-sub:   #ebe2c6;
 --text:         #1c1608;
 --text-muted:   #6b5f42;
 --text-dim:     #6b5e40;
@@ -72,14 +72,14 @@ font-family: 'Barlow Condensed', system-ui, sans-serif;
 --accent-hover: #92400e;
 --accent-contrast: #fff8eb;
 --ok:           #16a34a;
---ok-bg:        rgba(22,163,74,.07);
---ok-border:    rgba(22,163,74,.22);
---warn:         #b45309;
---warn-bg:      rgba(180,83,9,.07);
---warn-border:  rgba(180,83,9,.22);
+--ok-bg:        rgba(22,163,74,.10);
+--ok-border:    rgba(22,163,74,.30);
+--warn:         #d97706;
+--warn-bg:      rgba(217,119,6,.10);
+--warn-border:  rgba(217,119,6,.30);
 --bad:          #dc2626;
---bad-bg:       rgba(220,38,38,.07);
---bad-border:   rgba(220,38,38,.2);
+--bad-bg:       rgba(220,38,38,.10);
+--bad-border:   rgba(220,38,38,.28);
 }
 }
 body { background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; overflow-y: scroll; }
@@ -206,7 +206,7 @@ padding: 0; margin-bottom: 0; }
 text-transform: uppercase; letter-spacing: .05em; border-radius: 3px;
 padding: 1px 6px; border: 1px solid; display: inline-flex; align-items: center; }
 .card-chip.stale  { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
-.card-chip.capped { color: var(--text-dim); border-color: var(--border); background: var(--bg-input); }
+.card-chip.capped { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
 /* ── Bottleneck banner (one-line summary; full lists live in the Actions tab) ── */
 .bottleneck-banner { background: var(--bad-bg); border: 1px solid var(--bad-border);
 border-left: 3px solid var(--bad);
@@ -353,6 +353,36 @@ letter-spacing: .02em; padding: 6px 10px; }
 .line-filter-empty { margin-top: 10px; color: var(--text-dim);
 font-family: 'Barlow Condensed', sans-serif; font-size: 13px;
 letter-spacing: .04em; }
+/* ── Lines toolbar: search + status filter chips + expand-all ── */
+.lines-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.lines-toolbar .line-filter { margin-bottom: 0; flex: 1 1 220px; min-width: 180px; max-width: 320px; }
+.lines-toolbar .line-filter-input { max-width: none; }
+.lines-filter-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.filter-chip { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
+border-radius: 3px; padding: 3px 9px; height: 30px;
+font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
+letter-spacing: .05em; text-transform: uppercase; cursor: pointer;
+transition: background .12s, color .12s, border-color .12s;
+display: inline-flex; align-items: center; gap: 5px; }
+.filter-chip:hover:not(.active) { background: var(--border); color: var(--text); }
+.filter-chip.active { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+.filter-chip-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+color: var(--text-dim); letter-spacing: 0; }
+.filter-chip.active .filter-chip-count { color: var(--accent-contrast); opacity: .85; }
+.lines-count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
+margin-left: auto; white-space: nowrap; }
+/* ── Sticky Lines group header (visible / total counts) ── */
+.lines-group-header { position: sticky; top: 0; z-index: 2; background: var(--bg);
+margin: 12px 0 8px; padding: 4px 0;
+display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.line-group:first-child .lines-group-header { margin-top: 0; }
+.lines-group-header .group-label { margin: 0; padding-bottom: 4px; flex: 1; }
+.lines-group-count { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+color: var(--text-dim); letter-spacing: 0; padding-bottom: 4px;
+border-bottom: 1px solid var(--border-sub); }
+/* ── Merged Inputs chip: source tag (bus / bot / direct) ── */
+.chip-tag { display: inline-block; margin-right: 5px; font-size: 9px; font-weight: 700;
+text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
 .rate-num  { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted);
 font-variant-numeric: tabular-nums; }
 .rate-unit { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
@@ -440,8 +470,11 @@ text-indent: -9999px; overflow: hidden; color: var(--text-dim); }
 .bcn-chip .qdot, .mod-chip .qdot, td.name-col .qdot { width: 5px; height: 5px; }
 .bcn-sep { margin: 0 3px; }
 /* ── Issues ── */
+/* Pending actions use a neutral accent palette — green reads as "done". */
 .issue-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px;
-border-radius: 4px; font-size: 13px; margin-bottom: 8px; }
+border-radius: 4px; font-size: 13px; margin-bottom: 8px;
+background: var(--bg-card); border: 1px solid var(--border-sub);
+border-left: 3px solid var(--accent); color: var(--text-muted); }
 .issue-item:last-child { margin-bottom: 0; }
 .issue-item.bad  { background: var(--bad-bg);  border: 1px solid var(--bad-border);
 border-left: 3px solid var(--bad);  color: var(--bad); }
@@ -540,23 +573,6 @@ white-space: nowrap; }
 <button class="btn-primary" id="import-apply">Apply</button>
 </div>
 </dialog>
-<dialog id="add-loc-dialog">
-<h3>Add Location</h3>
-<p class="desc">Add a planet or a named space platform.</p>
-<div class="section-label" style="margin-bottom:6px">Planets</div>
-<div id="add-loc-planets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
-<hr style="border:none;border-top:1px solid var(--border-sub);margin-bottom:14px">
-<div class="section-label" style="margin-bottom:6px">Space Platform</div>
-<div style="display:flex;gap:8px">
-<input id="add-plat-name" class="dialog-textarea"
-style="min-height:unset;height:32px;flex:1;padding:4px 8px;font-size:13px"
-placeholder="Platform name…" maxlength="40">
-<button class="btn-primary" id="btn-add-plat" style="height:32px;padding:0 14px">Add</button>
-</div>
-<div class="dialog-actions" style="margin-top:16px">
-<button class="btn-cancel" id="add-loc-close">Close</button>
-</div>
-</dialog>
 <script>
 // ── Encode / Decode ─────────────────────────────────────────────────────────
 function encodeState(state) {
@@ -576,7 +592,6 @@ return JSON.parse(value); // backward compat: plain JSON
 }
 // ── Constants ────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'factorio_engineer_state';
-const PLANET_IDS    = ['nauvis','vulcanus','fulgora','gleba','aquilo'];
 const PLANET_LABELS = { nauvis:'Nauvis', vulcanus:'Vulcanus', fulgora:'Fulgora', gleba:'Gleba', aquilo:'Aquilo' };
 function makeLocation(id, type, labelOverride) {
 const lbl = labelOverride ?? PLANET_LABELS[id] ?? id;
@@ -809,6 +824,7 @@ let activeTab = 'overview';
 let activeLocationIdx = 0;
 let expandedCards = new Set();
 let lineFilter = '';  // Lines-tab item filter (live, in-place; not persisted)
+let linesStatusFilter = 'all'; // 'all' | 'bad' | 'warn' | 'wip' | 'stale' | 'capped'
 let storageMode = 'checking';
 let chatSending = false;
 function currentLoc() {
@@ -1114,11 +1130,9 @@ return `<button class="loc-btn${i === activeLocationIdx ? ' active' : ''}" data-
 const planetBtns   = planets.map(btnFor).join('');
 const platformBtns = platforms.map(btnFor).join('');
 const sep = planets.length && platforms.length ? '<span class="loc-sep">|</span>' : '';
-const isVanilla = (STATE.dataset ?? 'vanilla') === 'vanilla';
 return `
 <div class="loc-bar">
 ${planetBtns}${sep}${platformBtns}
-${isVanilla ? '' : '<button class="btn loc-btn" id="btn-add-loc" style="opacity:.7">+ Add</button>'}
 </div>`;
 }
 // ── Research productivity ────────────────────────────────────────────────────
@@ -1384,7 +1398,7 @@ const actionCount = (loc.bottlenecks?.length ?? 0) + (loc.next_steps?.length ?? 
 const tabs = [
 ['overview',  'Overview'],
 ['lines',     `Lines${loc.lines?.length ? ` (${loc.lines.length})` : ''}`],
-['issues',    `Actions${actionCount ? ` (${actionCount})` : ''}`],
+['issues',    `Steps${actionCount ? ` (${actionCount})` : ''}`],
 ['chat',      'Chat'],
 ];
 return `
@@ -1428,7 +1442,7 @@ const ns = loc.next_steps ?? [];
 const nextSection = ns.length ? `
 <div class="overview-section">
 <div class="group-label">Next Step</div>
-<div class="issue-item good"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(ns[0]))}</span>
+<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(ns[0]))}</span>
 ${ns.length > 1 ? `<button class="overview-link" style="margin-left:auto;flex-shrink:0" data-goto-tab="issues">+${ns.length - 1} more →</button>` : ''}
 </div>
 </div>` : '';
@@ -1463,39 +1477,102 @@ const idxMap = new Map(lines.map((l, i) => [l, i]));
 const buckets = Object.fromEntries(LINE_CATEGORY_ORDER.map(n => [n, []]));
 for (const line of lines) buckets[lineCategory(line)].push(line);
 const groups = LINE_CATEGORY_ORDER.map(name => [name, buckets[name]]);
-const filterBar = `
+// Status filter counts (over all lines on this location, ignoring the search
+// box — chips are reset-to-status switches, not search refinements).
+const counts = {
+all:    lines.length,
+bad:    lines.filter(l => lineStatusBucket(l) === 'bad').length,
+warn:   lines.filter(l => lineStatusBucket(l) === 'warn').length,
+wip:    lines.filter(l => lineStatusBucket(l) === 'wip').length,
+stale:  lines.filter(l => lineStaleTechs(l).length > 0).length,
+capped: lines.filter(l => l.cli_result?.research_prod_capped === true).length,
+};
+const chip = (key, lbl) => {
+const n = counts[key];
+if (key !== 'all' && n === 0) return '';
+return `<button class="filter-chip${linesStatusFilter === key ? ' active' : ''}" data-status="${key}">${lbl}<span class="filter-chip-count">${n}</span></button>`;
+};
+// Expand/collapse-all label reflects current state.
+const toggleAllLabel = expandedCards.size > 0 ? 'Collapse all' : 'Expand all';
+const toolbar = `
+<div class="lines-toolbar">
 <div class="line-filter">
 <input type="text" id="line-filter-input" class="line-filter-input" autocomplete="off"
-placeholder="Filter items…" value="${esc(lineFilter)}" />
-<span class="line-filter-empty" id="line-filter-empty" style="display:none">No lines match.</span>
-</div>`;
-let html = filterBar;
-for (const [name, lines] of groups) {
-if (!lines.length) continue;
-html += `<div class="line-group">
-<div class="group-label" style="margin:12px 0 8px">${name}</div>
-${lines.map(l => renderLineCard(l, idxMap.get(l))).join('')}
+placeholder="Filter lines… (press / to focus)" value="${esc(lineFilter)}" />
+</div>
+<div class="lines-filter-chips">
+${chip('all',    'All')}
+${chip('bad',    'Bad')}
+${chip('warn',   'Warn')}
+${chip('wip',    'WIP')}
+${chip('stale',  'Stale')}
+${chip('capped', '@300%')}
+</div>
+<button class="btn" id="btn-toggle-all">${toggleAllLabel}</button>
+<span class="lines-count" id="lines-count">${lines.length} ${lines.length === 1 ? 'line' : 'lines'}</span>
+</div>
+<div class="line-filter-empty" id="line-filter-empty" style="display:none">No lines match.</div>`;
+let html = toolbar;
+for (const [name, groupLines] of groups) {
+if (!groupLines.length) continue;
+html += `<div class="line-group" data-group="${esc(name)}" data-total="${groupLines.length}">
+<div class="lines-group-header">
+<div class="group-label">${name}</div>
+<span class="lines-group-count">${groupLines.length}</span>
+</div>
+${groupLines.map(l => renderLineCard(l, idxMap.get(l))).join('')}
 </div>`;
 }
 return html;
 }
-// In-place Lines-tab filter — hides non-matching cards (and emptied group headers)
-// without re-rendering, so the input keeps focus while typing.
+// Status bucket for a line — drives both the status filter chips and the inline
+// dot. 'wip' takes precedence; otherwise the rate-vs-target status applies.
+function lineStatusBucket(line) {
+if (line.wip) return 'wip';
+const actual = line.effective_rate ?? line.target_rate ?? 0;
+return statusClass(pct(actual, line.target_rate ?? 0));
+}
+function lineCardMatchesStatus(card, filter) {
+if (filter === 'all')    return true;
+if (filter === 'stale')  return card.dataset.stale === '1';
+if (filter === 'capped') return card.dataset.capped === '1';
+return card.dataset.status === filter; // bad | warn | wip
+}
+// In-place Lines-tab filter — hides non-matching cards (and emptied groups)
+// without re-rendering, so the search input keeps focus while typing. Applies
+// both the text search and the active status filter, and refreshes the group /
+// total counts.
 function applyLineFilter() {
 const q = (lineFilter || '').trim().toLowerCase();
-let anyMatch = false;
+let totalVisible = 0;
+let totalCards = 0;
 document.querySelectorAll('.line-group').forEach(group => {
-let groupVisible = false;
-group.querySelectorAll('.line-card').forEach(card => {
-const match = !q || (card.dataset.filter || '').includes(q);
+let groupVisible = 0;
+const cards = group.querySelectorAll('.line-card');
+cards.forEach(card => {
+const match = (!q || (card.dataset.filter || '').includes(q))
+&& lineCardMatchesStatus(card, linesStatusFilter);
 card.style.display = match ? '' : 'none';
-if (match) groupVisible = true;
+if (match) groupVisible++;
 });
+totalCards += cards.length;
+totalVisible += groupVisible;
 group.style.display = groupVisible ? '' : 'none';
-if (groupVisible) anyMatch = true;
+const countEl = group.querySelector('.lines-group-count');
+if (countEl) {
+const total = +group.dataset.total || cards.length;
+countEl.textContent = groupVisible === total ? `${total}` : `${groupVisible} / ${total}`;
+}
 });
 const empty = document.getElementById('line-filter-empty');
-if (empty) empty.style.display = (q && !anyMatch) ? 'block' : 'none';
+if (empty) empty.style.display = (totalCards && !totalVisible) ? 'block' : 'none';
+const countCap = document.getElementById('lines-count');
+if (countCap) {
+const filtering = q || linesStatusFilter !== 'all';
+countCap.textContent = filtering
+? `${totalVisible} of ${totalCards}`
+: `${totalCards} ${totalCards === 1 ? 'line' : 'lines'}`;
+}
 }
 function renderLineCard(line, idx) {
 const actual = line.effective_rate ?? line.target_rate ?? 0;
@@ -1626,28 +1703,20 @@ const totalsSection = _totChips ? `
 const busInputs = line.cli_result?.bus_inputs ?? {};
 const logiSet   = new Set(line.cli_args?.logistics_items ?? []);
 const directSet = new Set(line.cli_args?.direct_items ?? []);
-const busOnly    = Object.entries(busInputs).filter(([r]) => !logiSet.has(r) && !directSet.has(r));
-const logiOnly   = Object.entries(busInputs).filter(([r]) =>  logiSet.has(r));
-const directOnly = Object.entries(busInputs).filter(([r]) =>  directSet.has(r));
-const renderInputChips = (entries) => entries.map(([r, rate]) => {
-const b = STATE.preferred_belt;
-const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, b);
-return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
-}).join('');
-const busInputSection = busOnly.length ? `
+// Merged Inputs section — one row, each chip tagged with its source
+// (bus / bot / direct). Replaces the three sibling sections.
+const inputEntries = Object.entries(busInputs);
+const renderInputChip = ([r, rate]) => {
+const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
+const tag = logiSet.has(r)   ? '<span class="chip-tag" title="From logistics bots">bot</span>'
+: directSet.has(r) ? '<span class="chip-tag" title="Belt-fed directly from another line">direct</span>'
+: '<span class="chip-tag" title="From the main bus">bus</span>';
+return `<span class="chip">${tag}${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
+};
+const inputsSection = inputEntries.length ? `
 <div class="card-section">
-<div class="section-label">Bus Inputs</div>
-<div class="chips">${renderInputChips(busOnly)}</div>
-</div>` : '';
-const fromLogiSection = logiOnly.length ? `
-<div class="card-section">
-<div class="section-label">From Logistics</div>
-<div class="chips">${renderInputChips(logiOnly)}</div>
-</div>` : '';
-const fromDirectSection = directOnly.length ? `
-<div class="card-section">
-<div class="section-label">Belt-fed Direct</div>
-<div class="chips">${renderInputChips(directOnly)}</div>
+<div class="section-label">Inputs</div>
+<div class="chips">${inputEntries.map(renderInputChip).join('')}</div>
 </div>` : '';
 const reserveItems = line.reserve_items ?? [];
 const reserveSection = reserveItems.length ? `
@@ -1663,42 +1732,50 @@ const dim = rate > 0 ? '' : ' style="opacity:.5"';
 return `<span class="chip"${dim}>${esc(label(item))}: <span style="color:var(--ok)">+${rateStr}</span></span>`;
 }).join('')}</div>
 </div>` : '';
-const ownRaw = Object.entries(raw);
+// Merged Raws section — one chip per resource: rate · miner count · machine
+// · power. Items present in both raw_resources and miners_needed combine;
+// an item in only one still renders with whatever datum is available.
+const ownRaw    = Object.entries(raw);
 const ownMiners = Object.entries(miners);
-const rawSection = ownRaw.length ? `
+const allRawKeys = [...new Set([...ownRaw.map(([k]) => k), ...ownMiners.map(([k]) => k)])];
+const rawsSection = allRawKeys.length ? `
 <div class="card-section">
-<div class="section-label">Raw Resources</div>
-<div class="chips">${ownRaw.map(([r, rate]) => {
-const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
-return `<span class="chip">${esc(label(r))}: <span style="color:var(--text)">${fmt}</span></span>`;
-}).join('')}</div>
-</div>` : '';
-const minerSection = ownMiners.length ? `
-<div class="card-section">
-<div class="section-label">Miners / Extractors</div>
-<div class="chips">${ownMiners.map(([r, info]) => {
+<div class="section-label">Raws</div>
+<div class="chips">${allRawKeys.map(r => {
+const rate = raw[r];
+const info = miners[r];
+const rateFmt = rate != null
+? (FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt))
+: null;
+let minerStr = '';
+if (info) {
 const isYield = info.required_yield_pct != null;
 const count   = isYield ? `${info.required_yield_pct.toFixed(1)}% yield` : `${fmtMC(info.machine_count)}×`;
 const countCl = isYield ? 'var(--warn)' : 'var(--text)';
 const powStr  = info.power_kw ? fmtPower(info.power_kw) : null;
-return `<span class="chip">${esc(label(r))}: <span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ${powStr}` : ''}</span></span>`;
+const sep     = rateFmt ? ' · ' : '';
+minerStr = `${sep}<span style="color:${countCl};font-weight:600">${count}</span> <span style="color:var(--text-dim)">${esc(machineLabel(info.machine))}${powStr ? ` · ${powStr}` : ''}</span>`;
+}
+const rateStr = rateFmt ? `<span style="color:var(--text)">${rateFmt}</span>` : '';
+return `<span class="chip">${esc(label(r))}: ${rateStr}${minerStr}</span>`;
 }).join('')}</div>
 </div>` : '';
+// Outputs section — only render when there are co-products; the primary
+// rate is already shown in the card header.
 const coProds = Object.entries(line.cli_result?.co_products ?? {});
 const primaryRate = line.effective_rate ?? line.target_rate ?? 0;
 const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, STATE.preferred_belt);
-const outputChips = [
+const coProductSection = coProds.length ? `
+<div class="card-section">
+<div class="section-label">Outputs</div>
+<div class="chips">${[
 `<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
 ...coProds.map(([r, rate]) => {
 const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
 return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
 })
-].join('');
-const coProductSection = `
-<div class="card-section">
-<div class="section-label">Outputs</div>
-<div class="chips">${outputChips}</div>
-</div>`;
+].join('')}</div>
+</div>` : '';
 const noteSection = line.player_notes ? `
 <div class="player-notes">${esc(line.player_notes)}</div>` : '';
 const cliArgsSummary = summarizeCliArgs(line.cli_args);
@@ -1707,7 +1784,7 @@ const cliArgsSection = cliArgsSummary ? `
 <div class="section-label">Sized by</div>
 <div class="chips"><span class="chip" style="font-family:var(--mono,monospace);color:var(--text-dim)">${esc(cliArgsSummary)}</span></div>
 </div>` : '';
-body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${busInputSection}${fromLogiSection}${fromDirectSection}${rawSection}${minerSection}${cliArgsSection}${noteSection}</div>`;
+body = `<div class="card-body">${machineSection}${totalsSection}${coProductSection}${reserveSection}${inputsSection}${rawsSection}${cliArgsSection}${noteSection}</div>`;
 }
 const cardClass   = line.wip ? 'wip' : sc;
 const displayRate = actual;
@@ -1727,9 +1804,17 @@ const subtitle  = itemName.trim().toLowerCase() !== titleText.trim().toLowerCase
 // Show the target only when it differs from actual — "30 / 30/min" is noise.
 const target = line.target_rate ?? 0;
 const showTarget = target > 0 && Math.abs(displayRate - target) > 1e-9;
-const filterKey = `${titleText} ${itemName}`.toLowerCase();
+// Filter key also covers machine + recipe names so "foundry" / "plastic" find lines.
+const filterKey = [
+titleText, itemName, line.item,
+...steps.map(s => machineLabel(s.machine)),
+...steps.map(s => label(s.recipe)),
+].join(' ').toLowerCase();
+// Status bucket for the data-status attribute (drives the status filter chips).
+const dotClass = line.wip ? 'wip' : sc;
 return `
-<div class="line-card ${cardClass}" data-filter="${esc(filterKey)}">
+<div class="line-card ${cardClass}" data-filter="${esc(filterKey)}"
+data-status="${dotClass}" data-stale="${stale.length ? 1 : 0}" data-capped="${cappedHere ? 1 : 0}">
 <div class="card-header ${cardClass}" data-card="${idx}" role="button" tabindex="0"
 aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'}">
 <div class="card-header-left">
@@ -1761,7 +1846,7 @@ parts.push(...bn.map(b => `<div class="issue-item bad"><span>${esc(humanizeText(
 }
 if (ns.length) {
 parts.push(`<div class="group-label" style="margin:${bn.length ? '16px' : '0'} 0 8px">Next Steps</div>`);
-parts.push(...ns.map(s => `<div class="issue-item good"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`));
+parts.push(...ns.map(s => `<div class="issue-item"><span style="color:var(--accent)">→</span><span>${esc(humanizeText(s))}</span></div>`));
 }
 return parts.join('');
 }
@@ -1853,10 +1938,6 @@ activeLocationIdx = +btn.dataset.locidx;
 expandedCards = new Set();
 render();
 }));
-document.getElementById('btn-add-loc')?.addEventListener('click', () => {
-openAddLocDialog();
-document.getElementById('add-loc-dialog').showModal();
-});
 document.querySelectorAll('.card-header[data-card]').forEach(hdr =>
 hdr.addEventListener('click', e => {
 const idx = +hdr.dataset.card;
@@ -1865,9 +1946,27 @@ render();
 }));
 // Lines-tab filter: filter in place (no re-render) so the input keeps focus while typing.
 const filterInput = document.getElementById('line-filter-input');
-if (filterInput) filterInput.addEventListener('input', () => {
+if (filterInput) {
+filterInput.addEventListener('input', () => {
 lineFilter = filterInput.value;
 applyLineFilter();
+});
+filterInput.addEventListener('keydown', e => {
+if (e.key === 'Escape') { lineFilter = ''; filterInput.value = ''; applyLineFilter(); }
+});
+}
+// Status filter chips — toggle on/off (re-click the active chip to clear).
+document.querySelectorAll('.filter-chip[data-status]').forEach(btn =>
+btn.addEventListener('click', () => {
+const key = btn.dataset.status;
+linesStatusFilter = linesStatusFilter === key ? 'all' : key;
+render();
+}));
+// Expand-all / collapse-all toggle over every line on the current location.
+document.getElementById('btn-toggle-all')?.addEventListener('click', () => {
+const lns = currentLoc().lines ?? [];
+expandedCards = expandedCards.size > 0 ? new Set() : new Set(lns.map((_, i) => i));
+render();
 });
 document.getElementById('research-toggle')?.addEventListener('click', () => {
 researchOpen = !researchOpen;
@@ -1966,43 +2065,6 @@ chatSending = false;
 render(); scrollChat();
 }
 }
-// ── Add Location ─────────────────────────────────────────────────────────────
-function openAddLocDialog() {
-const existingIds = new Set((STATE.locations ?? []).map(l => l.id));
-const available = PLANET_IDS.filter(id => !existingIds.has(id));
-const container = document.getElementById('add-loc-planets');
-container.innerHTML = available.length
-? available.map(id =>
-`<button class="btn" style="text-transform:uppercase;font-size:12px" data-planet="${esc(id)}">${esc(PLANET_LABELS[id])}</button>`
-).join('')
-: `<span style="color:var(--text-dim);font-size:12px">All planets already added.</span>`;
-container.querySelectorAll('[data-planet]').forEach(btn =>
-btn.addEventListener('click', () => addPlanetLocation(btn.dataset.planet)));
-document.getElementById('add-plat-name').value = '';
-}
-function addPlanetLocation(id) {
-STATE = { ...STATE, locations: [...(STATE.locations ?? []), makeLocation(id, 'planet')] };
-activeLocationIdx = STATE.locations.length - 1;
-saveState(); render();
-document.getElementById('add-loc-dialog').close();
-}
-function addPlatformLocation() {
-const nameEl = document.getElementById('add-plat-name');
-const name = nameEl?.value.trim();
-if (!name) return;
-const n = (STATE.locations ?? []).filter(l => l.type === 'space-platform').length;
-const id = `space-platform-${n}`;
-STATE = { ...STATE, locations: [...(STATE.locations ?? []), makeLocation(id, 'space-platform', name)] };
-activeLocationIdx = STATE.locations.length - 1;
-saveState(); render();
-document.getElementById('add-loc-dialog').close();
-}
-document.getElementById('add-loc-close').addEventListener('click', () =>
-document.getElementById('add-loc-dialog').close());
-document.getElementById('btn-add-plat').addEventListener('click', addPlatformLocation);
-document.getElementById('add-plat-name').addEventListener('keydown', e => {
-if (e.key === 'Enter') { e.preventDefault(); addPlatformLocation(); }
-});
 // ── Export / Import dialogs (outside render cycle) ───────────────────────────
 document.getElementById('export-close').addEventListener('click', () =>
 document.getElementById('export-dialog').close());
@@ -2035,6 +2097,32 @@ if (tabParam && ['overview','lines','issues','chat'].includes(tabParam)) activeT
 if (params.get('expand') === 'all') {
 expandedCards = new Set((currentLoc().lines ?? []).map((_, i) => i));
 }
+// Global keyboard shortcuts (bound once; ignored while typing in a field).
+//   /      focus the Lines-tab filter (switches to Lines if elsewhere)
+//   n / j  scroll the next visible card into view; p / k previous
+document.addEventListener('keydown', e => {
+if (e.ctrlKey || e.metaKey || e.altKey) return;
+const tag = (e.target?.tagName || '').toLowerCase();
+if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
+if (e.key === '/') {
+e.preventDefault();
+if (activeTab !== 'lines') { activeTab = 'lines'; render(); }
+document.getElementById('line-filter-input')?.focus();
+return;
+}
+if (activeTab === 'lines' && (e.key === 'n' || e.key === 'j' || e.key === 'p' || e.key === 'k')) {
+const cards = [...document.querySelectorAll('.line-card')].filter(c => c.style.display !== 'none');
+if (!cards.length) return;
+e.preventDefault();
+const dir = (e.key === 'n' || e.key === 'j') ? 1 : -1;
+const tops = cards.map(c => c.getBoundingClientRect().top + window.scrollY);
+const cy = window.scrollY + 24;
+let cur = -1;
+for (let i = 0; i < tops.length; i++) { if (tops[i] <= cy + 4) cur = i; else break; }
+const targetIdx = Math.max(0, Math.min(cards.length - 1, cur + dir));
+cards[targetIdx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+});
 render();
 })();
 </script>
