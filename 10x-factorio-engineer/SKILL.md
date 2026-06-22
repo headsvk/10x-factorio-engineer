@@ -212,6 +212,31 @@ Notes:
 - `power_kw` is 0.0 for burner machines (stone furnace, steel furnace, biochamber, captive spawner)
 - `beacon_power_kw` uses a sharing factor based on machine tile size (÷4 for ≤4-tile, ÷2 for 5–7-tile) to model physical beacon count in a standard double-row layout
 
+#### Fulgora (`--location fulgora`) — recycling-graph LP
+
+Fulgora has no ore mining: its only raw is `scrap`, and `scrap-recycling` is a
+single 1→12 probabilistic recipe. Most base materials come from recycling its
+outputs further down (e.g. `iron-gear-wheel → recycle → iron-plate → smelt →
+steel-plate`). `--location fulgora` therefore switches the solver from the
+recursive tree walk to a **recycling-graph linear program** that models every
+usable recipe (crafting **and** recycling) as an activity and minimises total
+machines subject to meeting demand. Output shape is unchanged; what differs:
+
+- `raw_resources` is just `scrap` (+ `heavy-oil` where the chain needs it) — **no
+  asteroid crushing** (that's a space-platform mechanic, never Fulgora's surface).
+- `production_steps` include **recycler** steps (`machine: "recycler"`) such as
+  `scrap-recycling`, `iron-gear-wheel-recycling`, `advanced-circuit-recycling`.
+- The cascade's leftover outputs are surfaced in **`co_products`** (the same
+  surplus field uranium-238 uses) for the player to use or dispose of.
+- Fixed **wrap-and-recycle** disposal tricks (steel-plate→steel-chest,
+  concrete→hazard-concrete) are LP candidates the solver picks only when needed.
+- `--step-machines` is rejected with `--location fulgora` (the LP sizes all
+  machines jointly). `--modules`, `--machine-quality`, `--research`, `--bus-item`,
+  and multi-target all still apply. Module type tokens are `prod`/`speed`/
+  `quality`/`efficiency` (not `productivity`/`speed-module`).
+- Infeasible demand (no recycling route to an item) exits with an error
+  suggesting `--bus-item <item>` to import it.
+
 **Critical rule**: Never report a machine count or resource rate to the player
 without first running the CLI and citing the exact value from its JSON output.
 
@@ -571,6 +596,72 @@ lets direct belt connections net silently against the supplier's reserve.
 }
 ```
 The CLI picks the binding step (smallest declared/ideal ratio), runs the rest at that scale, and reports each step's binding-scale `machine_count`. The dashboard compares declared vs binding to compute reserve rate per intermediate.
+
+### 3.4 Fulgora (recycling) lines
+
+`--location fulgora` is special: Fulgora has no ore mining — its only raw is
+`scrap`, and the CLI solves it as a **recycling-graph LP** rather than the
+recursive tree (see §2 "Fulgora" for the mechanics). A Fulgora line's
+`cli_result` reads differently from a Nauvis one, so track it accordingly:
+
+- **`raw_resources` is just `scrap`** (+ `heavy-oil` if the chain needs it).
+  There is no ore, no asteroid crushing, and **no ore bus** — don't add
+  `--bus-item iron-plate` etc.; the LP sources everything from scrap.
+- **`production_steps` include `recycler` steps** — `scrap-recycling` plus
+  down-recycling like `iron-gear-wheel-recycling` (recycle surplus gears →
+  iron-plate). `machine: "recycler"`.
+- **`co_products` is large and important.** It's the recycling cascade's
+  by-product overflow (gears, solid-fuel, concrete, steel-plate, battery, …).
+  These are the player's to use or dispose of — **surface them as "what your
+  scrap recycling spits out," NOT as automatic bus supply.** Only add a
+  by-product to `bus_items` if the player declares a line that actually consumes
+  it.
+- **Sizing:** use `rate` (or `targets`). `machines` / `step_machines` are **not
+  supported** with `--location fulgora` (the LP sizes every machine jointly).
+- **Modules:** type tokens are `prod` / `speed` / `quality` / `efficiency`
+  (NOT `productivity`). Per-line modules go in `cli_args.modules` as usual.
+- **Account-wide `research_levels` still apply** (e.g. `mining-productivity`
+  cuts the scrap-drill count); they stay top-level, never in `cli_args`.
+
+**Worked example — the Fulgora science line** (mirror of the uranium example in
+§3.2, for the recycling case):
+```jsonc
+{
+  "id": "fulgora", "type": "planet", "label": "Fulgora",
+  "bus_items": [], "targets": { "electromagnetic-science-pack": 90 },
+  "bottlenecks": [], "next_steps": [],
+  "lines": [
+    {
+      "item": "electromagnetic-science-pack",
+      "label": "Fulgora Science (EM science pack)",
+      "reserve_items": ["electromagnetic-science-pack"],  // export to Nauvis labs — see §3.3
+      "target_rate": 90,
+      "effective_rate": 90,
+      "cli_args": {
+        "item": "electromagnetic-science-pack",
+        "rate": 90,
+        "assembler": 3,                      // AM3 fallback where the EM plant can't run a recipe
+        "modules": {
+          "electromagnetic-plant": [{ "count": 5, "type": "prod", "tier": 2, "quality": "normal" }],
+          "assembling-machine-3":  [{ "count": 4, "type": "prod", "tier": 2, "quality": "normal" }],
+          "chemical-plant":        [{ "count": 3, "type": "prod", "tier": 2, "quality": "normal" }]
+        }
+      },
+      "cli_result": { /* full JSON from: cli.py --item electromagnetic-science-pack
+                         --rate 90 --location fulgora --assembler 3
+                         --modules electromagnetic-plant=5:prod:2:normal ...
+                         (+ account-wide --research) */ }
+    }
+  ]
+}
+```
+`--location` is derived from the parent location's `id` (here `fulgora`), so it
+is **not** stored in `cli_args` (§3.2 rule 1). Like any off-world science line,
+tag the pack in `reserve_items` so it's shipped to Nauvis research and reads as
+100% consumed rather than idle surplus (§3.3, science-pack rule) — same pattern
+as `space-science-pack` on a platform. The result's `co_products` are Fulgora's
+by-product overflow — report them to the player, but leave disposal to them
+unless they ask to route a by-product somewhere.
 
 ---
 
