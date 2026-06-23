@@ -121,7 +121,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
-| `dev/test_cli.py` | `unittest` suite (239 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (252 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (315 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
@@ -162,6 +162,10 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `Solver.resolve_oil(data)` | Injects oil linear-system results into steps/raw_resources |
 | `compute_miners(...)` | Per-resource miner/pump counts |
 | `format_output(...)` | Assembles final JSON dict |
+| `_lp_minimize(c, A_ge, b_ge)` | Exact-rational two-phase simplex (Bland's rule); `min cᵀx s.t. Ax ≥ b, x ≥ 0`; returns `(status, x)` with status `optimal`/`infeasible`/`unbounded`. Used by the Fulgora LP |
+| `build_recycling_index(data)` | `{output_item: [recycling_recipe, ...]}` — recycling recipes only (excluded from `build_recipe_index`); read only by the Fulgora LP |
+| `solve_fulgora(solver, data, targets)` | Fulgora recycling-graph LP entry point; builds the activity set, solves, populates `solver.steps`/`raw_resources`/`surplus`; see "Fulgora Recycling LP" below |
+| `_fulgora_activity_coeffs(solver, recipe)` | Per-craft LP coefficients (machine, machine_coef, io with module/quality/prod effects) for one activity |
 
 ### `Solver` class state
 
@@ -383,6 +387,52 @@ A module-level dict that maps `item_key → recipe_key` for items where the orde
 
 ---
 
+## Fulgora Recycling LP
+
+Fulgora has no ore mining — its only raw is `scrap`, and `scrap-recycling` is a
+single 1→12 probabilistic recipe (gears 20%, … holmium-ore 1%, stone 4%). Base
+materials come from recycling those outputs further down (e.g.
+`iron-gear-wheel → recycle → iron-plate → smelt → steel-plate`). This fixed-ratio
+multi-output cascade can't be expressed by the recursive tree walk, so
+`--location fulgora` routes `main()` to **`solve_fulgora`**, which models it as a
+linear program. The recursive solver and all other locations are untouched.
+
+**Trigger**: `fulgora_mode = args.location == "fulgora"` in `main()` skips the
+recursive solve / oil resolve / `--step-machines` floor and calls
+`solve_fulgora(solver, data, targets)`. `--step-machines` errors out (the LP
+sizes all machines jointly); `--use-ceil` and Phase B/C are skipped.
+
+**Activity set** (`solve_fulgora`):
+1. **`recycle_reachable`** — items obtainable through *pure recycling* cascades
+   from `{scrap, heavy-oil}`. Recycling activities are gated on "ingredient ∈
+   recycle_reachable" so the LP can only shred natural scrap-byproducts, never
+   craft-a-building-to-shred-it (which would explode the activity set — iron-plate
+   alone has 40+ recycling producers). Fixed `FULGORA_WRAP_ROUTES` wrap items
+   (steel-chest, hazard-concrete) are whitelisted into this set so their fast
+   `<wrap>-recycling` recipes become LP candidates.
+2. **Forward-availability closure** — crafting recipes (all Fulgora-valid
+   non-recycling recipes, planet + machine-unlock filtered; NOT collapsed to one
+   canonical per item, so oil cracking → plastic etc. are reachable) added when
+   all inputs are available; recycling recipes added when input ∈ recycle_reachable.
+3. **Backward reachability** from targets trims to activities that produce a
+   needed item, keeping the LP small (~40 vars for a science chain).
+
+**LP**: variables `x_r` = crafts/min per activity; one `≥` row per consumed/target
+item (`Σ (out−in)·x ≥ demand`, demand = target rate else 0, raws are free inputs);
+objective = minimise total machines (`Σ machine_coef_r · x_r`,
+`machine_coef = energy/(60·eff_speed)`). Solved by `_lp_minimize` (exact-rational
+simplex). Per-activity coefficients come from `_fulgora_activity_coeffs`, which
+reuses the solver's module/quality/prod/beacon math (recycling recipes run on the
+`recycler`, speed 1/2, 4 slots; beacons fold in as a rounded Fraction).
+
+**Output**: steps populate `solver.steps` in the same shape the recursive solver
+emits (so `format_output` is reused); `scrap` (+ `heavy-oil`) → `raw_resources`;
+net overflow → `solver.surplus` → **`co_products`** (the uranium-238 field).
+Infeasible demand → `SystemExit` suggesting `--bus-item`. The human format gains a
+"Co-Products (surplus)" section.
+
+---
+
 ## Oil Processing
 
 `petroleum-gas`, `light-oil`, `heavy-oil` are in `OIL_PRODUCTS` and handled specially:
@@ -466,7 +516,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 239 tests covering:
+`dev/test_cli.py` contains 252 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -503,6 +553,8 @@ python -m unittest dev.test_cli -v
 | `TestResearchProductivity` | `--research NAME=LEVEL` flag / `research_levels` dict; mining-productivity multiplies drill rate_each (uncapped, skips `offshore-pump`); recipe-prod techs boost all recipes in their `PRODUCTIVITY_RESEARCH` list (steel/plastic-bar/casting paths, asteroid-crushing family, bioplastic on Gleba); additive stacking with module prod; +300 % cap clamps crafting recipes and sets `research_prod_capped`; unknown research names ignored; `research_levels` + `research_prod_capped` + per-step `prod_capped` echoed in JSON output |
 | `TestUseCeil` | `--use-ceil` two-pass re-solve: single-step bus-only line gives integer `machine_count`; two-step chain tops out at integer with intermediate correctly sized; binding-is-intermediate case leaves rate unchanged; already-integer counts produce no rescaling; `use_ceil: true` echoed in JSON output |
 | `TestMachineInherentProd` | `build_machine_prod_bonus` returns 1/2 for foundry/EM-plant/biochamber and 0 for assembler/furnace; `_compute_module_effects` returns the machine built-in prod even when `allow_prod=False` (modules gated, inherent not) and 0 for non-inherent machines; EM-plant electronic-circuit machine count is 2/3 of the no-inherent baseline |
+| `TestSimplexLP` | Direct unit tests for `_lp_minimize`: basic optimum with exact `Fraction` output; picks the cheaper variable; `infeasible` when an item has no producer (all-zero row, b>0); `unbounded` detection; fractional optimum (2.5 each on a symmetric cover) |
+| `TestFulgoraRecyclingLP` | End-to-end `--location fulgora` LP via subprocess: `scrap` is the only solid raw and no asteroid-crushing steps; binding-constraint throughput (battery 60/min → 1500 scrap on `recycler`); by-products surface in `co_products`; holmium-ore/stone resolve with no `--bus-item` (EM-science 90/min → 9800 scrap); cascade uses `iron-gear-wheel-recycling` not asteroids; speed modules flow into LP coefficients and reduce machine counts; `--step-machines` rejected on fulgora; `FULGORA_WRAP_ROUTES` entries are valid single-ingredient wrap recipes with existing `<wrap>-recycling` |
 
 ### `dev/test_quality_planner.py` (315 tests)
 

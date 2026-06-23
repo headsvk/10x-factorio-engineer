@@ -3782,5 +3782,141 @@ class TestMachineInherentProd(unittest.TestCase):
         self.assertEqual(with_inherent, without * Fraction(2, 3))
 
 
+class TestSimplexLP(unittest.TestCase):
+    """Direct unit tests for the exact-rational two-phase simplex used by the
+    Fulgora recycling-graph solver."""
+
+    def test_basic_optimum_exact_fractions(self):
+        # min x0 + x1  s.t.  x0 >= 3, x1 >= 2  ->  (3, 2)
+        status, x = cli._lp_minimize([1, 1], [[1, 0], [0, 1]], [3, 2])
+        self.assertEqual(status, "optimal")
+        self.assertEqual(x, [Fraction(3), Fraction(2)])
+        self.assertTrue(all(isinstance(v, Fraction) for v in x))
+
+    def test_picks_cheaper_variable(self):
+        # min 2x0 + 3x1 s.t. x0+x1>=10, x0>=2, x1>=1 -> (9, 1), cost 21
+        status, x = cli._lp_minimize(
+            [2, 3], [[1, 1], [1, 0], [0, 1]], [10, 2, 1]
+        )
+        self.assertEqual(status, "optimal")
+        self.assertEqual(x, [Fraction(9), Fraction(1)])
+
+    def test_infeasible_when_item_has_no_producer(self):
+        # Second row is 0·x >= 2 (an item demanded with no producing activity).
+        status, x = cli._lp_minimize([1, 1], [[1, 0], [0, 0]], [3, 2])
+        self.assertEqual(status, "infeasible")
+
+    def test_unbounded(self):
+        # min -x0 s.t. x0 >= 1  ->  x0 can grow without bound
+        status, _ = cli._lp_minimize([-1], [[1]], [1])
+        self.assertEqual(status, "unbounded")
+
+    def test_fractional_optimum(self):
+        # symmetric cover: each pair >= 5 -> 2.5 each, exact Fraction(5, 2)
+        status, x = cli._lp_minimize(
+            [1, 1, 1], [[1, 1, 0], [0, 1, 1], [1, 0, 1]], [5, 5, 5]
+        )
+        self.assertEqual(status, "optimal")
+        self.assertEqual(x, [Fraction(5, 2)] * 3)
+
+
+class TestFulgoraRecyclingLP(unittest.TestCase):
+    """End-to-end tests for the Fulgora recycling-graph LP path (--location
+    fulgora), driven through the CLI via _run_cli."""
+
+    def _recipes(self, out: dict) -> "list[str]":
+        return [s["recipe"] for s in out["production_steps"]]
+
+    def test_scrap_is_only_solid_raw_no_asteroids(self):
+        out = _run_cli("--item", "battery", "--rate", "60", "--location", "fulgora")
+        # scrap is the only solid raw; no asteroid-crushing recipes appear.
+        self.assertEqual(list(out["raw_resources"]), ["scrap"])
+        self.assertFalse(any(
+            "asteroid" in r or "crushing" in r for r in self._recipes(out)
+        ))
+
+    def test_binding_constraint_scrap_throughput(self):
+        # battery is a 4% scrap drop and its only source -> 60/0.04 = 1500 scrap.
+        out = _run_cli("--item", "battery", "--rate", "60", "--location", "fulgora")
+        self.assertAlmostEqual(out["raw_resources"]["scrap"], 1500.0, places=4)
+        self.assertEqual(self._recipes(out), ["scrap-recycling"])
+        self.assertEqual(out["production_steps"][0]["machine"], "recycler")
+
+    def test_byproducts_surface_as_co_products(self):
+        out = _run_cli("--item", "battery", "--rate", "60", "--location", "fulgora")
+        # The 11 other scrap outputs are surplus -> co_products (not voided/raw).
+        self.assertIn("co_products", out)
+        self.assertIn("iron-gear-wheel", out["co_products"])
+        self.assertIn("holmium-ore", out["co_products"])
+
+    def test_holmium_and_stone_resolve_without_bus(self):
+        # These only come from scrap recycling; the LP must resolve them with no
+        # --bus-item (a clean run, no RuntimeError, no bus_inputs).
+        out = _run_cli(
+            "--item", "electromagnetic-science-pack", "--rate", "90",
+            "--location", "fulgora",
+        )
+        self.assertNotIn("bus_inputs", out)
+        self.assertAlmostEqual(out["raw_resources"]["scrap"], 9800.0, places=2)
+
+    def test_cascade_uses_gear_recycling_not_asteroids(self):
+        out = _run_cli(
+            "--item", "electromagnetic-science-pack", "--rate", "90",
+            "--location", "fulgora",
+        )
+        recipes = self._recipes(out)
+        self.assertIn("scrap-recycling", recipes)
+        # iron-plate is produced by recycling surplus gears, not smelting ore.
+        self.assertIn("iron-gear-wheel-recycling", recipes)
+        self.assertFalse(any("asteroid" in r or "crushing" in r for r in recipes))
+        self.assertTrue(any(s["machine"] == "recycler" for s in out["production_steps"]))
+
+    def test_speed_modules_reduce_machines(self):
+        # Module config flows into the LP coefficients: speed modules on the EM
+        # plant make its steps faster, so the science-pack step needs fewer
+        # machines and the total drops.  (Module type token is 'speed'/'prod',
+        # not 'speed-module'/'productivity'.)
+        def step_mc(out, recipe):
+            return [s["machine_count"] for s in out["production_steps"]
+                    if s["recipe"] == recipe][0]
+        plain = _run_cli(
+            "--item", "electromagnetic-science-pack", "--rate", "90",
+            "--location", "fulgora",
+        )
+        sped = _run_cli(
+            "--item", "electromagnetic-science-pack", "--rate", "90",
+            "--location", "fulgora",
+            "--modules", "electromagnetic-plant=5:speed:2:normal",
+        )
+        self.assertLess(
+            step_mc(sped, "electromagnetic-science-pack"),
+            step_mc(plain, "electromagnetic-science-pack"),
+        )
+        self.assertLess(
+            sum(s["machine_count"] for s in sped["production_steps"]),
+            sum(s["machine_count"] for s in plain["production_steps"]),
+        )
+
+    def test_step_machines_rejected_on_fulgora(self):
+        with self.assertRaises(RuntimeError):
+            _run_cli(
+                "--item", "battery", "--rate", "60", "--location", "fulgora",
+                "--step-machines", "scrap-recycling=5",
+            )
+
+    def test_wrap_routes_are_valid_lp_candidates(self):
+        # The fixed wrap-and-recycle set maps a surplus base material to a cheap
+        # single-ingredient container whose -recycling recipe exists in the data
+        # (so the LP can pick it when the base material is actually needed).
+        data = _DATA["fulgora"]["data"]
+        by_key = {r["key"]: r for r in data["recipes"]}
+        for base, wrap in cli.FULGORA_WRAP_ROUTES.items():
+            self.assertIn(wrap, by_key, f"wrap craft recipe {wrap} missing")
+            self.assertIn(f"{wrap}-recycling", by_key, f"{wrap}-recycling missing")
+            craft = by_key[wrap]
+            ing_names = {i["name"] for i in craft["ingredients"]}
+            self.assertEqual(ing_names, {base}, f"{wrap} should wrap only {base}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

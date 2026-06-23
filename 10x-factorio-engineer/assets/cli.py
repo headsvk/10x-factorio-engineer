@@ -162,11 +162,27 @@ MACHINE_CRAFTING_SPEED: dict[str, Fraction] = {
     "crusher":                 Fraction(1),
     "agricultural-tower":      Fraction(1),
     "captive-spawner":         Fraction(1),
+    # Fulgora recycling (used only by the Fulgora recycling-graph LP path;
+    # the recursive solver never routes here because recycling recipes are
+    # excluded from build_recipe_index).
+    "recycler":                Fraction(1, 2),
 }
 
 SMELTING_CATS   = frozenset(["smelting"])
 SKIP_SUBGROUPS  = frozenset(["empty-barrel", "fill-barrel"])
 SKIP_CATEGORIES = frozenset(["recycling", "recycling-or-hand-crafting"])
+
+# Known Fulgora "wrap-and-recycle" tricks: a base material is crafted into a
+# cheap single-ingredient container which then recycles (shreds) far faster per
+# recycler, because recycling time = craft energy / 16.  solve_fulgora
+# whitelists the wrap items into its recycle-reachable set so the much-faster
+# "<wrap>-recycling" recipe becomes an LP candidate the solver may pick when it
+# pays off (it is NOT forced).  Map is base item → wrap craft recipe key.
+# Fixed set — extend as needed.
+FULGORA_WRAP_ROUTES: dict[str, str] = {
+    "steel-plate": "steel-chest",       # 8 steel → chest → recycle (1.0 → 0.03125s, ~32x)
+    "concrete":    "hazard-concrete",   # concrete → hazard → recycle (0.625 → 0.0156s, ~40x)
+}
 
 # Planet-locked advanced machines. Each requires planet-specific tech to build,
 # so by default we only route to them when --location is set to a planet that
@@ -583,6 +599,26 @@ def build_recipe_index(data: dict) -> dict[str, list]:
     return dict(idx)
 
 
+def build_recycling_index(data: dict) -> dict[str, list]:
+    """Return {output_item: [recycling_recipe, ...]} for recycling recipes only.
+
+    These recipes are deliberately *excluded* from build_recipe_index (the
+    recursive solver never uses them).  Only the Fulgora recycling-graph LP
+    path reads this index, to model the planet's scrap → recycle → down-recycle
+    cascade.  Barrel recipes are excluded; the canonical 'deconstruct' recyclers
+    (category recycling / recycling-or-hand-crafting) are kept.
+    """
+    idx: dict[str, list] = defaultdict(list)
+    for recipe in data.get("recipes", []):
+        if recipe.get("subgroup") in SKIP_SUBGROUPS:
+            continue
+        if recipe.get("category") not in SKIP_CATEGORIES:
+            continue
+        for result in recipe.get("results", []):
+            idx[result["name"]].append(recipe)
+    return dict(idx)
+
+
 def build_resource_info(data: dict) -> dict:
     """
     Return {item_name: {"mining_time": Fraction, "yield": Fraction, "category": str}}
@@ -946,6 +982,188 @@ def _gauss3(A: list, b: list) -> list[Fraction] | None:
                 for j in range(col, n + 1):
                     M[row][j] -= f * M[col][j]
     return [M[i][n] / M[i][i] for i in range(n)]
+
+
+# ---------------------------------------------------------------------------
+# Exact-rational LP (two-phase simplex, Bland's rule)
+# ---------------------------------------------------------------------------
+
+def _lp_minimize(
+    c: list, A_ge: list, b_ge: list,
+) -> "tuple[str, list[Fraction]]":
+    """
+    Minimise c·x subject to  A_ge · x >= b_ge ,  x >= 0  — exact Fraction math.
+
+    Used by the Fulgora recycling-graph solver: each x is the crafts/min of one
+    recipe activity, each row is an item-balance "produce at least demand"
+    constraint.  Returns (status, x) where status is one of
+    "optimal" / "infeasible" / "unbounded"; x has len(c) entries (Fractions).
+
+    Two-phase simplex on the standard form  A_eq · x = b  (b >= 0):
+      surplus var s_i >= 0 turns  row·x >= b_i  into  row·x - s_i = b_i ;
+      an artificial a_i >= 0 gives an initial basis.  Phase 1 minimises the
+      artificial sum to 0 (feasibility); phase 2 minimises c.  Bland's rule
+      (lowest-index entering/leaving) guarantees no cycling -> termination.
+    """
+    m = len(A_ge)
+    n = len(c)
+    if m == 0:
+        # No constraints: optimum is x = 0 (c >= 0 expected here).
+        return "optimal", [Fraction(0)] * n
+
+    # Precondition: b_ge >= 0 (item demands are non-negative).  A row with b_i
+    # = 0 is fine; the two-phase method needs rhs >= 0 for a feasible artificial
+    # basis, which holds here.
+    A: list[list[Fraction]] = [[Fraction(v) for v in A_ge[i]] for i in range(m)]
+    b: list[Fraction] = [Fraction(b_ge[i]) for i in range(m)]
+
+    # Structural columns: n vars + m surplus (coefficient -1 on its own row).
+    # Total non-artificial columns = n + m.  Artificials added per row for phase 1.
+    n_total = n + m
+    # Build tableau rows: [structural+surplus coeffs | artificial coeffs | rhs]
+    # We keep artificial columns implicit via an identity; basis starts as
+    # the artificials (one per row).
+    tab: list[list[Fraction]] = []
+    for i in range(m):
+        srow = list(A[i]) + [Fraction(0)] * m   # structural + surplus
+        srow[n + i] = Fraction(-1)              # surplus var for row i
+        tab.append(srow + [b[i]])               # append rhs at the end
+    # Basis = artificial variables, indexed n_total .. n_total+m-1 (conceptual).
+    basis = [n_total + i for i in range(m)]
+
+    def _pivot(prow: int, pcol: int) -> None:
+        piv = tab[prow][pcol]
+        tab[prow] = [v / piv for v in tab[prow]]
+        for r in range(m):
+            if r != prow and tab[r][pcol] != 0:
+                f = tab[r][pcol]
+                tab[r] = [a - f * bb for a, bb in zip(tab[r], tab[prow])]
+        basis[prow] = pcol
+
+    def _optimise(cost: list) -> None:
+        # cost has length n_total (artificials excluded -> implicit 0 cost in phase 2,
+        # cost 1 in phase 1 handled by caller).  Standard Bland's-rule simplex.
+        while True:
+            # Reduced costs: z_j - c_j computed from current basis.
+            # Build basic cost vector.
+            reduced = []
+            for j in range(n_total):
+                # reduced cost = cost_j - sum_i cost[basis_i]*tab[i][j]
+                cj = cost[j]
+                s = Fraction(0)
+                for i in range(m):
+                    bi = basis[i]
+                    cbi = cost[bi] if bi < n_total else Fraction(0)
+                    if cbi != 0:
+                        s += cbi * tab[i][j]
+                reduced.append(cj - s)
+            # Entering: lowest index with reduced cost < 0 (minimisation).
+            pcol = next((j for j in range(n_total) if reduced[j] < 0), None)
+            if pcol is None:
+                return
+            # Leaving: min ratio test, Bland tie-break (lowest basis index).
+            prow = None
+            best_ratio: Fraction | None = None
+            for i in range(m):
+                if tab[i][pcol] > 0:
+                    ratio = tab[i][-1] / tab[i][pcol]
+                    if (best_ratio is None or ratio < best_ratio or
+                            (ratio == best_ratio and prow is not None and
+                             basis[i] < basis[prow])):
+                        best_ratio = ratio
+                        prow = i
+            if prow is None:
+                raise _LPUnbounded()
+            _pivot(prow, pcol)
+
+    # --- Phase 1: drive the artificial sum to zero (feasibility) ---
+    # Artificials are the initial basis (implicit +1 identity; rhs >= 0 so the
+    # basis is feasible).  _optimise_phase1 minimises their sum; artificials are
+    # never materialised as columns, so their unit cost is folded into the
+    # reduced-cost computation there.
+    try:
+        _optimise_phase1(tab, basis, m, n_total)
+        # Feasibility: artificial sum == 0  <=>  every basic artificial is 0.
+        infeasible = False
+        for i in range(m):
+            if basis[i] >= n_total and tab[i][-1] != 0:
+                infeasible = True
+                break
+        if infeasible:
+            return "infeasible", [Fraction(0)] * n
+        # Drive any remaining (degenerate, value-0) artificials out of the basis.
+        for i in range(m):
+            if basis[i] >= n_total:
+                pcol = next((j for j in range(n_total) if tab[i][j] != 0), None)
+                if pcol is not None:
+                    _pivot(i, pcol)
+        # --- Phase 2: minimise the real objective ---
+        phase2_cost = [Fraction(v) for v in c] + [Fraction(0)] * m
+        _optimise(phase2_cost)
+    except _LPUnbounded:
+        return "unbounded", [Fraction(0)] * n
+
+    # Extract structural variable values from the basis.
+    x = [Fraction(0)] * n
+    for i in range(m):
+        if basis[i] < n:
+            x[basis[i]] = tab[i][-1]
+    return "optimal", x
+
+
+class _LPUnbounded(Exception):
+    """Internal signal: the LP objective is unbounded below."""
+
+
+def _optimise_phase1(tab: list, basis: list, m: int, n_total: int) -> None:
+    """
+    Phase-1 simplex: minimise the sum of artificial variables.
+
+    Artificials form the initial basis (one per row, implicit +1 identity, rhs
+    >= 0).  The phase-1 objective value is sum of basic-artificial rhs; a column
+    j's reduced cost is -(sum over rows whose basis is artificial of tab[i][j]).
+    Pivot in any column with negative reduced cost (Bland: lowest index), pivot
+    out by min-ratio (Bland tie-break).  Terminates when no artificial remains
+    reducible.
+    """
+    def _pivot(prow: int, pcol: int) -> None:
+        piv = tab[prow][pcol]
+        tab[prow] = [v / piv for v in tab[prow]]
+        for r in range(m):
+            if r != prow and tab[r][pcol] != 0:
+                f = tab[r][pcol]
+                tab[r] = [a - f * bb for a, bb in zip(tab[r], tab[prow])]
+        basis[prow] = pcol
+
+    while True:
+        # Reduced cost of column j = - sum_i [basis_i is artificial] * tab[i][j].
+        art_rows = [i for i in range(m) if basis[i] >= n_total]
+        if not art_rows:
+            return
+        reduced = []
+        for j in range(n_total):
+            s = Fraction(0)
+            for i in art_rows:
+                s += tab[i][j]
+            reduced.append(-s)
+        pcol = next((j for j in range(n_total) if reduced[j] < 0), None)
+        if pcol is None:
+            return
+        prow = None
+        best_ratio: Fraction | None = None
+        for i in range(m):
+            if tab[i][pcol] > 0:
+                ratio = tab[i][-1] / tab[i][pcol]
+                if (best_ratio is None or ratio < best_ratio or
+                        (ratio == best_ratio and prow is not None and
+                         basis[i] < basis[prow])):
+                    best_ratio = ratio
+                    prow = i
+        if prow is None:
+            # Artificial sum can't be reduced further but is still > 0 elsewhere;
+            # remaining artificials are checked for infeasibility by the caller.
+            return
+        _pivot(prow, pcol)
 
 
 def _recipe_yield(recipe: dict, product: str) -> Fraction:
@@ -1615,6 +1833,327 @@ class Solver:
 
 
 # ---------------------------------------------------------------------------
+# Fulgora recycling-graph LP
+# ---------------------------------------------------------------------------
+
+def _fulgora_activity_coeffs(solver: "Solver", recipe: dict) -> dict:
+    """
+    Per-craft LP coefficients for one Fulgora activity (recipe).
+
+    Mirrors the recursive solver's machine/module/quality/beacon math so the LP
+    is consistent with the rest of the CLI:
+      * recycling recipes run on the recycler (speed 0.5); crafting recipes use
+        the normal category→machine resolution (planet-unlock aware).
+      * prod modules + machine inherent prod scale every output; module/quality
+        speed penalty and machine-quality bonus scale the machine-count coef.
+      * beacons (rare on Fulgora) fold in as a rounded Fraction to keep the LP
+        exact.
+    Returns {machine, machine_coef, outputs, inputs, beacon_speed_bonus, capped}
+    where machine_coef = machines per (craft/min) and outputs/inputs are
+    per-craft amounts (outputs already include the productivity bonus).
+    """
+    rk   = recipe["key"]
+    cat  = recipe.get("category", "crafting")
+    energy = Fraction(str(recipe.get("energy_required", "0.5")))
+
+    if cat in SKIP_CATEGORIES:
+        machine_key = "recycler"
+        base_speed  = MACHINE_CRAFTING_SPEED["recycler"]
+    else:
+        machine_key, base_speed = solver._resolve_machine(rk, cat)
+
+    quality_mult = Fraction(1) + MACHINE_QUALITY_SPEED[solver.machine_quality]
+    eff_speed    = base_speed * quality_mult
+
+    allow_prod = recipe.get("allow_productivity", False)
+    specs      = solver._get_modules(rk, machine_key)
+    prod_bonus, speed_mod_bonus, capped = solver._compute_module_effects(
+        specs, machine_key, allow_prod, rk,
+    )
+    eff_speed = eff_speed * (Fraction(1) + speed_mod_bonus)
+
+    beacon_spec        = solver._get_beacon(rk, machine_key)
+    beacon_speed_bonus = solver._compute_beacon_speed(beacon_spec)
+    if beacon_speed_bonus:
+        eff_speed = eff_speed * (Fraction(1) + Fraction(str(round(beacon_speed_bonus, 10))))
+
+    machine_coef = energy / (Fraction(60) * eff_speed)
+
+    outputs: dict[str, Fraction] = {}
+    for res in recipe.get("results", []):
+        prob = Fraction(str(res.get("probability", 1)))
+        amt  = Fraction(str(res.get("amount", 1))) * prob * (Fraction(1) + prod_bonus)
+        outputs[res["name"]] = outputs.get(res["name"], Fraction(0)) + amt
+    inputs: dict[str, Fraction] = {}
+    for ing in recipe.get("ingredients", []):
+        inputs[ing["name"]] = (
+            inputs.get(ing["name"], Fraction(0)) + Fraction(str(ing.get("amount", 1)))
+        )
+
+    return {
+        "machine":            machine_key,
+        "machine_coef":       machine_coef,
+        "outputs":            outputs,
+        "inputs":             inputs,
+        "beacon_speed_bonus": beacon_speed_bonus,
+        "capped":             capped,
+    }
+
+
+def _fulgora_primary_output(recipe: dict, outputs: dict) -> str:
+    """Pick the display 'primary' output: the result with the largest per-craft
+    amount (highest-probability drop for recycling, the main product for crafts)."""
+    best: str | None = None
+    best_amt = Fraction(-1)
+    for res in recipe.get("results", []):
+        a = outputs.get(res["name"], Fraction(0))
+        if a > best_amt:
+            best_amt = a
+            best     = res["name"]
+    return best or recipe["key"]
+
+
+def solve_fulgora(solver: "Solver", data: dict, targets: list) -> dict:
+    """
+    Solve a Fulgora production plan as a recycling-graph linear program.
+
+    Fulgora's only raw is scrap, and scrap-recycling is a single 1→12
+    probabilistic recipe; most base materials come from recycling its outputs
+    further down (e.g. iron-gear-wheel → recycle → iron-plate → smelt →
+    steel-plate).  That is a joint multi-output optimisation, so instead of the
+    recursive tree walk we model every usable recipe (crafting + recycling) as
+    an LP activity x_r (crafts/min) and minimise total machines subject to
+    meeting each target's demand, allowing overflow.
+
+    Surplus by-products with a fixed wrap-and-recycle route (FULGORA_WRAP_ROUTES)
+    are disposed via emitted craft+recycle steps; the rest are credited to
+    solver.surplus (→ co_products).  Populates solver.steps / raw_resources /
+    bus_inputs and returns the leftover {item: rate/min} by-products dict.
+    Raises SystemExit if a demand cannot be met.
+    """
+    planet_props = solver.planet_props or None
+    raw_set = solver.raw_set
+    bus     = set(solver.bus_items)
+
+    # Recycling recipes valid on Fulgora (deduped, planet-condition filtered).
+    recycling_idx = build_recycling_index(data)
+    recycling_recipes: list[dict] = []
+    seen_rec: set[str] = set()
+    for recs in recycling_idx.values():
+        for r in recs:
+            if r["key"] in seen_rec:
+                continue
+            if planet_props and not _recipe_valid_for_planet(r, planet_props):
+                continue
+            seen_rec.add(r["key"])
+            recycling_recipes.append(r)
+
+    # All non-recycling crafting recipes usable on Fulgora.  Unlike the recursive
+    # solver we do NOT collapse to one canonical recipe per item: the LP must see
+    # every real route (e.g. heavy-oil→crack→light-oil→crack→petroleum-gas for
+    # plastic-bar) and choose among them.  We still apply the same planet and
+    # machine-unlock filters pick_recipe would, so locked machines (foundry on
+    # Fulgora) and off-planet recipes are excluded; routes needing unavailable
+    # raws (crude-oil for AOP) simply never become reachable in the closure.
+    unlocks = solver.location_unlocks
+    crafting_recipes: list[dict] = []
+    for r in data.get("recipes", []):
+        if r.get("subgroup") in SKIP_SUBGROUPS:
+            continue
+        if r.get("category") in SKIP_CATEGORIES:
+            continue
+        if planet_props and not _recipe_valid_for_planet(r, planet_props):
+            continue
+        required = HARD_CATEGORY_REQUIRES.get(r.get("category", ""))
+        if required is not None and unlocks is not None and required not in unlocks:
+            continue
+        crafting_recipes.append(r)
+
+    # Items obtainable through *pure recycling* cascades from the raws (scrap →
+    # recycle → its outputs → recycle those → …).  Recycling activities are
+    # restricted to shredding these natural byproducts; without this the LP would
+    # pull in absurd "craft a building just to recycle it for iron" routes
+    # (iron-plate has 40+ recycling producers), exploding the activity set.
+    recycle_reachable: set[str] = set(raw_set) | bus
+    changed = True
+    while changed:
+        changed = False
+        for recipe in recycling_recipes:
+            if all(i["name"] in recycle_reachable for i in recipe.get("ingredients", [])):
+                for res in recipe.get("results", []):
+                    if res["name"] not in recycle_reachable:
+                        recycle_reachable.add(res["name"])
+                        changed = True
+        # Whitelist the fixed wrap-and-recycle tricks: once a base material is
+        # recycle-reachable, its cheap wrapper (steel-chest, hazard-concrete) is
+        # too — making the much-faster <wrap>-recycling recipe an LP candidate
+        # the solver can pick when it pays off (it is NOT forced).
+        for base, wrap in FULGORA_WRAP_ROUTES.items():
+            if base in recycle_reachable and wrap not in recycle_reachable:
+                recycle_reachable.add(wrap)
+                changed = True
+
+    # --- Forward-availability closure from the raws ---
+    # An item is "available" once some activity can produce it: crafting (all
+    # inputs available) or recycling (input is a recycle-reachable byproduct).
+    # This gives every cascade leg its own LP column — e.g. steel-plate via the
+    # direct scrap drop AND via gear→iron-plate→smelt.
+    available: set[str] = set(raw_set) | bus
+    closure: dict[str, dict] = {}
+    changed = True
+    while changed:
+        changed = False
+        for recipe in crafting_recipes:
+            rk = recipe["key"]
+            if rk in closure:
+                continue
+            if all(i["name"] in available for i in recipe.get("ingredients", [])):
+                closure[rk] = recipe
+                changed = True
+                for res in recipe.get("results", []):
+                    if res["name"] not in available:
+                        available.add(res["name"])
+                        changed = True
+        for recipe in recycling_recipes:
+            rk = recipe["key"]
+            if rk in closure:
+                continue
+            if all(i["name"] in recycle_reachable for i in recipe.get("ingredients", [])):
+                closure[rk] = recipe
+                changed = True
+                for res in recipe.get("results", []):
+                    if res["name"] not in available:
+                        available.add(res["name"])
+                        changed = True
+
+    # --- Backward reachability from targets: keep only relevant activities ---
+    producers: dict[str, list] = defaultdict(list)
+    for r in closure.values():
+        for res in r.get("results", []):
+            producers[res["name"]].append(r)
+
+    target_items = [t for (t, _) in targets]
+    for item in target_items:
+        if item not in raw_set and item not in bus and not producers.get(item):
+            sys.exit(
+                f"error: cannot produce '{item}' on fulgora (no scrap-recycling "
+                f"route). Use --bus-item {item} to import it."
+            )
+
+    included: dict[str, dict] = {}
+    needed: set[str] = set(target_items)
+    frontier = list(target_items)
+    while frontier:
+        item = frontier.pop()
+        if item in raw_set or item in bus:
+            continue
+        for r in producers.get(item, []):
+            if r["key"] in included:
+                continue
+            included[r["key"]] = r
+            for ing in r.get("ingredients", []):
+                nm = ing["name"]
+                if nm not in needed:
+                    needed.add(nm)
+                    frontier.append(nm)
+
+    activities = list(included.values())
+    if not activities:
+        sys.exit("error: no Fulgora recipes reachable for the requested target(s).")
+
+    coeffs = [_fulgora_activity_coeffs(solver, r) for r in activities]
+
+    # --- Build the LP: one row per consumed/target item (raws are free) ---
+    demand: dict[str, Fraction] = {t: Fraction(str(rate)) for (t, rate) in targets}
+    row_items: set[str] = set()
+    for co in coeffs:
+        for it in co["inputs"]:
+            if it not in raw_set and it not in bus:
+                row_items.add(it)
+    for t in target_items:
+        if t not in raw_set and t not in bus:
+            row_items.add(t)
+    row_list = sorted(row_items)
+    idx_of = {it: i for i, it in enumerate(row_list)}
+
+    n = len(activities)
+    A = [[Fraction(0)] * n for _ in row_list]
+    b = [demand.get(it, Fraction(0)) for it in row_list]
+    c = [co["machine_coef"] for co in coeffs]
+    for j, co in enumerate(coeffs):
+        for it, amt in co["outputs"].items():
+            if it in idx_of:
+                A[idx_of[it]][j] += amt
+        for it, amt in co["inputs"].items():
+            if it in idx_of:
+                A[idx_of[it]][j] -= amt
+
+    status, x = _lp_minimize(c, A, b)
+    if status == "infeasible":
+        sys.exit(
+            "error: cannot satisfy the requested demand on fulgora (insufficient "
+            "recycling routes). Try --bus-item for a missing input."
+        )
+    if status == "unbounded":
+        sys.exit("error: Fulgora LP is unbounded (unexpected — please report).")
+
+    # --- Assemble steps / raw_resources / by-products ---
+    EPS = Fraction(1, 10 ** 9)
+    net: dict[str, Fraction] = defaultdict(Fraction)
+    for j, co in enumerate(coeffs):
+        xj = x[j]
+        if xj <= EPS:
+            continue
+        recipe = activities[j]
+        rk = recipe["key"]
+
+        step_inputs: dict[str, Fraction] = {}
+        for it, amt in co["inputs"].items():
+            rate = xj * amt
+            step_inputs[it] = step_inputs.get(it, Fraction(0)) + rate
+            net[it] -= rate
+            if it in raw_set:
+                solver.raw_resources[it] += rate
+            elif it in bus:
+                solver.bus_inputs[it] += rate
+        step_outputs: dict[str, Fraction] = {}
+        for it, amt in co["outputs"].items():
+            rate = xj * amt
+            step_outputs[it] = step_outputs.get(it, Fraction(0)) + rate
+            net[it] += rate
+
+        primary = _fulgora_primary_output(recipe, co["outputs"])
+        solver.steps[rk] = {
+            "recipe":             rk,
+            "machine":            co["machine"],
+            "machine_count":      xj * co["machine_coef"],
+            "rate_per_min":       step_outputs.get(primary, Fraction(0)),
+            "output_item":        primary,
+            "beacon_speed_bonus": co["beacon_speed_bonus"],
+            "inputs":             step_inputs,
+            "outputs":            step_outputs,
+        }
+        if co["capped"]:
+            solver.capped_recipes.add(rk)
+
+    # Net overflow from the recycling cascade (produced − consumed − demand).
+    byproducts: dict[str, Fraction] = {}
+    for it, amt in net.items():
+        leftover = amt - demand.get(it, Fraction(0))
+        if leftover > EPS and it not in raw_set:
+            byproducts[it] = leftover
+
+    # By-products are credited to solver.surplus → co_products, the same field
+    # the recursive solver uses for surplus outputs (e.g. uranium-238).  The
+    # wrap-and-recycle recipes are LP candidates (whitelisted above), so any
+    # disposal the solver chose already shows up as ordinary steps; whatever is
+    # left over is genuine surplus for the player to handle.
+    for it, amt in byproducts.items():
+        solver.surplus[it] += amt
+    return byproducts
+
+
+# ---------------------------------------------------------------------------
 # Miner computation
 # ---------------------------------------------------------------------------
 
@@ -2105,6 +2644,14 @@ def format_human_readable(out: dict) -> str:
         lines.append("Bus Inputs (from bus, not mined)")
         lines.append("---------------------------------")
         for item, rate in out["bus_inputs"].items():
+            lines.append(f"  {item:<30}  {rate}/min")
+
+    # --- Co-Products (surplus outputs: uranium-238, Fulgora recycling overflow) ---
+    if out.get("co_products"):
+        lines.append("")
+        lines.append("Co-Products (surplus)")
+        lines.append("---------------------")
+        for item, rate in out["co_products"].items():
             lines.append(f"  {item:<30}  {rate}/min")
 
     # --- Power ---
@@ -2609,6 +3156,16 @@ def main() -> None:
     )
     chain_throttled = False
 
+    # Fulgora uses the recycling-graph LP instead of the recursive solver: scrap
+    # is the only raw and most materials come from recycling cascades, which is a
+    # joint multi-output optimisation the tree walk can't express.
+    fulgora_mode = args.location == "fulgora"
+    if fulgora_mode and has_step_machines:
+        sys.exit(
+            "error: --step-machines is not supported with --location fulgora; the "
+            "recycling-graph LP sizes all machines jointly."
+        )
+
     # --- Phase A: derive base top-level rate(s) ---
     if has_rate:
         for i, item in enumerate(args.items):
@@ -2642,7 +3199,7 @@ def main() -> None:
     # --- Phase B: throttle if any constraint caps the chain below natural ---
     # Only meaningful when --rate or --machines provided the base rate; in the
     # constraints-only path Phase A already yields the binding rate.
-    if constraints and (has_rate or has_machines):
+    if constraints and (has_rate or has_machines) and not fulgora_mode:
         pre = _clone_solver(solver)
         for item, rate in targets:
             pre.solve(item, rate)
@@ -2682,7 +3239,7 @@ def main() -> None:
                 tf = Fraction(str(round(throttle_float, 10)))
                 targets = [(it, rate * tf) for (it, rate) in targets]
 
-    if args.use_ceil and targets:
+    if args.use_ceil and targets and not fulgora_mode:
         # Pass 1: preliminary solve to find fractional machine counts
         pre = _clone_solver(solver)
         pre.solve(targets[0][0], targets[0][1])
@@ -2720,13 +3277,16 @@ def main() -> None:
                 actual_rate = targets[0][1] * Fraction(str(round(min_scale_float, 10)))
             targets[0] = (targets[0][0], actual_rate)
 
-    for item, rate in targets:
-        solver.solve(item, rate)
-    solver.resolve_oil(data)
+    if fulgora_mode:
+        solve_fulgora(solver, data, targets)
+    else:
+        for item, rate in targets:
+            solver.solve(item, rate)
+        solver.resolve_oil(data)
 
-    # --- Phase D: floor-bump any constraint still under its declared N ---
-    if constraints:
-        _apply_step_machines_floor(solver, constraints)
+        # --- Phase D: floor-bump any constraint still under its declared N ---
+        if constraints:
+            _apply_step_machines_floor(solver, constraints)
 
     if len(targets) == 1:
         args.rate = float(targets[0][1])
