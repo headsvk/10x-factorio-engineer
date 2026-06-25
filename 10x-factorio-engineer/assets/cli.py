@@ -2373,10 +2373,16 @@ def format_output(
     # Sort steps topologically: target recipe(s) first, dependencies below.
     # DFS pre-order from each target item; among a step's inputs, visit the
     # highest-rate one first for deterministic sub-ordering.
-    _item_to_recipe: dict[str, str] = {}
+    #
+    # An item may have MORE than one producing recipe (Fulgora's recycling graph
+    # is a multi-output DAG — e.g. scrap-recycling emits 12 items and steel-plate
+    # is produced by several recyclers). Map each item to the full list of its
+    # producers (in step order) so the DFS follows every dependency edge rather
+    # than an arbitrary last-writer-wins one, which scattered the recycling steps.
+    _item_to_recipes: dict[str, list[str]] = {}
     for _s in steps_list_raw:
         for _itm in _s["outputs"]:
-            _item_to_recipe[_itm] = _s["recipe"]
+            _item_to_recipes.setdefault(_itm, []).append(_s["recipe"])
     _recipe_to_step: dict[str, dict] = {_s["recipe"]: _s for _s in steps_list_raw}
 
     def _topo_sort(target_items: list[str]) -> list[dict]:
@@ -2389,12 +2395,10 @@ def format_output(
             _result.append(_recipe_to_step[rkey])
             _step = _recipe_to_step[rkey]
             for _inp in sorted(_step["inputs"], key=lambda k: -(_step["inputs"][k] or 0)):
-                _dep = _item_to_recipe.get(_inp)
-                if _dep:
+                for _dep in _item_to_recipes.get(_inp, ()):
                     _visit(_dep)
         for _tgt in target_items:
-            _start = _item_to_recipe.get(_tgt)
-            if _start:
+            for _start in _item_to_recipes.get(_tgt, ()):
                 _visit(_start)
         # Append any steps not reachable from targets (e.g. oil cracking intermediates)
         for _s in steps_list_raw:
@@ -2402,8 +2406,46 @@ def format_output(
                 _result.append(_s)
         return _result
 
+    def _level_sort(target_items: list[str]) -> list[dict]:
+        # Strict bill-of-materials order for the Fulgora recycling graph: the
+        # target sits at the top and every step appears below ALL steps that
+        # consume its output, so the raw-processing step (scrap-recycling) sinks
+        # to the bottom just above the raw `scrap`. Each step's rank is its
+        # longest dependency depth from the target (cycle-guarded); we sort by
+        # depth descending. The DFS pre-order index breaks ties within a level.
+        _order0 = {_s["recipe"]: _i for _i, _s in enumerate(_topo_sort(target_items))}
+        _depth: dict[str, int] = {}
+        def _visit(rkey: str, stack: frozenset) -> int:
+            if rkey in _depth:
+                return _depth[rkey]
+            if rkey in stack:          # back-edge inside a recycling cycle
+                return 0
+            _stack = stack | {rkey}
+            _d = 0
+            for _inp in _recipe_to_step[rkey]["inputs"]:
+                for _p in _item_to_recipes.get(_inp, ()):
+                    if _p != rkey:
+                        _d = max(_d, _visit(_p, _stack) + 1)
+            _depth[rkey] = _d
+            return _d
+        for _tgt in target_items:
+            for _start in _item_to_recipes.get(_tgt, ()):
+                _visit(_start, frozenset())
+        for _s in steps_list_raw:
+            _depth.setdefault(_s["recipe"], 0)
+        return sorted(
+            steps_list_raw,
+            key=lambda s: (-_depth[s["recipe"]], _order0.get(s["recipe"], 0)),
+        )
+
     _target_items: list[str] = getattr(args, "items", None) or [getattr(args, "item", None)]
-    steps_list = _topo_sort([t for t in _target_items if t])
+    _targets_clean = [t for t in _target_items if t]
+    # Fulgora is a multi-output recycling DAG with one dominant source (scrap);
+    # a sources-last bill-of-materials reads better than the tree DFS pre-order.
+    if getattr(args, "location", None) == "fulgora":
+        steps_list = _level_sort(_targets_clean)
+    else:
+        steps_list = _topo_sort(_targets_clean)
 
     raw_sorted = {
         k: _f(v)

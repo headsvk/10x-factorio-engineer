@@ -312,7 +312,7 @@ working context and update it after every player message.
     //      "research-productivity": 2
   },
 
-  "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — lead with this tier in answers (shared)
+  "preferred_belt": "blue",           // "yellow"|"red"|"blue"|"turbo" — GLOBAL default belt tier; lead with it in answers. Each location may override it (see locations[].preferred_belt).
 
   // Research-lab consumption model (dashboard-only — labs are not in cli.py).
   // Drives the "Research Labs" card: how many labs consume the science production
@@ -340,6 +340,7 @@ working context and update it after every player message.
       "id": "nauvis",                   // planet name or "space-platform-N"
       "type": "planet",                 // "planet" | "space-platform"
       "label": "Nauvis",               // display name; user-editable for space platforms
+      "preferred_belt": null,           // "yellow"|"red"|"blue"|"turbo"|null — per-location belt override; null ⇒ inherit global preferred_belt. Set when the player runs a different belt tier on this surface (e.g. red on Nauvis, blue on Fulgora).
 
       // Items on this location's main bus — player-declared supply rates (items/min).
       // Claude applies --bus-item ITEM to CLI calls for lines that draw ITEM from the bus.

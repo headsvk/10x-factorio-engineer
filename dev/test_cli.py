@@ -3904,6 +3904,34 @@ class TestFulgoraRecyclingLP(unittest.TestCase):
                 "--step-machines", "scrap-recycling=5",
             )
 
+    def test_steps_sources_last_bill_of_materials(self):
+        # The Fulgora recycling graph is a multi-output DAG with one dominant
+        # source (scrap). production_steps are emitted as a strict bill of
+        # materials: the target sits first and every step appears below ALL
+        # steps that consume its output, so the raw-processing step
+        # (scrap-recycling) sinks to the very bottom just above the raw scrap.
+        out = _run_cli(
+            "--item", "electromagnetic-science-pack", "--rate", "90",
+            "--location", "fulgora",
+        )
+        steps = out["production_steps"]
+        self.assertEqual(steps[0]["recipe"], "electromagnetic-science-pack")
+        self.assertEqual(steps[-1]["recipe"], "scrap-recycling")
+        # Strict topological order: for every producer/consumer pair, the
+        # consumer precedes the producer (ignoring same-step self-recycle loops).
+        pos = {s["recipe"]: i for i, s in enumerate(steps)}
+        for s in steps:
+            for inp in s["inputs"]:
+                for prod in (
+                    p["recipe"] for p in steps if inp in p["outputs"]
+                ):
+                    if prod == s["recipe"]:
+                        continue  # self-loop, not a precedence edge
+                    self.assertLess(
+                        pos[s["recipe"]], pos[prod],
+                        f"consumer {s['recipe']} must precede producer {prod}",
+                    )
+
     def test_wrap_routes_are_valid_lp_candidates(self):
         # The fixed wrap-and-recycle set maps a surplus base material to a cheap
         # single-ingredient container whose -recycling recipe exists in the data

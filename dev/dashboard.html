@@ -572,6 +572,16 @@
                 letter-spacing: .05em; text-transform: uppercase; cursor: pointer; transition: background .12s, color .12s; }
     .loc-btn:hover:not(.active) { background: var(--border); color: var(--text); }
     .loc-btn.active { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); font-weight: 800; }
+    .belt-picker { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+    .belt-picker-label { color: var(--text-dim); font-family: 'Barlow Condensed', sans-serif;
+                font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; margin-right: 2px; }
+    .belt-btn { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
+                border-radius: 3px; padding: 2px 8px; height: 24px; display: inline-flex; align-items: center; gap: 5px;
+                font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
+                letter-spacing: .04em; text-transform: uppercase; cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
+    .belt-btn:hover:not(.active) { background: var(--border); color: var(--text); }
+    .belt-btn.active { color: var(--text); border-color: var(--text-muted); background: var(--border); }
+    .belt-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 1px rgba(0,0,0,.35) inset; }
 
     /* ── Science location chips ── */
     .sci-loc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -892,6 +902,12 @@ let chatSending = false;
 
 function currentLoc() {
   return STATE.locations?.[activeLocationIdx] ?? STATE.locations?.[0] ?? makeLocation('nauvis', 'planet');
+}
+
+// Belt preference is per-location when set, otherwise the global default.
+// Lets e.g. Nauvis run red belt while Fulgora runs blue.
+function currentBelt() {
+  return currentLoc().preferred_belt ?? STATE.preferred_belt ?? 'blue';
 }
 
 // ── Migration ─────────────────────────────────────────────────────────────────
@@ -1229,7 +1245,23 @@ function renderLocationBar() {
   return `
     <div class="loc-bar">
       ${planetBtns}${sep}${platformBtns}
+      ${renderBeltPicker()}
     </div>`;
+}
+
+// Per-location belt selector. Sets the active location's preferred_belt so each
+// surface can carry its own belt tier; falls back to the global default until
+// overridden.
+function renderBeltPicker() {
+  const active = currentBelt();
+  const belts = ['yellow', 'red', 'blue', 'turbo'];
+  const labels = { yellow: 'Yellow', red: 'Red', blue: 'Blue', turbo: 'Turbo' };
+  const btns = belts.map(b =>
+    `<button class="belt-btn${b === active ? ' active' : ''}" data-belt="${b}"
+       title="${labels[b]} belt — ${BELT_THROUGHPUT[b]}/min">
+       <span class="belt-dot" style="background:${BELT_COLORS[b]}"></span>${labels[b]}
+     </button>`).join('');
+  return `<div class="belt-picker"><span class="belt-picker-label">Belt</span>${btns}</div>`;
 }
 
 // ── Research productivity ────────────────────────────────────────────────────
@@ -1760,7 +1792,7 @@ function renderLineCard(line, idx) {
       const chipRow = [modHtml, bcnHtml, bonusHtml].filter(Boolean).join(' ');
       const qualDot = machineQ !== 'normal' ? `<span class="qdot q-${machineQ}">◆</span>` : '';
 
-      const belt = STATE.preferred_belt;
+      const belt = currentBelt();
       const inEntries = Object.entries(s.inputs ?? {});
       const outEntries = Object.entries(s.outputs ?? {});
 
@@ -1858,7 +1890,7 @@ function renderLineCard(line, idx) {
     // (bus / bot / direct). Replaces the three sibling sections.
     const inputEntries = Object.entries(busInputs);
     const renderInputChip = ([r, rate]) => {
-      const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
+      const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, currentBelt());
       const tag = logiSet.has(r)   ? '<span class="chip-tag" title="From logistics bots">bot</span>'
                 : directSet.has(r) ? '<span class="chip-tag" title="Belt-fed directly from another line">direct</span>'
                 : '<span class="chip-tag" title="From the main bus">bus</span>';
@@ -1898,7 +1930,7 @@ function renderLineCard(line, idx) {
           const rate = raw[r];
           const info = miners[r];
           const rateFmt = rate != null
-            ? (FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt))
+            ? (FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, currentBelt()))
             : null;
           let minerStr = '';
           if (info) {
@@ -1918,14 +1950,14 @@ function renderLineCard(line, idx) {
     // rate is already shown in the card header.
     const coProds = Object.entries(line.cli_result?.co_products ?? {});
     const primaryRate = line.effective_rate ?? line.target_rate ?? 0;
-    const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, STATE.preferred_belt);
+    const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, currentBelt());
     const coProductSection = coProds.length ? `
       <div class="card-section">
         <div class="section-label">Outputs</div>
         <div class="chips">${[
           `<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
           ...coProds.map(([r, rate]) => {
-            const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, STATE.preferred_belt);
+            const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, currentBelt());
             return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
           })
         ].join('')}</div>
@@ -1984,7 +2016,7 @@ function renderLineCard(line, idx) {
         </div>
         <div class="card-header-rate">
           <span class="rate-num">${fmtN(displayRate)}${showTarget ? ` / ${fmtN(target)}` : ''}/min</span>
-          <span class="rate-unit">${isFluid ? fmtFluidUnitOnly(displayRate) : fmtUnitOnly(displayRate, belt ?? STATE.preferred_belt)}</span>
+          <span class="rate-unit">${isFluid ? fmtFluidUnitOnly(displayRate) : fmtUnitOnly(displayRate, belt ?? currentBelt())}</span>
         </div>
       </div>
       <div class="card-progress"><div class="card-progress-fill" style="width:${p}%;background:${line.wip ? 'var(--warn)' : col}"></div></div>
@@ -2105,6 +2137,13 @@ function bindEvents() {
     btn.addEventListener('click', () => {
       activeLocationIdx = +btn.dataset.locidx;
       expandedCards = new Set();
+      render();
+    }));
+
+  document.querySelectorAll('.belt-btn[data-belt]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      currentLoc().preferred_belt = btn.dataset.belt;
+      saveState();
       render();
     }));
 

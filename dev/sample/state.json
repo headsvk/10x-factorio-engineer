@@ -1409,7 +1409,8 @@
       "next_steps": [
         "Scale metallurgic-science-pack to 60/min — need big-mining-drill on tungsten-ore",
         "Replace asteroid-crushing copper source with foundry once lava smelting is set up"
-      ]
+      ],
+      "preferred_belt": "turbo"
     },
     {
       "id": "gleba",
