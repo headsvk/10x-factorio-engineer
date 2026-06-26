@@ -1393,7 +1393,7 @@ function renderBusBalance() {
 
   // Logistics network (bot-routed items): same supply/demand/net model, shown as a third
   // transport group alongside Belt Bus and Pipe Network.
-  const { supply: lSupply, demand: lDemand } = computeLogisticsBalance(loc);
+  const { supply: lSupply, demand: lDemand, qualityLabels: lQual = {} } = computeLogisticsBalance(loc);
   const logiItems = [...new Set([...Object.keys(lSupply), ...Object.keys(lDemand)])]
     .filter(i => (lSupply[i] ?? 0) > 0 || (lDemand[i] ?? 0) > 0);
 
@@ -1432,7 +1432,7 @@ function renderBusBalance() {
     return card({ rowLabel: labelFn(item), net, usedPct, tip });
   };
   const busRow  = rowFor(supply, demand, (i) => busItemMap[i]?.label ?? label(i));
-  const logiRow = rowFor(lSupply, lDemand, (i) => label(i));
+  const logiRow = rowFor(lSupply, lDemand, (i) => lQual[i] ?? label(i));
 
   // Sort tightest-first within each group so constrained/deficit items surface top-left.
   const loadIn = (sup, dem) => (item) => {
@@ -1544,7 +1544,24 @@ function computeLogisticsBalance(loc) {
     if (SCIENCE_ITEM_SET.has(item) && (sciTargets[item] ?? 0) > 0)
       demand[item] = (demand[item] ?? 0) + sciTargets[item];
   }
-  return { supply, demand };
+  // Picked-out quality items (cli --quality-pickout) are routed into the bot
+  // network as pure supply: there's no normal-tier demand for them, so they read
+  // as available surplus the player harvests off the line. Keyed per (item, tier)
+  // with a unit-separator that can never collide with a real item id.
+  const qualityLabels = {};
+  for (const line of loc.lines ?? []) {
+    const qy = line.cli_result?.quality_yield;
+    if (!qy) continue;
+    for (const [item, tiers] of Object.entries(qy)) {
+      for (const [tier, rate] of Object.entries(tiers)) {
+        if (!(rate > 0)) continue;
+        const key = `${item}␟${tier}`;
+        supply[key] = (supply[key] ?? 0) + rate;
+        qualityLabels[key] = `${label(item)} · ${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+      }
+    }
+  }
+  return { supply, demand, qualityLabels };
 }
 
 function renderTabs() {
@@ -1902,19 +1919,37 @@ function renderLineCard(line, idx) {
         <div class="chips">${inputEntries.map(renderInputChip).join('')}</div>
       </div>` : '';
 
+    // Picked-out quality items (cli --quality-pickout) are routed to the bot
+    // network. Flattened to {item, tier, rate, label} once and shown both here
+    // (Reserve → Logistics) and in the Outputs section below.
+    const qualityYield = [];
+    for (const [item, tiers] of Object.entries(line.cli_result?.quality_yield ?? {})) {
+      for (const [tier, rate] of Object.entries(tiers)) {
+        if (!(rate > 0)) continue;
+        const tcap = tier.charAt(0).toUpperCase() + tier.slice(1);
+        qualityYield.push({ item, tier, rate, label: `${label(item)} · ${tcap}` });
+      }
+    }
+
     const reserveItems = line.reserve_items ?? [];
-    const reserveSection = reserveItems.length ? `
+    const reserveSection = (reserveItems.length || qualityYield.length) ? `
       <div class="card-section">
         <div class="section-label">Reserve → Logistics</div>
-        <div class="chips">${reserveItems.map(item => {
-          const rate = reserveRateFor(line, item);
-          const isF = FLUID_ITEM_IDS.has(item);
-          const rateStr = rate > 0
-            ? (isF ? fmtFluid(rate) : `${fmtN(rate)}/min`)
-            : '0/min';
-          const dim = rate > 0 ? '' : ' style="opacity:.5"';
-          return `<span class="chip"${dim}>${esc(label(item))}: <span style="color:var(--ok)">+${rateStr}</span></span>`;
-        }).join('')}</div>
+        <div class="chips">${[
+          ...reserveItems.map(item => {
+            const rate = reserveRateFor(line, item);
+            const isF = FLUID_ITEM_IDS.has(item);
+            const rateStr = rate > 0
+              ? (isF ? fmtFluid(rate) : `${fmtN(rate)}/min`)
+              : '0/min';
+            const dim = rate > 0 ? '' : ' style="opacity:.5"';
+            return `<span class="chip"${dim}>${esc(label(item))}: <span style="color:var(--ok)">+${rateStr}</span></span>`;
+          }),
+          // Quality items carry a tier suffix; no source tag needed here since the
+          // whole section is the line's bot-network feed.
+          ...qualityYield.map(q =>
+            `<span class="chip">${esc(q.label)}: <span style="color:var(--ok)">+${fmtN(q.rate)}/min</span></span>`),
+        ].join('')}</div>
       </div>` : '';
 
     // Merged Raws section — one chip per resource: rate · miner count · machine
@@ -1946,21 +1981,27 @@ function renderLineCard(line, idx) {
         }).join('')}</div>
       </div>` : '';
 
-    // Outputs section — only render when there are co-products; the primary
-    // rate is already shown in the card header.
+    // Outputs section — render when there are co-products OR picked-out quality
+    // items; the primary rate is also shown in the card header.
     const coProds = Object.entries(line.cli_result?.co_products ?? {});
     const primaryRate = line.effective_rate ?? line.target_rate ?? 0;
     const primaryFmt = isFluid ? fmtFluid(primaryRate) : fmtRB(primaryRate, currentBelt());
-    const coProductSection = coProds.length ? `
+    // Quality pick-out items also appear here as outputs. Like co-products they
+    // are untagged — the Reserve → Logistics section is the single place that
+    // marks what a line routes to the bot network.
+    const outputChips = (coProds.length || qualityYield.length) ? [
+      `<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
+      ...coProds.map(([r, rate]) => {
+        const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, currentBelt());
+        return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
+      }),
+      ...qualityYield.map(q =>
+        `<span class="chip">${esc(q.label)}: <span style="color:var(--ok)">+${fmtN(q.rate)}/min</span></span>`),
+    ] : [];
+    const coProductSection = outputChips.length ? `
       <div class="card-section">
         <div class="section-label">Outputs</div>
-        <div class="chips">${[
-          `<span class="chip">${esc(label(line.item))}: <span style="color:var(--ok)">${primaryFmt}</span></span>`,
-          ...coProds.map(([r, rate]) => {
-            const fmt = FLUID_ITEM_IDS.has(r) ? fmtFluid(rate) : fmtRB(rate, currentBelt());
-            return `<span class="chip">${esc(label(r))}: <span style="color:var(--ok)">${fmt}</span></span>`;
-          })
-        ].join('')}</div>
+        <div class="chips">${outputChips.join('')}</div>
       </div>` : '';
 
     const noteSection = line.player_notes ? `

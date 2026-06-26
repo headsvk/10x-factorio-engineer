@@ -3946,5 +3946,184 @@ class TestFulgoraRecyclingLP(unittest.TestCase):
             self.assertEqual(ing_names, {base}, f"{wrap} should wrap only {base}")
 
 
+class TestQualityChanceHelpers(unittest.TestCase):
+    """Unit tests for the quality-chance / tier-cascade helper functions."""
+
+    def test_quality_chance_basic(self):
+        # 5 quality-2 modules at normal quality: 5 × 1.5% = 7.5%.
+        specs = [{"count": 5, "type": "quality", "tier": 2, "quality": "normal"}]
+        self.assertEqual(cli.quality_chance_from_specs(specs, 5), Fraction(75, 1000))
+
+    def test_quality_chance_tier_and_quality_scaling(self):
+        # T3 = 2.5% base; legendary module housing scales positive stats ×2.5.
+        specs = [{"count": 1, "type": "quality", "tier": 3, "quality": "legendary"}]
+        self.assertEqual(
+            cli.quality_chance_from_specs(specs, 4),
+            Fraction(25, 1000) * Fraction(5, 2),
+        )
+
+    def test_quality_chance_ignores_non_quality_modules(self):
+        specs = [
+            {"count": 4, "type": "prod", "tier": 3, "quality": "normal"},
+            {"count": 1, "type": "speed", "tier": 3, "quality": "normal"},
+        ]
+        self.assertEqual(cli.quality_chance_from_specs(specs, 5), Fraction(0))
+
+    def test_quality_chance_slot_scaling(self):
+        # Request 8 quality modules but only 4 slots → effective 4.
+        specs = [{"count": 8, "type": "quality", "tier": 1, "quality": "normal"}]
+        # 8 requested scaled to 4 slots → 4 × 1% = 4%.
+        self.assertEqual(cli.quality_chance_from_specs(specs, 4), Fraction(4, 100))
+
+    def test_quality_chance_clamped(self):
+        specs = [{"count": 100, "type": "quality", "tier": 3, "quality": "legendary"}]
+        self.assertEqual(cli.quality_chance_from_specs(specs, 100), Fraction(1))
+
+    def test_quality_chance_zero_when_no_slots(self):
+        specs = [{"count": 4, "type": "quality", "tier": 2, "quality": "normal"}]
+        self.assertEqual(cli.quality_chance_from_specs(specs, 0), Fraction(0))
+
+    def test_tier_probs_legendary_cap(self):
+        # q = 10%, max_index = 4 (legendary): full 90/9/0.9/0.1 split.
+        probs = cli.quality_tier_probs(Fraction(1, 10), 4)
+        self.assertEqual(probs[0], Fraction(9, 10))
+        self.assertEqual(probs[1], Fraction(1, 10) * Fraction(9, 10))
+        self.assertEqual(probs[2], Fraction(1, 10) * Fraction(9, 100))
+        self.assertEqual(probs[3], Fraction(1, 10) * Fraction(9, 1000))
+        self.assertEqual(probs[4], Fraction(1, 10) * Fraction(1, 1000))
+        self.assertEqual(sum(probs), Fraction(1))
+
+    def test_tier_probs_rare_cap_folds_mass(self):
+        # max_index = 2 (rare): all +2/+3/+4 mass folds onto rare.
+        q = Fraction(1, 10)
+        probs = cli.quality_tier_probs(q, 2)
+        self.assertEqual(probs[0], Fraction(9, 10))
+        self.assertEqual(probs[1], q * Fraction(9, 10))
+        # rare = +2 .. +4 shares summed
+        self.assertEqual(
+            probs[2],
+            q * (Fraction(9, 100) + Fraction(9, 1000) + Fraction(1, 1000)),
+        )
+        self.assertEqual(probs[3], Fraction(0))
+        self.assertEqual(probs[4], Fraction(0))
+        self.assertEqual(sum(probs), Fraction(1))
+
+    def test_tier_probs_normal_only_no_upgrade(self):
+        # max_index = 0: nothing unlocked, all mass folds back to normal.
+        probs = cli.quality_tier_probs(Fraction(1, 2), 0)
+        self.assertEqual(probs[0], Fraction(1))
+        self.assertEqual(sum(probs[1:]), Fraction(0))
+
+
+class TestQualityPickout(unittest.TestCase):
+    """End-to-end quality-output / pick-out behaviour via the CLI (subprocess)."""
+
+    def test_recursive_pickout_scales_and_extracts(self):
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60", "--location", "nauvis",
+            "--recipe-modules", "electronic-circuit=2:quality:3:normal",
+            "--quality-pickout", "--max-quality", "epic",
+        )
+        self.assertTrue(out["quality_pickout"])
+        self.assertEqual(out["max_quality"], "epic")
+        ec = next(s for s in out["production_steps"] if s["recipe"] == "electronic-circuit")
+        qo = ec["quality_output"]["electronic-circuit"]
+        # Normal-tier output still meets demand exactly.
+        self.assertAlmostEqual(qo["normal"], 60.0, places=4)
+        # Higher tiers extracted; capped at epic (no legendary key).
+        self.assertIn("uncommon", qo)
+        self.assertIn("epic", qo)
+        self.assertNotIn("legendary", qo)
+        # Aggregated quality_yield matches the per-step >normal split.
+        qy = out["quality_yield"]["electronic-circuit"]
+        self.assertAlmostEqual(qy["uncommon"], qo["uncommon"], places=6)
+
+    def test_pickout_raises_machine_count_vs_no_pickout(self):
+        base = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60", "--location", "nauvis",
+            "--recipe-modules", "electronic-circuit=2:quality:3:normal",
+        )
+        pick = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60", "--location", "nauvis",
+            "--recipe-modules", "electronic-circuit=2:quality:3:normal",
+            "--quality-pickout",
+        )
+        base_ec = next(s for s in base["production_steps"] if s["recipe"] == "electronic-circuit")
+        pick_ec = next(s for s in pick["production_steps"] if s["recipe"] == "electronic-circuit")
+        # Pick-out must run MORE machines to keep normal output at the target.
+        self.assertGreater(pick_ec["machine_count"], base_ec["machine_count"])
+        # Reporting-only run carries no quality_yield.
+        self.assertNotIn("quality_yield", base)
+
+    def test_reporting_only_does_not_rescale(self):
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60", "--location", "nauvis",
+            "--recipe-modules", "electronic-circuit=2:quality:3:normal",
+            "--max-quality", "rare",
+        )
+        self.assertNotIn("quality_pickout", out)
+        ec = next(s for s in out["production_steps"] if s["recipe"] == "electronic-circuit")
+        qo = ec["quality_output"]["electronic-circuit"]
+        # Informational split of the flowing 60/min: normal < 60 (mixed quality).
+        self.assertLess(qo["normal"], 60.0)
+        self.assertAlmostEqual(
+            qo["normal"] + qo.get("uncommon", 0) + qo.get("rare", 0), 60.0, places=4
+        )
+
+    def test_no_quality_modules_no_quality_fields(self):
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60", "--location", "nauvis",
+            "--quality-pickout",
+        )
+        # Pick-out flag set but no quality modules anywhere → nothing extracted.
+        self.assertNotIn("quality_yield", out)
+        ec = next(s for s in out["production_steps"] if s["recipe"] == "electronic-circuit")
+        self.assertNotIn("quality_output", ec)
+
+    def test_fulgora_lp_pickout(self):
+        out = _run_cli(
+            "--item", "accumulator", "--rate", "50", "--location", "fulgora",
+            "--recipe-modules", "accumulator=5:quality:2:normal",
+            "--quality-pickout", "--max-quality", "rare",
+        )
+        self.assertTrue(out["quality_pickout"])
+        acc = next(s for s in out["production_steps"] if s["recipe"] == "accumulator")
+        qo = acc["quality_output"]["accumulator"]
+        self.assertAlmostEqual(qo["normal"], 50.0, places=4)
+        # 5 × quality-2 = 7.5% chance; rare-capped distribution.
+        self.assertIn("uncommon", qo)
+        self.assertIn("rare", qo)
+        self.assertNotIn("epic", qo)
+        qy = out["quality_yield"]["accumulator"]
+        self.assertGreater(qy["uncommon"], 0)
+
+    def test_max_quality_rare_caps_cascade(self):
+        out = _run_cli(
+            "--item", "accumulator", "--rate", "50", "--location", "fulgora",
+            "--recipe-modules", "accumulator=5:quality:3:legendary",
+            "--quality-pickout", "--max-quality", "rare",
+        )
+        qy = out["quality_yield"]["accumulator"]
+        # No epic/legendary extracted when only rare is unlocked.
+        self.assertNotIn("epic", qy)
+        self.assertNotIn("legendary", qy)
+
+    def test_human_format_renders_quality_sections(self):
+        cli_path = os.path.join(
+            os.path.dirname(__file__), '..', '10x-factorio-engineer', 'assets', 'cli.py'
+        )
+        proc = _subprocess.run(
+            [sys.executable, cli_path,
+             "--item", "accumulator", "--rate", "50", "--location", "fulgora",
+             "--recipe-modules", "accumulator=5:quality:2:normal",
+             "--quality-pickout", "--max-quality", "rare", "--format", "human"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Quality pick-out: ON", proc.stdout)
+        self.assertIn("~ quality accumulator:", proc.stdout)
+        self.assertIn("Picked-Out Quality Items", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

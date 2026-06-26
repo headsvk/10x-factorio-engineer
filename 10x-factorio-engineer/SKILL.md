@@ -49,6 +49,8 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --s
 | `--location PLANET` | _(none)_ | Target location; omit for vanilla. Options: `nauvis` `vulcanus` `fulgora` `gleba` `aquilo` `space-platform`. Automatically selects the Space Age dataset. |
 | `--machine-quality QUALITY` | `normal` | Machine quality: `normal`/`uncommon`/`rare`/`epic`/`legendary` |
 | `--beacon-quality QUALITY` | `normal` | Beacon housing quality (same enum) |
+| `--max-quality QUALITY` | `legendary` | Highest quality tier the player has **unlocked**. Caps the quality-roll cascade: roll mass above this tier folds onto it (you can't roll a quality you haven't researched). Set to e.g. `rare` if epic/legendary aren't researched. Only matters when quality modules are present. |
+| `--quality-pickout` | _(off)_ | Treat the higher-quality output of any step carrying **quality modules** as siphoned off: each such step (and its upstream feed) is scaled up so the **normal-tier** yield still meets demand, and the extracted higher-quality items are reported under top-level `quality_yield`. Place quality modules via `--modules`/`--recipe-modules`. Works on every location including the Fulgora recycling LP. Without this flag, quality modules only impose their speed penalty and the per-step `quality_output` split is purely informational (nominal flow unchanged). |
 | `--modules MACHINE=COUNT:TYPE:TIER:QUALITY[,...]` | _(none)_ | Module config per machine; repeatable |
 | `--beacon [MACHINE=]BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY[+...]` | _(none)_ | Beacon config. Omit `MACHINE=` for a global default (all machines). Multiple module specs joined with `+`. TYPE must be `speed` or `efficiency`. Priority: per-recipe > per-machine > global. Repeatable. |
 | `--recipe ITEM=RECIPE` | _(none)_ | Override recipe; repeatable |
@@ -155,7 +157,8 @@ The CLI emits JSON to stdout. Example:
       "power_kw_ceil": 3000.0,
       "beacon_power_kw": 7680.0,
       "forced_min_machines": 8.0,
-      "excess_output_per_min": 0.5
+      "excess_output_per_min": 0.5,
+      "quality_output": { "processing-unit": { "normal": 10.0, "uncommon": 0.4737, "rare": 0.0526 } }
     }
   ],
   "raw_resources": { "crude-oil": 487.18, "iron-ore": 120.0 },
@@ -176,7 +179,10 @@ The CLI emits JSON to stdout. Example:
   "research_prod_capped": true,
   "step_machines": { "processing-unit": 8 },
   "chain_throttled": false,
-  "co_products": { "processing-unit": 0.5 }
+  "co_products": { "processing-unit": 0.5 },
+  "quality_pickout": true,
+  "max_quality": "rare",
+  "quality_yield": { "processing-unit": { "uncommon": 0.4737, "rare": 0.0526 } }
 }
 ```
 
@@ -185,7 +191,7 @@ The CLI emits JSON to stdout. Example:
 | `item` + `rate_per_min` | Present in single-target output; the requested item and rate |
 | `targets` | Present in multi-target output (2+ `--item` flags); array of `{item, rate_per_min}` objects instead of top-level `item`/`rate_per_min` |
 | `location` | string or null | `"vulcanus"` / `null` (vanilla) | Location passed via `--location`; `null` means vanilla (no planet filtering) |
-| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `inputs` (ingredient consumption rates in items/min), `machine_quality` (always), `module_specs` (if modules applied), `beacon_spec` + `beacon_quality` (if beacon applied), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw`, `prod_capped` (`true` when total machine prod for this step was clamped to +300 %; omitted otherwise) |
+| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `inputs` (ingredient consumption rates in items/min), `machine_quality` (always), `module_specs` (if modules applied), `beacon_spec` + `beacon_quality` (if beacon applied), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw`, `prod_capped` (`true` when total machine prod for this step was clamped to +300 %; omitted otherwise), `quality_output` (present only when the step carries quality modules; `{item: {tier: rate}}` per-tier split of the primary output, capped at `--max-quality`) |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw`; `module_specs` present when modules applied to the drill |
 | `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |
@@ -204,6 +210,9 @@ The CLI emits JSON to stdout. Example:
 | Per-step `forced_min_machines` | Present on each step that had `--step-machines RECIPE=N` declared; echoes N. |
 | Per-step `excess_output_per_min` | Present on each forced step; positive when N > natural (the step over-produces and the surplus rolls up into top-level `co_products`); `0.0` when N ≤ natural (no buffer). |
 | `bus_inputs` | Present when `--bus-item` was passed; `{item: rate_per_min}` for items sourced from the bus (separate from `raw_resources`, which contains only true raws like ores) |
+| `quality_pickout` | `true` when `--quality-pickout` was passed; omitted otherwise. Signals that higher-quality output from quality-module steps was siphoned off and the affected steps were scaled up to keep normal-tier yield at target. |
+| `max_quality` | Present when `--quality-pickout` is on or any quality was extracted; echoes `--max-quality` (the highest unlocked tier; cascade mass folds onto it). |
+| `quality_yield` | Present only when `--quality-pickout` extracted higher-quality items; `{item: {tier: rate_per_min}}` aggregated across all pick-out steps — the goods you harvest off the line (normal tier excluded; it stays in the chain). |
 
 Notes:
 - `pumpjack` emits `required_yield_pct` (not `machine_count`) — player divides this across pumpjack fields; no `power_kw` (pumpjack is not electric)
@@ -515,6 +524,8 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 | `direct_items` | list of item IDs belt-fed directly from another line on this location (no bus, no bots) | one `--bus-item ITEM` per entry (CLI doesn't distinguish; dashboard nets against supplier's reserve) |
 | `research` | research-level overrides for this line only | one `--research NAME=LEVEL` per entry |
 | `use_ceil` | constrain to integer machine counts | `--use-ceil` |
+| `max_quality` | highest quality tier the player has unlocked (caps the quality cascade) | `--max-quality Q` |
+| `quality_pickout` | `true` to siphon higher-quality output off any quality-module step and scale it up to hold normal-tier demand (extracted goods land in `cli_result.quality_yield`, which the dashboard shows in the line card's **Outputs** and **Reserve → Logistics** sections and the Overview **Logistics Network** supply) | `--quality-pickout` |
 
 **Rules:**
 1. The `--location` flag is always derived from the parent location's `id`. Don't store it in `cli_args`.

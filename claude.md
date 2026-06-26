@@ -121,7 +121,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
-| `dev/test_cli.py` | `unittest` suite (253 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (269 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (315 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
@@ -165,7 +165,9 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `_lp_minimize(c, A_ge, b_ge)` | Exact-rational two-phase simplex (Bland's rule); `min cᵀx s.t. Ax ≥ b, x ≥ 0`; returns `(status, x)` with status `optimal`/`infeasible`/`unbounded`. Used by the Fulgora LP |
 | `build_recycling_index(data)` | `{output_item: [recycling_recipe, ...]}` — recycling recipes only (excluded from `build_recipe_index`); read only by the Fulgora LP |
 | `solve_fulgora(solver, data, targets)` | Fulgora recycling-graph LP entry point; builds the activity set, solves, populates `solver.steps`/`raw_resources`/`surplus`; see "Fulgora Recycling LP" below |
-| `_fulgora_activity_coeffs(solver, recipe)` | Per-craft LP coefficients (machine, machine_coef, io with module/quality/prod effects) for one activity |
+| `_fulgora_activity_coeffs(solver, recipe)` | Per-craft LP coefficients (machine, machine_coef, io with module/quality/prod effects) for one activity. Under `--quality-pickout`, scales each activity's outputs by the normal-tier fraction and returns `q_chance`/`pickout`/`gross_outputs` for post-solve quality accounting |
+| `quality_chance_from_specs(specs, slots)` | Total per-craft quality-upgrade chance from the quality modules in `specs` (slot-scaled like `_compute_module_effects`, clamped 0..1) |
+| `quality_tier_probs(q_total, max_index)` | Length-5 per-tier probability vector for a normal-tier craft; mass above `max_index` (highest unlocked tier) folds onto it |
 
 ### `Solver` class state
 
@@ -184,6 +186,9 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 - `location`: `str | None` — location string (for error messages); `None` for vanilla
 - `machine_quality`: `str` — quality tier applied to all machines (speed bonus via `MACHINE_QUALITY_SPEED`)
 - `beacon_quality`: `str` — quality tier of beacon housings (effectivity via `BEACON_EFFECTIVITY`)
+- `max_quality`: `str` / `max_quality_index`: `int` — highest UNLOCKED quality tier (`--max-quality`, default `legendary`); cascade mass above it folds onto it
+- `quality_pickout`: `bool` — when set, any step with quality modules has its >normal output siphoned off; the step is scaled up so the normal-tier yield meets demand (`effective_result_normal = effective_result × (1 − q_chance)`), extracted items accumulate in `quality_yield` (`--quality-pickout`)
+- `quality_yield`: `{item: {tier_name: Fraction}}` — higher-quality items extracted by pickout, aggregated across steps; surfaced as top-level `quality_yield`. Each step also caches `_quality_chance`/`_pickout` so `format_output` can render the per-step `quality_output` split
 
 **`ModuleSpec`** (named tuple or dict): `{count: int, type: str, tier: int, quality: str}`
 **`BeaconSpec`** (named tuple or dict): `{count: int, tier: int, quality: str}`
@@ -201,6 +206,20 @@ All numeric values use `fractions.Fraction` internally. Only converted to `float
 ```python
 # Quality enum (valid values for all quality flags)
 QUALITY_NAMES = frozenset(["normal", "uncommon", "rare", "epic", "legendary"])
+
+# Ordered tiers (index == tier number) for the quality-output cascade.
+QUALITY_TIERS = ("normal", "uncommon", "rare", "epic", "legendary")
+QUALITY_INDEX = {q: i for i, q in enumerate(QUALITY_TIERS)}
+
+# Base per-slot quality CHANCE at normal module quality (T1 +1%, T2 +1.5%,
+# T3 +2.5%); scaled by MODULE_QUALITY_MULT like every other positive stat.
+QUALITY_MODULE_BONUS: dict[int, Fraction] = {
+    1: Fraction(1, 100), 2: Fraction(3, 200), 3: Fraction(1, 40),
+}
+
+# When a quality roll succeeds: +1..+4 tiers split 90/9/0.9/0.1. Mass above the
+# highest UNLOCKED tier (--max-quality) folds back onto it.
+QUALITY_TIER_SKIP_DIST = (Fraction(9,10), Fraction(9,100), Fraction(9,1000), Fraction(1,1000))
 
 # Multiplier applied to positive module stats at each quality tier
 MODULE_QUALITY_MULT: dict[str, Fraction] = {
@@ -438,6 +457,48 @@ below ALL of its consumers) via a longest-path level sort gated on
 `args.location == "fulgora"`. Every other location keeps the recursive tree's
 DFS pre-order.
 
+**Quality pick-out on Fulgora**: `--quality-pickout` works in the LP too.
+`_fulgora_activity_coeffs` scales each activity's output coefficients by the
+normal-tier fraction `(1 − q_chance)` (so the LP runs more crafts to meet demand)
+and returns `q_chance`/`pickout`/`gross_outputs`. After the solve, every output of
+a pick-out activity contributes `x_r · gross · tier_probs[s>0]` to `quality_yield`
+(recycling activities are multi-output, so co-products roll quality too). The step
+caches `_quality_chance`/`_pickout` so the shared `format_output` renders its
+per-step `quality_output` split, identical to the recursive path.
+
+---
+
+## Quality-Module Output (`--max-quality`, `--quality-pickout`)
+
+`cli.py` models the quality tier of crafted output. Quality modules give a
+per-craft upgrade chance `q_chance` (`quality_chance_from_specs`: T1 +1% / T2 +1.5%
+/ T3 +2.5% per slot, ×`MODULE_QUALITY_MULT`, slot-scaled, clamped). A normal-tier
+craft lands at tier `s` with probability `quality_tier_probs(q, max_index)` — the
+90/9/0.9/0.1 cascade with mass above `--max-quality` (highest UNLOCKED tier) folded
+onto the cap.
+
+- **Reporting (default).** Whenever a step carries quality modules, `format_output`
+  attaches a per-step `quality_output = {primary_item: {tier: rate}}` — the tier
+  composition of the flowing output. Nominal flow is unchanged (the higher-quality
+  items are informational; downstream still receives the full nominal amount). Only
+  the existing speed penalty applies. (Output-quality was previously NOT modelled —
+  the old comment "quality rolls are not modelled here" is gone.)
+- **Pick-out (`--quality-pickout`).** For each step with quality modules, only the
+  `(1 − q_chance)` normal fraction stays in the chain. `solve()` divides the cycle
+  count by `normal_frac` (`effective_result_normal`), so machine counts and input
+  feed scale up to keep the normal-tier yield at demand; co-products credit only
+  their normal fraction to `surplus`. The extracted higher-quality items accumulate
+  in `solver.quality_yield` → top-level **`quality_yield`** `{item: {tier: rate}}`.
+  `rate_for_machines` applies the same `(1 − q_chance)` factor so `--machines`/
+  `--step-machines` reference runs stay consistent; `_primary_amount` is stored as
+  the normal-tier per-cycle amount so the `--step-machines` floor pass works.
+  `100% q_chance` (no normal output) raises `ValueError`.
+
+Top-level echoes: `quality_pickout: true` (when set), `max_quality` (when pickout
+or any extraction occurred). Human format adds a "Quality pick-out: ON" header
+line, a `~ quality <item>: …` line per step, and a "Picked-Out Quality Items"
+section. Works on every location including the Fulgora LP (see above).
+
 ---
 
 ## Oil Processing
@@ -523,7 +584,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 253 tests covering:
+`dev/test_cli.py` contains 269 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -562,6 +623,8 @@ python -m unittest dev.test_cli -v
 | `TestMachineInherentProd` | `build_machine_prod_bonus` returns 1/2 for foundry/EM-plant/biochamber and 0 for assembler/furnace; `_compute_module_effects` returns the machine built-in prod even when `allow_prod=False` (modules gated, inherent not) and 0 for non-inherent machines; EM-plant electronic-circuit machine count is 2/3 of the no-inherent baseline |
 | `TestSimplexLP` | Direct unit tests for `_lp_minimize`: basic optimum with exact `Fraction` output; picks the cheaper variable; `infeasible` when an item has no producer (all-zero row, b>0); `unbounded` detection; fractional optimum (2.5 each on a symmetric cover) |
 | `TestFulgoraRecyclingLP` | End-to-end `--location fulgora` LP via subprocess: `scrap` is the only solid raw and no asteroid-crushing steps; binding-constraint throughput (battery 60/min → 1500 scrap on `recycler`); by-products surface in `co_products`; holmium-ore/stone resolve with no `--bus-item` (EM-science 90/min → 9800 scrap); cascade uses `iron-gear-wheel-recycling` not asteroids; speed modules flow into LP coefficients and reduce machine counts; `--step-machines` rejected on fulgora; `FULGORA_WRAP_ROUTES` entries are valid single-ingredient wrap recipes with existing `<wrap>-recycling`; production_steps are emitted as a strict sources-last bill of materials (target first, `scrap-recycling` last; every step below ALL its consumers) — `format_output` uses a longest-path level sort for `--location fulgora` (recursive/tree locations keep the DFS pre-order) |
+| `TestQualityChanceHelpers` | Unit tests for `quality_chance_from_specs` (T2=1.5%/slot base, tier+quality scaling, ignores non-quality modules, slot-scaling caps at machine slots, clamp to 1.0, zero when no slots) and `quality_tier_probs` (legendary-cap 90/9/0.9/0.1 split sums to 1; rare-cap folds +2/+3/+4 mass onto rare; normal-only cap folds everything back to normal) |
+| `TestQualityPickout` | End-to-end `--quality-pickout` via subprocess: recursive path scales the quality step up so normal output == demand and extracts uncommon/rare/epic (capped at `--max-quality`, no legendary key); aggregated `quality_yield` matches the per-step `quality_output` >normal split; pick-out raises machine count vs the reporting-only run; reporting-only (no flag) leaves machine count at nominal and emits no `quality_yield` (informational split sums to the flowing rate); pick-out flag with no quality modules extracts nothing; Fulgora LP pick-out (accumulator 5×quality-2 → normal 50/min + rare-capped extraction); `--max-quality rare` suppresses epic/legendary even with legendary T3 modules; human format renders the three quality sections |
 
 ### `dev/test_quality_planner.py` (315 tests)
 

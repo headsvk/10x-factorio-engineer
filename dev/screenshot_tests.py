@@ -491,6 +491,12 @@ def make_state_logistics() -> dict:
                 "steel-plate": 60.0, "copper-plate": 60.0,
                 "iron-gear-wheel": 30.0,
             },
+            # Quality pick-out on the battery step routes higher-quality batteries
+            # into the bot network (rendered as pure-supply cards in the
+            # Logistics Network group of the Supply / Demand sheet).
+            "quality_yield": {
+                "battery": {"uncommon": 4.5, "rare": 0.5},
+            },
         },
     }
     # Yellow science — belt-fed flying-robot-frame from the FRF line (direct_items).
@@ -881,6 +887,30 @@ def make_state_line_holmium_fulgora():
     )
 
 
+def make_state_line_quality_pickout():
+    """Quality pick-out: accumulator with 5× quality-2 modules on Fulgora. The
+    Outputs and Reserve → Logistics sections both list the picked-out uncommon/
+    rare accumulators per tier, even though the line has no co-products."""
+    cli = run_cli(
+        "--item", "accumulator", "--rate", "50",
+        "--location", "fulgora",
+        "--recipe-modules", "accumulator=5:quality:2:normal",
+        "--quality-pickout", "--max-quality", "rare",
+        "--bus-item", "battery", "--bus-item", "iron-plate",
+    )
+    return _line_card_state(
+        "Fulgora – Quality Accumulators", "fulgora", "Fulgora",
+        "accumulator", "Quality Accumulators", 50, cli,
+        cli_args={
+            "item": "accumulator", "rate": 50,
+            "recipe_modules": {"accumulator": [
+                {"count": 5, "type": "quality", "tier": 2, "quality": "normal"}]},
+            "quality_pickout": True, "max_quality": "rare",
+            "bus_items": ["battery", "iron-plate"],
+        },
+    )
+
+
 def make_state_line_cryogenic_aquilo():
     cli = run_cli(
         "--item", "cryogenic-science-pack", "--rate", "10",
@@ -973,6 +1003,7 @@ LINE_CARD_SCENARIOS = [
     ("line-card__centrifuge-uranium.png",   make_state_line_centrifuge_uranium),
     ("line-card__oil-refinery.png",         make_state_line_oil_refinery),
     ("line-card__holmium-fulgora.png",      make_state_line_holmium_fulgora),
+    ("line-card__quality-pickout.png",      make_state_line_quality_pickout),
     ("line-card__cryogenic-aquilo.png",     make_state_line_cryogenic_aquilo),
     ("line-card__space-crusher.png",        make_state_line_space_crusher),
     ("line-card__research-stale.png",       make_state_line_research_stale),

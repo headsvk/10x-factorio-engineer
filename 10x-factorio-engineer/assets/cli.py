@@ -11,6 +11,8 @@ Usage:
                   [--location PLANET]
                   [--machine-quality QUALITY]
                   [--beacon-quality QUALITY]
+                  [--max-quality QUALITY]
+                  [--quality-pickout]
                   [--modules MACHINE=COUNT:TYPE:TIER:QUALITY]   # repeatable
                   [--beacon MACHINE=COUNT:TIER:QUALITY]         # repeatable
                   [--recipe ITEM=RECIPE]                        # repeatable
@@ -422,6 +424,26 @@ QUALITY_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
     3: Fraction(-1, 20),   # -5%
 }
 
+# Ordered quality tiers (index == tier number). QUALITY_NAMES is the unordered set.
+QUALITY_TIERS: tuple[str, ...] = ("normal", "uncommon", "rare", "epic", "legendary")
+QUALITY_INDEX: dict[str, int] = {q: i for i, q in enumerate(QUALITY_TIERS)}
+
+# Base per-slot quality CHANCE at normal module quality (game source: quality
+# module T1 = +1%, T2 = +1.5%, T3 = +2.5%). Scaled by MODULE_QUALITY_MULT for
+# higher-quality module housings, same as every other positive module stat.
+QUALITY_MODULE_BONUS: dict[int, Fraction] = {
+    1: Fraction(1, 100),    # +1.0%
+    2: Fraction(3, 200),    # +1.5%
+    3: Fraction(1, 40),     # +2.5%
+}
+
+# When a quality roll succeeds the item tiers up by +1..+4 with this fixed split
+# (90% +1, 9% +2, 0.9% +3, 0.1% +4). Mass that would exceed the highest UNLOCKED
+# tier folds back onto that tier (you can't roll a quality you haven't researched).
+QUALITY_TIER_SKIP_DIST: tuple[Fraction, ...] = (
+    Fraction(9, 10), Fraction(9, 100), Fraction(9, 1000), Fraction(1, 1000),
+)
+
 # Number of module slots in a standard beacon (quality-invariant)
 BEACON_SLOTS: int = 2
 
@@ -478,6 +500,49 @@ MODULE_EFFICIENCY_REDUCTION: dict[int, Fraction] = {
 }
 
 
+
+
+# ---------------------------------------------------------------------------
+# Quality-module output helpers
+# ---------------------------------------------------------------------------
+
+def quality_chance_from_specs(specs: list, slots: int) -> Fraction:
+    """Total per-craft quality-upgrade chance from the quality modules in *specs*.
+
+    Mirrors the slot-scaling used by _compute_module_effects (a machine never
+    runs more modules than it has slots). Only ``type == "quality"`` specs count.
+    Result is clamped to [0, 1].
+    """
+    if not specs or slots <= 0:
+        return Fraction(0)
+    total_requested = sum(s["count"] for s in specs)
+    if total_requested <= 0:
+        return Fraction(0)
+    scale = Fraction(min(slots, total_requested), total_requested)
+    q = Fraction(0)
+    for spec in specs:
+        if spec.get("type") == "quality":
+            eff_count = Fraction(spec["count"]) * scale
+            q += eff_count * QUALITY_MODULE_BONUS[spec["tier"]] * MODULE_QUALITY_MULT[spec["quality"]]
+    if q < 0:
+        return Fraction(0)
+    if q > 1:
+        return Fraction(1)
+    return q
+
+
+def quality_tier_probs(q_total: Fraction, max_index: int) -> list[Fraction]:
+    """Per-tier probability vector for a NORMAL-tier craft given upgrade chance
+    *q_total*, with mass above *max_index* (highest unlocked tier) folded onto it.
+
+    Returns a length-5 list indexed by QUALITY_INDEX; entry 0 is "stays normal".
+    """
+    probs = [Fraction(0)] * 5
+    probs[0] = Fraction(1) - q_total
+    for delta, share in enumerate(QUALITY_TIER_SKIP_DIST, start=1):
+        target = delta if delta <= max_index else max_index
+        probs[target] += q_total * share
+    return probs
 
 
 # ---------------------------------------------------------------------------
@@ -1314,6 +1379,8 @@ class Solver:
         planet_props: dict | None = None,
         location: str | None = None,
         research_levels: dict | None = None,
+        max_quality: str = "legendary",
+        quality_pickout: bool = False,
     ):
         self.recipe_idx      = recipe_idx
         self.raw_set         = raw_set
@@ -1354,11 +1421,22 @@ class Solver:
         self.research_prod_capped: bool = False
         self.capped_recipes: set[str] = set()
 
+        # Quality-module output modelling. max_quality is the highest tier the
+        # player has unlocked (cascade mass folds onto it). With quality_pickout
+        # set, any step carrying quality modules has its >normal output siphoned
+        # off: the step is scaled up so the normal-tier yield still meets demand
+        # and the extracted higher-quality items accumulate in quality_yield.
+        self.max_quality: str  = max_quality
+        self.max_quality_index: int = QUALITY_INDEX[max_quality]
+        self.quality_pickout: bool = quality_pickout
+
         self.steps: dict[str, dict]             = {}
         self.raw_resources: dict[str, Fraction] = defaultdict(Fraction)
         self.bus_inputs: dict[str, Fraction]    = defaultdict(Fraction)
         self.surplus: dict[str, Fraction]       = defaultdict(Fraction)
         self.oil_demands: dict[str, Fraction]   = defaultdict(Fraction)
+        # {item: {tier_name: rate}} — higher-quality items extracted by pickout.
+        self.quality_yield: dict[str, dict[str, Fraction]] = defaultdict(lambda: defaultdict(Fraction))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -1492,6 +1570,15 @@ class Solver:
 
         effective_result = result_amount * (Fraction(1) + prod_bonus)
 
+        # Pickout: only the normal-tier fraction of the output counts toward the
+        # requested rate (the rest is siphoned off as higher quality).
+        if self.quality_pickout:
+            q_chance = quality_chance_from_specs(
+                specs, self.machine_module_slots.get(machine_key, 0)
+            )
+            if q_chance > 0:
+                effective_result = effective_result * (Fraction(1) - q_chance)
+
         beacon_spec        = self._get_beacon(recipe_key, machine_key)
         beacon_speed_bonus = self._compute_beacon_speed(beacon_spec)
 
@@ -1594,7 +1681,26 @@ class Solver:
 
         # Effective output per cycle (productivity bonus)
         effective_result = result_amount * (Fraction(1) + prod_bonus)
-        cycles_per_min   = rate / effective_result
+
+        # Quality-module output: when pickout is active and this step carries
+        # quality modules, only the (1 - q_chance) NORMAL fraction of each output
+        # feeds the chain; the upgraded fraction is siphoned off (quality_yield).
+        # Scaling the cycles up by 1/normal_frac keeps the normal-tier yield equal
+        # to demand. With pickout off (or no quality modules) normal_frac == 1 and
+        # everything below collapses to the original nominal-flow behaviour.
+        slots      = self.machine_module_slots.get(machine_key, 0)
+        q_chance   = quality_chance_from_specs(specs, slots)
+        pickout    = self.quality_pickout and q_chance > 0
+        normal_frac = (Fraction(1) - q_chance) if pickout else Fraction(1)
+        if pickout and normal_frac <= 0:
+            raise ValueError(
+                f"--quality-pickout: '{recipe_key}' rolls 100% quality "
+                f"(no normal output to feed the chain); reduce quality modules."
+            )
+        tier_probs = quality_tier_probs(q_chance, self.max_quality_index) if pickout else None
+
+        effective_result_normal = effective_result * normal_frac
+        cycles_per_min   = rate / effective_result_normal
 
         # Beacon speed bonus (may introduce float — sqrt is irrational)
         beacon_spec        = self._get_beacon(recipe_key, machine_key)
@@ -1606,9 +1712,17 @@ class Solver:
         else:
             machines_needed = (cycles_per_min * energy_req) / (60 * effective_speed)
 
+        # Extracted higher-quality primary output (pickout only).
+        if pickout and tier_probs is not None:
+            gross_primary = cycles_per_min * effective_result
+            for ti in range(1, 5):
+                if tier_probs[ti] > 0:
+                    self.quality_yield[item_key][QUALITY_TIERS[ti]] += gross_primary * tier_probs[ti]
+
         # Credit co-products as surplus BEFORE recursing into ingredients so that
         # self-recycling co-products (e.g. asteroid chunks returned by crushing)
-        # are available to offset the ingredient demand in the same step.
+        # are available to offset the ingredient demand in the same step. Under
+        # pickout, only the normal-tier fraction is surplus; the rest is extracted.
         for res in recipe.get("results", []):
             co = res["name"]
             if co == item_key:
@@ -1617,7 +1731,14 @@ class Solver:
             co_amt = Fraction(str(res.get("amount", 1))) * prob
             if prod_bonus > 0:
                 co_amt = co_amt * (Fraction(1) + prod_bonus)
-            self.surplus[co] += cycles_per_min * co_amt
+            gross_co = cycles_per_min * co_amt
+            if pickout and tier_probs is not None:
+                self.surplus[co] += gross_co * normal_frac
+                for ti in range(1, 5):
+                    if tier_probs[ti] > 0:
+                        self.quality_yield[co][QUALITY_TIERS[ti]] += gross_co * tier_probs[ti]
+            else:
+                self.surplus[co] += gross_co
 
         # Accumulate step (same recipe may arrive from multiple tree paths)
         if recipe_key in self.steps:
@@ -1638,7 +1759,7 @@ class Solver:
                 co_amt = Fraction(str(res.get("amount", 1))) * prob
                 if prod_bonus > 0:
                     co_amt = co_amt * (Fraction(1) + prod_bonus)
-                outputs[co] = outputs.get(co, Fraction(0)) + cycles_per_min * co_amt
+                outputs[co] = outputs.get(co, Fraction(0)) + cycles_per_min * co_amt * normal_frac
         else:
             step_inputs: dict[str, Fraction] = {}
             for ing in recipe.get("ingredients", []):
@@ -1654,7 +1775,7 @@ class Solver:
                 co_amt = Fraction(str(res.get("amount", 1))) * prob
                 if prod_bonus > 0:
                     co_amt = co_amt * (Fraction(1) + prod_bonus)
-                step_outputs[co] = cycles_per_min * co_amt
+                step_outputs[co] = cycles_per_min * co_amt * normal_frac
             # Per-machine cycle throughput, cached so the post-solve floor
             # pass (--step-machines) can bump the count without re-deriving
             # module/beacon/quality math. Stays Fraction unless beacons are
@@ -1677,8 +1798,10 @@ class Solver:
                 # Internal — stripped before serialisation in format_output
                 "_recipe_obj":           recipe,
                 "_cycles_per_min_per_m": cycles_pm_per_machine,
-                "_primary_amount":       effective_result,   # already includes prod bonus
+                "_primary_amount":       effective_result_normal,  # normal-tier per cycle (== effective_result without pickout)
                 "_prod_bonus":           prod_bonus,
+                "_quality_chance":       q_chance,
+                "_pickout":              pickout,
             }
 
     def resolve_oil(self, data: dict) -> None:
@@ -1890,6 +2013,22 @@ def _fulgora_activity_coeffs(solver: "Solver", recipe: dict) -> dict:
             inputs.get(ing["name"], Fraction(0)) + Fraction(str(ing.get("amount", 1)))
         )
 
+    # Quality pick-out: when this activity carries quality modules, only the
+    # normal-tier fraction of every output stays in the LP flow (the LP then runs
+    # more crafts to meet demand); the upgraded fraction is reported post-solve.
+    # gross_outputs preserves the full per-craft output for that reporting.
+    gross_outputs = dict(outputs)
+    q_chance = quality_chance_from_specs(specs, solver.machine_module_slots.get(machine_key, 0))
+    pickout  = solver.quality_pickout and q_chance > 0
+    if pickout:
+        normal_frac = Fraction(1) - q_chance
+        if normal_frac <= 0:
+            raise ValueError(
+                f"--quality-pickout: '{rk}' rolls 100% quality (no normal output "
+                f"to feed the chain); reduce quality modules."
+            )
+        outputs = {k: v * normal_frac for k, v in outputs.items()}
+
     return {
         "machine":            machine_key,
         "machine_coef":       machine_coef,
@@ -1897,6 +2036,9 @@ def _fulgora_activity_coeffs(solver: "Solver", recipe: dict) -> dict:
         "inputs":             inputs,
         "beacon_speed_bonus": beacon_speed_bonus,
         "capped":             capped,
+        "q_chance":           q_chance,
+        "pickout":            pickout,
+        "gross_outputs":      gross_outputs,
     }
 
 
@@ -2132,9 +2274,23 @@ def solve_fulgora(solver: "Solver", data: dict, targets: list) -> dict:
             "beacon_speed_bonus": co["beacon_speed_bonus"],
             "inputs":             step_inputs,
             "outputs":            step_outputs,
+            # Let format_output render the per-step quality split for the primary.
+            "_quality_chance":    co["q_chance"],
+            "_pickout":           co["pickout"],
         }
         if co["capped"]:
             solver.capped_recipes.add(rk)
+
+        # Accumulate the extracted higher-quality output across every result of
+        # this activity (recycling activities are multi-output, so co-products
+        # roll quality too — all results share the one per-craft quality roll).
+        if co["pickout"]:
+            probs = quality_tier_probs(co["q_chance"], solver.max_quality_index)
+            for it, gross_amt in co["gross_outputs"].items():
+                gross_rate = xj * gross_amt
+                for ti in range(1, 5):
+                    if probs[ti] > 0:
+                        solver.quality_yield[it][QUALITY_TIERS[ti]] += gross_rate * probs[ti]
 
     # Net overflow from the recycling cascade (produced − consumed − demand).
     byproducts: dict[str, Fraction] = {}
@@ -2363,6 +2519,24 @@ def format_output(
             step_out["beacon_quality"] = solver.beacon_quality
         if recipe_key in solver.capped_recipes:
             step_out["prod_capped"] = True
+        # Quality-module output split for this step's primary item. Present
+        # whenever the step carries quality modules; under pickout the >normal
+        # tiers are the extracted goods, otherwise it's the mixed composition of
+        # the flowing output. Gross = rate/normal_frac (pickout) else rate.
+        qc = s.get("_quality_chance") or Fraction(0)
+        if qc > 0:
+            probs = quality_tier_probs(qc, solver.max_quality_index)
+            if s.get("_pickout"):
+                gross = s["rate_per_min"] / (Fraction(1) - qc)
+            else:
+                gross = s["rate_per_min"]
+            tier_split = {}
+            for ti in range(0, solver.max_quality_index + 1):
+                amt = gross * probs[ti]
+                if amt > 0:
+                    tier_split[QUALITY_TIERS[ti]] = _f(amt)
+            if tier_split:
+                step_out["quality_output"] = {primary_item: tier_split}
         # --step-machines floor / excess buffer (only present when constraint was set)
         if "forced_min_machines" in s:
             step_out["forced_min_machines"] = s["forced_min_machines"]
@@ -2520,6 +2694,10 @@ def format_output(
         out["recipe_beacon_overrides"] = args.recipe_beacon_overrides
     if getattr(args, "use_ceil", False):
         out["use_ceil"] = True
+    if getattr(args, "quality_pickout", False):
+        out["quality_pickout"] = True
+    if getattr(args, "quality_pickout", False) or solver.quality_yield:
+        out["max_quality"] = getattr(args, "max_quality", solver.max_quality)
 
     # --step-machines echo: the declared (recipe, N) pairs and the throttle flag
     sm_constraints = getattr(args, "step_machines_constraints", None) or []
@@ -2540,6 +2718,23 @@ def format_output(
     out["production_steps"]    = steps_list
     out["raw_resources"]       = raw_sorted
     out["co_products"]         = co_products
+
+    # Picked-out higher-quality items (only when --quality-pickout extracted any).
+    if solver.quality_yield:
+        quality_yield: dict[str, dict[str, float]] = {}
+        for item, tiers in sorted(
+            solver.quality_yield.items(),
+            key=lambda kv: -sum(kv[1].values()),
+        ):
+            tier_out = {
+                QUALITY_TIERS[ti]: _f(tiers[QUALITY_TIERS[ti]])
+                for ti in range(1, 5)
+                if tiers.get(QUALITY_TIERS[ti], Fraction(0)) > 0
+            }
+            if tier_out:
+                quality_yield[item] = tier_out
+        if quality_yield:
+            out["quality_yield"] = quality_yield
     out["miners_needed"]       = miners
     out["total_power_mw"]      = round((total_step_pwr + miner_pwr) / 1000, 4)
     out["total_power_mw_ceil"] = round((total_step_pwr_ceil + miner_pwr) / 1000, 4)
@@ -2585,6 +2780,11 @@ def format_human_readable(out: dict) -> str:
     bq = out.get("beacon_quality", "normal")
     if mq != "normal" or bq != "normal":
         lines.append(f"Machine quality: {mq}  |  Beacon quality: {bq}")
+
+    if out.get("quality_pickout"):
+        lines.append(
+            f"Quality pick-out: ON  |  Unlocked up to: {out.get('max_quality', 'legendary')}"
+        )
 
     if out.get("module_configs"):
         for machine, specs in out["module_configs"].items():
@@ -2655,6 +2855,9 @@ def format_human_readable(out: dict) -> str:
             lines.append(f"  -> {out_item:<28}  {out_rate}/min")
         for inp_item, inp_rate in step.get("inputs", {}).items():
             lines.append(f"  <- {inp_item:<28}  {inp_rate}/min")
+        for q_item, tiers in step.get("quality_output", {}).items():
+            split = ", ".join(f"{rate} {tier}" for tier, rate in tiers.items())
+            lines.append(f"  ~ quality {q_item}: {split}")
         lines.append("")
 
     # --- Raw Resources ---
@@ -2695,6 +2898,15 @@ def format_human_readable(out: dict) -> str:
         lines.append("---------------------")
         for item, rate in out["co_products"].items():
             lines.append(f"  {item:<30}  {rate}/min")
+
+    # --- Picked-Out Quality Items (higher-quality output siphoned by pickout) ---
+    if out.get("quality_yield"):
+        lines.append("")
+        lines.append("Picked-Out Quality Items")
+        lines.append("------------------------")
+        for item, tiers in out["quality_yield"].items():
+            split = ", ".join(f"{rate}/min {tier}" for tier, rate in tiers.items())
+            lines.append(f"  {item:<28}  {split}")
 
     # --- Power ---
     lines.append("")
@@ -2743,6 +2955,8 @@ def _clone_solver(s: "Solver") -> "Solver":
         planet_props=s.planet_props or None,
         location=s.location,
         research_levels=s.research_levels or None,
+        max_quality=s.max_quality,
+        quality_pickout=s.quality_pickout,
     )
 
 
@@ -2974,6 +3188,22 @@ Examples:
     p.add_argument("--beacon-quality", default="normal",
                    choices=list(QUALITY_NAMES), dest="beacon_quality",
                    help="Quality tier of beacons (default: normal).")
+    p.add_argument("--max-quality", default="legendary",
+                   choices=list(QUALITY_TIERS), dest="max_quality",
+                   help=(
+                       "Highest quality tier you have UNLOCKED (default: legendary). "
+                       "Caps the quality cascade: roll mass above this tier folds onto "
+                       "it. Set to e.g. 'rare' if you haven't researched epic/legendary."
+                   ))
+    p.add_argument("--quality-pickout", action="store_true", dest="quality_pickout",
+                   help=(
+                       "Treat higher-quality output from quality-module steps as siphoned "
+                       "off: scale each such step (and its feed) up so the normal-tier yield "
+                       "still meets demand, and report the extracted items under "
+                       "`quality_yield`. Put quality modules where you want them via "
+                       "--modules / --recipe-modules. Works on every location, including "
+                       "the Fulgora recycling LP."
+                   ))
     p.add_argument(
         "--modules",
         action="append", default=[],
@@ -3187,6 +3417,8 @@ def main() -> None:
         planet_props=planet_props or None,
         location=args.location,
         research_levels=research_levels or None,
+        max_quality=args.max_quality,
+        quality_pickout=args.quality_pickout,
     )
 
     targets: list[tuple[str, Fraction]] = []

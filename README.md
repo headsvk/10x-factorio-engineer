@@ -29,9 +29,9 @@ dev/
   sample/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
-  test_cli.py               # unittest suite (253 tests, stdlib only)
+  test_cli.py               # unittest suite (269 tests, stdlib only)
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
-  test_quality_planner.py   # unittest suite (310 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (315 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -145,6 +145,24 @@ electronic-circuit              60.0/min    0.0098 -> 1 legendary assembling-mac
 ...
 ```
 
+With quality modules + `--quality-pickout`, the affected step shows a per-tier
+output split and the harvested higher-quality items are listed at the bottom:
+```
+$ python assets/cli.py --item accumulator --rate 50 --location fulgora \
+    --recipe-modules accumulator=5:quality:2:normal --quality-pickout --max-quality rare --format human
+
+Quality pick-out: ON  |  Unlocked up to: rare
+...
+accumulator                     4.004 -> 5 electromagnetic-plant
+  modules: 5x quality-2-normal
+  -> accumulator                   50.0/min
+  ~ quality accumulator: 50.0 normal, 3.6486 uncommon, 0.4054 rare
+...
+Picked-Out Quality Items
+------------------------
+  accumulator                   3.6486/min uncommon, 0.4054/min rare
+```
+
 See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags reference and full JSON output shape.
 
 ### Running Tests
@@ -154,7 +172,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-234 CLI tests + 296 quality-planner tests, stdlib only.
+269 CLI tests + 315 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner
 
@@ -247,7 +265,7 @@ self-recycling items as **intermediate ingredients** of another chain.  See
 `SKILL.md` turns Claude into an active factory co-pilot:
 
 - **CLI mode** — Claude calls `python assets/cli.py` for all production math, tracks factory state conversationally, and outputs `FACTORY_STATE` JSON at session end for import into the dashboard.
-- **Dashboard mode** — a published `application/vnd.ant.html` artifact with a collapsible Science Targets section (collapsed by default; SPM / eSPM headline that names the limiting pack + a Research Labs card that sizes how many labs/biolabs consume your science given lab modules, beacons, quality, and lab research techs), an Overview tab with a **Supply / Demand** sheet — belt-bus, pipe-network, and bot **Logistics Network** items rendered as compact cards of supply vs. consumed rate, sorted tightest-first (driven by per-line `bus_items`, `reserve_items`, and `cli_args.logistics_items`; belt-fed `cli_args.direct_items` net silently against supplier reserves; reserved science packs count as consumed by research) — plus the top next step and total power, a Lines tab with per-line machine tables (per-recipe inputs/outputs and belt counts) grouped by category (Science / Mining / Smelting / Chemical / Circuits / Logistics / Military / Other) and filterable by item name, an Actions tab listing bottlenecks and next steps (summarised in a one-line banner above the tabs), and in-artifact chat. Dark and light themes; state persists via `window.storage` (cross-device) with `localStorage` fallback. Import/Export buttons sync state with CLI sessions.
+- **Dashboard mode** — a published `application/vnd.ant.html` artifact with a collapsible Science Targets section (collapsed by default; SPM / eSPM headline that names the limiting pack + a Research Labs card that sizes how many labs/biolabs consume your science given lab modules, beacons, quality, and lab research techs), an Overview tab with a **Supply / Demand** sheet — belt-bus, pipe-network, and bot **Logistics Network** items rendered as compact cards of supply vs. consumed rate, sorted tightest-first (driven by per-line `bus_items`, `reserve_items`, and `cli_args.logistics_items`; belt-fed `cli_args.direct_items` net silently against supplier reserves; reserved science packs count as consumed by research; picked-out quality items from `cli_result.quality_yield` appear as per-tier supply cards, e.g. "Accumulator · Rare") — plus the top next step and total power, a Lines tab with per-line machine tables (per-recipe inputs/outputs and belt counts; the line's **Outputs** and **Reserve → Logistics** sections also list any picked-out quality items per tier, e.g. "Accumulator · Rare") grouped by category (Science / Mining / Smelting / Chemical / Circuits / Logistics / Military / Other) and filterable by item name, an Actions tab listing bottlenecks and next steps (summarised in a one-line banner above the tabs), and in-artifact chat. Dark and light themes; state persists via `window.storage` (cross-device) with `localStorage` fallback. Import/Export buttons sync state with CLI sessions.
 
 See [SKILL.md §3](10x-factorio-engineer/SKILL.md) for the factory state schema shared by the skill and the dashboard.
 
