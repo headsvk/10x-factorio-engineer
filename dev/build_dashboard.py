@@ -46,7 +46,10 @@ with open(SRC, encoding="utf-8") as f:
 
 html = minify_html.minify(html, minify_css=True, minify_js=True)
 
-with open(OUT, "w", encoding="utf-8") as f:
+# newline="" stops Windows text-mode from translating \n to \r\n, so the
+# artifact is written with LF endings and matches the repo's text=auto policy
+# (otherwise every rebuild produces a CRLF file that git warns it'll normalize).
+with open(OUT, "w", encoding="utf-8", newline="") as f:
     f.write(html)
 
 src_size = os.path.getsize(SRC)
