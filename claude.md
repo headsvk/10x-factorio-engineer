@@ -121,6 +121,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `10x-factorio-engineer/assets/dashboard.html` | Built artifact — run `python dev/build_dashboard.py` to regenerate; paste into claude.ai as `application/vnd.ant.html` and publish |
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
+| `dev/update_research.py` | Applies a research-level change to a factory state and re-runs only the affected lines (`python dev/update_research.py TECH=LEVEL ... [--state PATH] [--dry-run] [--list]`; default state = `dev/my-factory.json`). Use this instead of hand-editing `research_levels` + manually re-running lines — it reconstructs each line's CLI command from its `cli_args` + shared top-level config, re-solves the affected lines, and rewrites their `cli_result` (LF output). Mining-prod re-runs miner lines; recipe-prod re-runs lines whose steps touch a boosted recipe; lab-only techs (`research-productivity` / `lab-research-speed`) update the field but trigger no re-run. See the **research-level updates** workflow note below. |
 | `dev/test_cli.py` | `unittest` suite (272 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
 | `dev/test_quality_planner.py` | `unittest` suite (315 tests) for quality_planner |
@@ -132,6 +133,28 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/artifact-api/research.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
 Dataset files are vendored. Auto-downloaded from KirkMcDonald's GitHub if missing.
+
+### Research-level updates (workflow)
+
+When the user reports finishing a research ("I just hit mining productivity 14",
+"scrap recycling productivity 1"), prefer `dev/update_research.py` over editing
+`research_levels` and re-running lines by hand:
+
+```bash
+python dev/update_research.py mining-productivity=14 scrap-recycling-productivity=1
+python dev/update_research.py --list            # current levels + affected lines per tech
+python dev/update_research.py steel-productivity=6 --dry-run   # preview, don't write
+```
+
+It updates the top-level `research_levels` and re-solves only the affected lines
+(mining-prod → miner lines; recipe-prod → lines whose steps touch a boosted
+recipe; lab-only techs update the field with no re-run), reconstructing each
+line's command from its `cli_args` + shared top-level config and rewriting
+`cli_result`. Re-running with an unchanged set reproduces existing results
+(faithfulness self-check). This is the script form of the manual workflow in
+`10x-factorio-engineer/SKILL.md` §3 ("I just finished mining productivity 5"). After it
+writes, regenerate the preview (`python dev/preview.py --state dev/my-factory.json`)
+if the user is viewing the dashboard.
 
 ---
 
