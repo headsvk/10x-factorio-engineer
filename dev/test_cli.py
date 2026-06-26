@@ -3528,6 +3528,34 @@ class TestResearchProductivity(unittest.TestCase):
         # Nothing was capped.
         self.assertFalse(weird.research_prod_capped)
 
+    def test_research_prod_applies_when_allow_productivity_false(self):
+        # scrap-recycling has allow_productivity=False (recyclers reject prod
+        # modules), but scrap-recycling-productivity is a recipe-targeted tech
+        # that still boosts it. _compute_module_effects must return the research
+        # prod regardless of the allow_prod argument.
+        s = _solver("fulgora", research_levels={"scrap-recycling-productivity": 3})
+        self.assertEqual(s.recipe_research_prod.get("scrap-recycling"), Fraction(3, 10))
+        total_prod, _speed, capped = s._compute_module_effects(
+            [], "recycler", allow_prod=False, recipe_key="scrap-recycling",
+        )
+        self.assertEqual(total_prod, Fraction(3, 10))
+        self.assertFalse(capped)
+        # A recipe with no targeted research still gets nothing, allow_prod aside.
+        none_prod, _s, _c = s._compute_module_effects(
+            [], "recycler", allow_prod=False, recipe_key="iron-plate",
+        )
+        self.assertEqual(none_prod, Fraction(0))
+
+    def test_scrap_recycling_prod_capped_at_plus_300_pct(self):
+        # The +300 % cap applies to scrap-recycling-productivity (per the wiki),
+        # so high levels saturate rather than running away.
+        s = _solver("fulgora", research_levels={"scrap-recycling-productivity": 50})
+        total_prod, _speed, capped = s._compute_module_effects(
+            [], "recycler", allow_prod=False, recipe_key="scrap-recycling",
+        )
+        self.assertEqual(total_prod, cli.MAX_CRAFTING_PROD)
+        self.assertTrue(capped)
+
     # -- Output format ------------------------------------------------------
 
     def test_output_echoes_research_levels(self):
@@ -3841,6 +3869,20 @@ class TestFulgoraRecyclingLP(unittest.TestCase):
         self.assertAlmostEqual(out["raw_resources"]["scrap"], 1500.0, places=4)
         self.assertEqual(self._recipes(out), ["scrap-recycling"])
         self.assertEqual(out["production_steps"][0]["machine"], "recycler")
+
+    def test_scrap_recycling_prod_reduces_scrap_demand(self):
+        # scrap-recycling-productivity adds +10%/level to the scrap-recycling
+        # recipe in the LP even though allow_productivity=False. battery is the
+        # binding 4% drop: 60/0.04 = 1500 scrap at L0, 1500/1.1 at L1, 1500/1.2
+        # at L2.
+        base = _run_cli("--item", "battery", "--rate", "60", "--location", "fulgora")
+        l1 = _run_cli("--item", "battery", "--rate", "60", "--location", "fulgora",
+                      "--research", "scrap-recycling-productivity=1")
+        l2 = _run_cli("--item", "battery", "--rate", "60", "--location", "fulgora",
+                      "--research", "scrap-recycling-productivity=2")
+        self.assertAlmostEqual(base["raw_resources"]["scrap"], 1500.0, places=4)
+        self.assertAlmostEqual(l1["raw_resources"]["scrap"], 1500.0 / 1.1, places=3)
+        self.assertAlmostEqual(l2["raw_resources"]["scrap"], 1500.0 / 1.2, places=3)
 
     def test_byproducts_surface_as_co_products(self):
         out = _run_cli("--item", "battery", "--rate", "60", "--location", "fulgora")

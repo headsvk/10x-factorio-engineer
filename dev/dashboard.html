@@ -205,6 +205,11 @@
                         color: var(--text); font-family: 'JetBrains Mono', monospace;
                         font-size: 12px; padding: 2px 6px; height: 24px; }
     .research-input:focus { outline: none; border-color: var(--accent); }
+    .research-value   { font-family: 'JetBrains Mono', monospace; font-size: 12px;
+                        color: var(--text); min-width: 58px; text-align: right; }
+    .research-value--zero { color: var(--text-dim); }
+    .research-hint    { grid-column: 1 / -1; font-size: 10px; color: var(--text-dim);
+                        margin-top: 8px; line-height: 1.45; }
     .research-subgroup-label { grid-column: 1 / -1; font-family: 'Barlow Condensed', sans-serif;
                                font-size: 10px; font-weight: 800; text-transform: uppercase;
                                letter-spacing: .12em; color: var(--text-dim); margin-top: 4px; }
@@ -480,6 +485,7 @@
     .mod-chip.type-prod  { background: rgba(210, 90,  30,.09); border-color: rgba(210, 90,  30,.35);  color: #d06020; }
     .mod-chip.type-speed { background: rgba( 30,130,210,.09); border-color: rgba( 30,130,210,.35);  color: #3a9fd4; }
     .mod-chip.type-eff   { background: rgba( 60,180, 60,.08); border-color: rgba( 60,180, 60,.30); color: #50b850; }
+    .mod-chip.type-qual  { background: rgba( 60,200,180,.08); border-color: rgba( 60,200,180,.32); color: #3ac9b0; }
     .bcn-chip {
       display: inline-flex; align-items: center; gap: 1px;
       padding: 1px 4px; border-radius: 2px;
@@ -657,6 +663,7 @@ function makeLocation(id, type, labelOverride) {
 const DEFAULT_STATE = {
   save_name: 'My Factory', dataset: 'vanilla', assembler: 3,
   furnace: 'electric', machine_quality: 'normal', beacon_quality: 'normal',
+  max_quality: 'legendary',
   module_configs: {}, beacon_configs: {}, recipe_overrides: {}, machine_overrides: {},
   research_levels: {},
   preferred_belt: 'blue',
@@ -873,8 +880,8 @@ function summarizeCliArgs(args) {
   return parts.length ? parts.join(' · ') : null;
 }
 function modChip(m) {
-  const abbr = {prod: 'P', speed: 'S', efficiency: 'E'}[m.type] ?? m.type[0].toUpperCase();
-  const tCls = {prod: 'type-prod', speed: 'type-speed', efficiency: 'type-eff'}[m.type] ?? '';
+  const abbr = {prod: 'P', speed: 'S', efficiency: 'E', quality: 'Q'}[m.type] ?? m.type[0].toUpperCase();
+  const tCls = {prod: 'type-prod', speed: 'type-speed', efficiency: 'type-eff', quality: 'type-qual'}[m.type] ?? '';
   const qdot = m.quality !== 'normal' ? `<span class="qdot q-${m.quality}">◆</span>` : '';
   return `<span class="mod-chip ${tCls}"><span>${m.count}×${abbr}${m.tier}${qdot}</span></span>`;
 }
@@ -1277,13 +1284,16 @@ function renderResearch() {
     ? `<span class="research-count-pill">${activeCount} active</span>`
     : '<span class="research-count-pill">none</span>';
 
-  const rowHtml = (key, entry, max) => {
+  // Read-only display. Research levels are Claude-driven: changing one re-runs
+  // every affected line via cli.py, which the dashboard can't do — so editing
+  // here would silently leave all cli_results stale. The player asks Claude to
+  // update these (see the hint below), same pattern as lab_config.
+  const rowHtml = (key, entry) => {
     const val = levels[key] ?? 0;
     return `
       <div class="research-row">
         <span class="research-label">${esc(entry.label)}</span>
-        <input type="number" class="research-input" data-research="${key}"
-               min="0" step="1"${max ? ` max="${max}"` : ''} value="${val}" placeholder="0" />
+        <span class="research-value${val > 0 ? '' : ' research-value--zero'}">${val > 0 ? 'Lv ' + val : '—'}</span>
       </div>`;
   };
 
@@ -1297,7 +1307,7 @@ function renderResearch() {
   // Lab techs feed the Research-lab card (speed → labs-needed, productivity → eSPM).
   const labRows = Object.entries(LAB_RESEARCH)
     .filter(([, entry]) => isSA || !entry.sa)
-    .map(([k, entry]) => rowHtml(k, entry, entry.max))
+    .map(([k, entry]) => rowHtml(k, entry))
     .join('');
 
   const body = researchOpen ? `
@@ -1306,6 +1316,7 @@ function renderResearch() {
         ${mining}
         ${isSA ? `<div class="research-subgroup-label">Space Age — Recipe Productivity (capped at +300%)</div>${saRows}` : ''}
         <div class="research-subgroup-label">Labs</div>${labRows}
+        <div class="research-hint">Set by Claude in chat — these aren't editable here because changing a level has to re-run every affected line through the calculator. Just tell Claude, e.g. <em>"I finished mining productivity 6"</em>.</div>
       </div>
     </div>` : '';
 
@@ -1885,7 +1896,7 @@ function renderLineCard(line, idx) {
       ...Object.entries(_machTotals).map(([m, n]) =>
         `<span class="chip"><span style="font-weight:600;color:var(--text)">${n}×</span> <span style="color:var(--text-dim)">${esc(machineLabel(m))}</span></span>`),
       ...Object.values(_modTotals).map(({m, total}) => {
-        const name = {prod:'Productivity',speed:'Speed',efficiency:'Efficiency'}[m.type] ?? m.type;
+        const name = {prod:'Productivity',speed:'Speed',efficiency:'Efficiency',quality:'Quality'}[m.type] ?? m.type;
         const qStr = m.quality !== 'normal' ? ` (${m.quality})` : '';
         return `<span class="chip"><span style="font-weight:600;color:var(--text)">${total}×</span> <span style="color:var(--text-dim)">${name}-${m.tier}${qStr}</span></span>`;
       }),
@@ -2227,16 +2238,8 @@ function bindEvents() {
     render();
   });
 
-  document.querySelectorAll('.research-input[data-research]').forEach(input =>
-    input.addEventListener('change', () => {
-      const key = input.dataset.research;
-      const lvl = Math.max(0, parseInt(input.value, 10) || 0);
-      STATE.research_levels = STATE.research_levels ?? {};
-      if (lvl > 0) STATE.research_levels[key] = lvl;
-      else         delete STATE.research_levels[key];
-      saveState();
-      render();
-    }));
+  // Research bonuses are read-only display (Claude-driven). No input binding —
+  // editing them here can't re-run the CLI, so it would leave cli_results stale.
 
   // Research cycle time picker — the only interactive lab control. The rest of
   // lab_config is state-driven (player asks Claude to update it).

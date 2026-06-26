@@ -284,6 +284,7 @@ working context and update it after every player message.
   "furnace": "electric",              // furnace type (shared)
   "machine_quality": "normal",        // "normal"|"uncommon"|"rare"|"epic"|"legendary" (shared)
   "beacon_quality": "normal",         // beacon housing quality (shared)
+  "max_quality": "legendary",         // highest quality tier the player has UNLOCKED — account-wide, shared like research_levels (NO per-line override). Becomes --max-quality Q on every cli.py call. Default "legendary" = CLI default (no cap); lower it to the player's unlocked tier (e.g. "rare") so the quality-roll cascade folds mass above it onto the cap. Only affects lines that carry quality modules.
 
   // Module/beacon configs — shared across all locations; each entry becomes --modules/--beacon MACHINE=... on every CLI call
   // Valid for both crafting machines AND mining drills (electric-mining-drill, big-mining-drill)
@@ -448,6 +449,7 @@ When a player says something like:
 - *"I'm at level 3 steel productivity"* → set `research_levels["steel-productivity"] = 3`, re-run CLI for every line that touches `steel-plate` or `casting-steel`.
 - *"I have level 10 processing unit productivity"* → set `research_levels["processing-unit-productivity"] = 10`, re-run CLI for any line producing `processing-unit`.
 - Generic form: any *"level N X productivity"* where X matches one of the research names in §3.1 maps to a `research_levels` entry. Re-run CLI for every line whose recipe list in §3.1 intersects the affected recipes.
+- *"I just unlocked epic quality"* (or any higher quality tier) → set the **top-level** `max_quality` to the new tier (it's account-wide and shared, exactly like a `research_levels` entry — one field, no per-line copies). Then re-run CLI for every line that carries quality modules so its `cli_result.quality_yield` tier split refreshes — otherwise the dashboard keeps showing the old, lower-capped split. Lines without quality modules are unaffected (the flag is a no-op there), so you needn't re-run them.
 - *"my labs are biolabs with 4 prod-3 modules"* / *"I run 8 speed beacons on my labs"* → update `lab_config` (`building`, `module_type`/`module_tier`/`module_quality`, `beacon`). The dashboard's Research Labs card is **driven entirely by this JSON** — it only exposes a research-cycle-time picker interactively, so the player relies on you to set the rest. `lab-research-speed` and `research-productivity` go in `research_levels` (not `lab_config`). No CLI re-run needed (labs aren't modelled by cli.py); the dashboard recomputes labs-needed and eSPM from `lab_config` + those two research levels.
 
 **Productivity research re-runs — crafting vs mining are different.**
@@ -492,8 +494,9 @@ that line is stale and must be re-planned.
 Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 `line.cli_args`. The shared top-level state already supplies the global flags
 (`--assembler`, `--furnace`, `--machine-quality`, `--beacon-quality`,
-`--research`, `--modules`, `--beacon`, `--recipe`); `cli_args` only stores the
-**line-level layer** on top of that — sizing plus any per-line override.
+`--max-quality`, `--research`, `--modules`, `--beacon`, `--recipe`); `cli_args`
+only stores the **line-level layer** on top of that — sizing plus any per-line
+override.
 
 **Mandatory:**
 - `item` — the target (must equal `line.item`; for multi-target solves, equals the primary item the line tracks).
@@ -524,7 +527,6 @@ Whenever you run `cli.py` for a line, capture the **inputs** of that run in
 | `direct_items` | list of item IDs belt-fed directly from another line on this location (no bus, no bots) | one `--bus-item ITEM` per entry (CLI doesn't distinguish; dashboard nets against supplier's reserve) |
 | `research` | research-level overrides for this line only | one `--research NAME=LEVEL` per entry |
 | `use_ceil` | constrain to integer machine counts | `--use-ceil` |
-| `max_quality` | highest quality tier the player has unlocked (caps the quality cascade) | `--max-quality Q` |
 | `quality_pickout` | `true` to siphon higher-quality output off any quality-module step and scale it up to hold normal-tier demand (extracted goods land in `cli_result.quality_yield`, which the dashboard shows in the line card's **Outputs** and **Reserve → Logistics** sections and the Overview **Logistics Network** supply) | `--quality-pickout` |
 
 **Rules:**
@@ -725,7 +727,11 @@ publishes it once from `10x-factorio-engineer/assets/dashboard.html` and it stay
 - **Science Targets** section shows SPM (science/min produced) and **eSPM** (effective
   research throughput after lab productivity), plus a **Research Labs** card computing how
   many labs/biolabs are needed to consume the SPM given the player's lab modules, beacons,
-  quality, `lab-research-speed` / `research-productivity` tech levels, and research cycle time
+  quality, `lab-research-speed` / `research-productivity` tech levels, and research cycle time.
+  The embedded **Research Bonuses** sub-section is **read-only display** (research-cycle-time
+  is the only interactive control on the card): the player asks Claude to change a research
+  level, because each change re-runs every affected line through `cli.py` — something the
+  dashboard can't do, so editing in-place would silently leave every `cli_result` stale.
 
 ### State sync: CLI → Dashboard
 

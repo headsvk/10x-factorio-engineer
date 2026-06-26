@@ -6,6 +6,7 @@
   "furnace": "electric",
   "machine_quality": "normal",
   "beacon_quality": "normal",
+  "max_quality": "legendary",
   "module_configs": {},
   "beacon_configs": {},
   "recipe_overrides": {},

@@ -1465,9 +1465,12 @@ class Solver:
         """
         Compute (prod_bonus, speed_bonus, capped) for a recipe step.
 
-        Module prod is computed from specs; research prod is looked up from
-        self.recipe_research_prod[recipe_key].  Both are gated by the
-        recipe's allow_productivity flag and summed additively.  The machine's
+        Module prod is computed from specs (gated by the recipe's
+        allow_productivity flag, since that flag governs prod *modules*);
+        research prod is looked up from self.recipe_research_prod[recipe_key]
+        and is NOT gated by allow_productivity (a recipe-targeted tech like
+        scrap-recycling-productivity applies even when modules are disallowed).
+        The two are summed additively.  The machine's
         built-in productivity (foundry / EM-plant / biochamber +50%) is added
         on top and is NOT gated by allow_productivity — that flag only restricts
         modules/beacons, not the machine's intrinsic bonus.  The total is
@@ -1497,8 +1500,16 @@ class Solver:
                         speed_bonus += eff_count * QUALITY_MODULE_SPEED_PENALTY[spec["tier"]]
                     # efficiency: no effect on production count
 
+        # Research productivity is a recipe-targeted *technology* effect (e.g.
+        # scrap-recycling-productivity). It applies regardless of the recipe's
+        # allow_productivity flag: that flag only blocks prod *modules* in the
+        # machine, not the dedicated research — the game deliberately attaches
+        # such techs to module-disallowed recipes (scrap-recycling has
+        # allow_productivity=False yet scrap-recycling-productivity boosts it).
+        # PRODUCTIVITY_RESEARCH is the authoritative map of tech → boosted
+        # recipes, so a non-zero entry here already means the boost is valid.
         research_prod = Fraction(0)
-        if allow_prod and recipe_key is not None:
+        if recipe_key is not None:
             research_prod = self.recipe_research_prod.get(recipe_key, Fraction(0))
 
         # Machine built-in productivity (foundry/EM-plant/biochamber +50%):
