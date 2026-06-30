@@ -9,7 +9,7 @@ these natively.** All values match the in-game 2.1.8 numbers.
 
 | Field | Location | Value(s) | Replaces (was hardcoded) | Consumed by |
 |---|---|---|---|---|
-| `quality` | each `modules[]` entry with `category == "quality"`, inside `effect` | `quality-module` 0.01, `quality-module-2` 0.015, `quality-module-3` 0.025 | `cli.QUALITY_MODULE_BONUS` | quality_planner quality-loop DP; cli quality-pickout |
+| `quality` | each `modules[]` entry with `category == "quality"`, inside `effect` | `quality-module` 0.01, `quality-module-2` 0.02, `quality-module-3` 0.025 | `cli.QUALITY_MODULE_BONUS` | quality_planner quality-loop DP; cli quality-pickout |
 | `quality_tier_skip_distribution` | top-level | `[0.9, 0.09, 0.009, 0.001]` (+1/+2/+3/+4 split when a quality roll succeeds) | `cli.QUALITY_TIER_SKIP_DIST` / `qp.TIER_SKIP_DIST` | cli quality output, quality_planner |
 | `module_slots` | `beacon` | `2` | `cli.BEACON_SLOTS` | cli beacon power/effect |
 | `tile_size` | each `crafting_machines[]`, `mining_drills[]`, `rocket_silo[]`, `agricultural_tower[]` entry (longest footprint dimension) | per machine (e.g. assembler 3, foundry 5, rocket-silo 9, stone/steel furnace 2) | `cli.MACHINE_SIZE` | cli `_beacon_sharing_factor` |

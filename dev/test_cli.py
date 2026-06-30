@@ -3992,9 +3992,9 @@ class TestQualityChanceHelpers(unittest.TestCase):
     """Unit tests for the quality-chance / tier-cascade helper functions."""
 
     def test_quality_chance_basic(self):
-        # 5 quality-2 modules at normal quality: 5 × 1.5% = 7.5%.
+        # 5 quality-2 modules at normal quality: 5 × 2.0% = 10%.
         specs = [{"count": 5, "type": "quality", "tier": 2, "quality": "normal"}]
-        self.assertEqual(cli.quality_chance_from_specs(specs, 5), Fraction(75, 1000))
+        self.assertEqual(cli.quality_chance_from_specs(specs, 5), Fraction(100, 1000))
 
     def test_quality_chance_tier_and_quality_scaling(self):
         # T3 = 2.5% base; legendary module housing scales positive stats ×2.5.
@@ -4178,7 +4178,7 @@ class TestQualityPickout(unittest.TestCase):
         acc = next(s for s in out["production_steps"] if s["recipe"] == "accumulator")
         qo = acc["quality_output"]["accumulator"]
         self.assertAlmostEqual(qo["normal"], 50.0, places=4)
-        # 5 × quality-2 = 7.5% chance; rare-capped distribution.
+        # 5 × quality-2 = 10% chance; rare-capped distribution.
         self.assertIn("uncommon", qo)
         self.assertIn("rare", qo)
         self.assertNotIn("epic", qo)

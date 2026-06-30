@@ -91,11 +91,11 @@ QUALITY_TIERS = ("normal", "uncommon", "rare", "epic", "legendary")
 QUALITY_INDEX = {q: i for i, q in enumerate(QUALITY_TIERS)}
 
 # Base quality chance per quality-module slot at normal module quality
-# (game source: quality module T1 = +1%, T2 = +1.5%, T3 = +2.5%; multiplied
+# (game source: quality module T1 = +1%, T2 = +2%, T3 = +2.5%; multiplied
 # by MODULE_QUALITY_MULT for uncommon/rare/epic/legendary modules).
 QUALITY_MODULE_BONUS: dict[int, float] = {
     1: 0.01,
-    2: 0.015,
+    2: 0.02,
     3: 0.025,
 }
 
