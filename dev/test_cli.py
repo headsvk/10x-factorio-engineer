@@ -625,7 +625,7 @@ class TestGlebaMachineRouting(unittest.TestCase):
         s.solve("biter-egg", Fraction(100))
         s.resolve_oil(_DATA["space-age"]["data"])
         step = s.steps["biter-egg"]
-        self.assertEqual(step["machine"], "captive-spawner")
+        self.assertEqual(step["machine"], "captive-biter-spawner")
         # recipe: 5 biter-eggs per 10 s, speed=1
         # cycles/min = 100/5 = 20; machines = 20 * 10 / 60 = 10/3
         self.assertEqual(step["machine_count"], Fraction(10, 3))
@@ -2385,18 +2385,18 @@ class TestProbabilisticOutputs(unittest.TestCase):
         self.assertAlmostEqual(float(step["outputs"]["uranium-235"]), 0.007 / 0.993, places=6)
 
     def test_space_platform_crushing_co_products(self):
-        # oxide-asteroid-crushing returns the chunk at 0.2 probability.
+        # oxide-asteroid-crushing returns the chunk at 0.3 probability (2.1.8).
         # Solving for 18 ice/min (5 ice/chunk): 3.6 cycles/min consumed,
-        # 0.72/min returned as co-product, 2.88/min net from collectors.
+        # 1.08/min returned as co-product, 2.52/min net from collectors.
         s = _solver("space-platform")
         s.solve("ice", Fraction(18))
         step = s.steps["oxide-asteroid-crushing"]
         self.assertIn("ice", step["outputs"])
         self.assertIn("oxide-asteroid-chunk", step["outputs"])
         self.assertAlmostEqual(float(step["outputs"]["ice"]), 18.0, places=6)
-        self.assertAlmostEqual(float(step["outputs"]["oxide-asteroid-chunk"]), 0.72, places=6)
-        # Net raw resource demand: 3.6 gross - 0.72 recycled = 2.88
-        self.assertAlmostEqual(float(s.raw_resources["oxide-asteroid-chunk"]), 2.88, places=6)
+        self.assertAlmostEqual(float(step["outputs"]["oxide-asteroid-chunk"]), 1.08, places=6)
+        # Net raw resource demand: 3.6 gross - 1.08 recycled = 2.52
+        self.assertAlmostEqual(float(s.raw_resources["oxide-asteroid-chunk"]), 2.52, places=6)
 
 
 # ---------------------------------------------------------------------------
@@ -2968,18 +2968,18 @@ class TestLocationFilter(unittest.TestCase):
         s.resolve_oil(d)
 
         # Raw resources must be only asteroid chunks — no planet imports needed.
-        # Values reflect net demand after 20% chunk recycling from basic crushing:
-        #   metallic: 90/min ÷ 20 ore/chunk × 0.8 net = 3.6/min → iron-plate step
-        #             then iron-plate needs 36 ore/min, ore from 36/20=1.8 cycles×0.8=1.44
-        #   carbonic: 18 carbon/min ÷ 10 carbon/chunk × 0.8 = 1.44/min
-        #   oxide:    18 ice/min    ÷  5 ice/chunk    × 0.8 = 2.88/min
+        # Values reflect net demand after 30% chunk recycling from basic crushing
+        # (2.1.8 raised the chunk-return probability 0.2 → 0.3, net factor 0.7):
+        #   metallic: iron-plate needs 36 ore/min, ore from 36/20=1.8 cycles×0.7=1.26
+        #   carbonic: 18 carbon/min ÷ 10 carbon/chunk × 0.7 = 1.26/min
+        #   oxide:    18 ice/min    ÷  5 ice/chunk    × 0.7 = 2.52/min
         self.assertSetEqual(
             set(s.raw_resources.keys()),
             {"metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk"},
         )
-        self.assertEqual(s.raw_resources["metallic-asteroid-chunk"], Fraction(72, 50))  # 1.44
-        self.assertEqual(s.raw_resources["carbonic-asteroid-chunk"], Fraction(72, 50))  # 1.44
-        self.assertEqual(s.raw_resources["oxide-asteroid-chunk"],    Fraction(144, 50)) # 2.88
+        self.assertEqual(s.raw_resources["metallic-asteroid-chunk"], Fraction(63, 50))  # 1.26
+        self.assertEqual(s.raw_resources["carbonic-asteroid-chunk"], Fraction(63, 50))  # 1.26
+        self.assertEqual(s.raw_resources["oxide-asteroid-chunk"],    Fraction(63, 25))  # 2.52
 
         # Verify the key recipes in the production chain
         recipe_keys = {step["recipe"] for step in s.steps.values()}
@@ -3167,58 +3167,58 @@ class TestPlanetMachineUnlocks(unittest.TestCase):
 
     def test_get_machine_none_unlocks_keeps_premium(self):
         # Legacy behaviour: with location_unlocks=None, premium machines win.
-        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric")
+        m, _ = cli.get_machine(["chemistry", "cryogenics"], 3, "electric")
         self.assertEqual(m, "cryogenic-plant")
-        m, _ = cli.get_machine("electronics", 3, "electric")
+        m, _ = cli.get_machine(["crafting", "electromagnetics"], 3, "electric")
         self.assertEqual(m, "electromagnetic-plant")
-        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric")
+        m, _ = cli.get_machine(["crafting-with-fluid", "metallurgy"], 3, "electric")
         self.assertEqual(m, "foundry")
 
     def test_get_machine_nauvis_falls_back_to_basics(self):
         unlocks = cli.compute_location_unlocks("nauvis")
-        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["chemistry", "cryogenics"], 3, "electric", unlocks)
         self.assertEqual(m, "chemical-plant")
-        m, _ = cli.get_machine("organic-or-chemistry", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["chemistry", "organic"], 3, "electric", unlocks)
         self.assertEqual(m, "chemical-plant")
-        m, _ = cli.get_machine("electronics", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting", "electromagnetics"], 3, "electric", unlocks)
         self.assertEqual(m, "assembling-machine-3")
-        m, _ = cli.get_machine("electronics-with-fluid", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting-with-fluid", "electromagnetics"], 3, "electric", unlocks)
         self.assertEqual(m, "assembling-machine-3")
-        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting-with-fluid", "metallurgy"], 3, "electric", unlocks)
         self.assertEqual(m, "assembling-machine-3")
-        m, _ = cli.get_machine("crafting-with-fluid-or-metallurgy", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting-with-fluid", "metallurgy"], 3, "electric", unlocks)
         self.assertEqual(m, "assembling-machine-3")
-        m, _ = cli.get_machine("pressing", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting", "metallurgy"], 3, "electric", unlocks)
         self.assertEqual(m, "assembling-machine-3")
-        m, _ = cli.get_machine("cryogenics-or-assembling", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["advanced-crafting", "cryogenics"], 3, "electric", unlocks)
         self.assertEqual(m, "assembling-machine-3")
 
     def test_get_machine_vulcanus_keeps_foundry_only(self):
         unlocks = cli.compute_location_unlocks("vulcanus")
         # foundry-bearing categories keep foundry
-        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting-with-fluid", "metallurgy"], 3, "electric", unlocks)
         self.assertEqual(m, "foundry")
-        m, _ = cli.get_machine("crafting-with-fluid-or-metallurgy", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting-with-fluid", "metallurgy"], 3, "electric", unlocks)
         self.assertEqual(m, "foundry")
-        m, _ = cli.get_machine("metallurgy", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["metallurgy"], 3, "electric", unlocks)
         self.assertEqual(m, "foundry")
         # cryo / biochamber / EM-plant categories fall back
-        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["chemistry", "cryogenics"], 3, "electric", unlocks)
         self.assertEqual(m, "chemical-plant")
-        m, _ = cli.get_machine("organic-or-chemistry", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["chemistry", "organic"], 3, "electric", unlocks)
         self.assertEqual(m, "chemical-plant")
-        m, _ = cli.get_machine("electronics", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting", "electromagnetics"], 3, "electric", unlocks)
         self.assertEqual(m, "assembling-machine-3")
 
     def test_get_machine_aquilo_keeps_everything(self):
         unlocks = cli.compute_location_unlocks("aquilo")
-        m, _ = cli.get_machine("chemistry-or-cryogenics", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["chemistry", "cryogenics"], 3, "electric", unlocks)
         self.assertEqual(m, "cryogenic-plant")
-        m, _ = cli.get_machine("electronics", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting", "electromagnetics"], 3, "electric", unlocks)
         self.assertEqual(m, "electromagnetic-plant")
-        m, _ = cli.get_machine("organic-or-chemistry", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["chemistry", "organic"], 3, "electric", unlocks)
         self.assertEqual(m, "biochamber")
-        m, _ = cli.get_machine("metallurgy-or-assembling", 3, "electric", unlocks)
+        m, _ = cli.get_machine(["crafting-with-fluid", "metallurgy"], 3, "electric", unlocks)
         self.assertEqual(m, "foundry")
 
     def test_nauvis_lds_routes_to_chemical_plant_and_assembler(self):

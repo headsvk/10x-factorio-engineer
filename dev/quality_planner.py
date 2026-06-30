@@ -11,7 +11,10 @@ V1 scope (asteroid-only, Nauvis-subset):
   * Nauvis-style assembly items whose raws are all reachable via
     asteroid reprocessing (iron-ore, copper-ore, coal, stone, calcite, ice).
   * DP-based quality loop solver (backward induction over tiers).
-  * Asteroid reprocessing as the canonical legendary raw source.
+  * Asteroid *crushing* as a legendary raw source (the chunk crushing step still
+    permits quality modules).  NOTE: as of 2.1.8 asteroid *reprocessing* no
+    longer permits quality modules, so the old reprocessing chunk-tier climb is
+    inert — chunks are sourced for quantity and quality is rolled at crushing.
   * Fluid quality transparency (foundry casting preferred when available).
   * Productivity research per recipe family, capped at +300 %.
 
@@ -100,8 +103,14 @@ QUALITY_MODULE_BONUS: dict[int, float] = {
 # Of the total quality chance Q: 90% goes to +1 tier, 9% to +2, 0.9% to +3, 0.1% to +4.
 TIER_SKIP_DIST: tuple[float, ...] = (0.9, 0.09, 0.009, 0.001)
 
-# Asteroid reprocessing: crusher processes chunk -> (mostly) chunk with some quality chance.
-# Data is in the recipe file; these are the canonical loop recipes.
+# Asteroid reprocessing: crusher processes chunk -> (mostly) chunk.  These
+# recipes drive chunk *quantity* sourcing (self-output retention).
+# NOTE (2.1.8): reprocessing recipes no longer permit quality modules
+# (allowed_effects drops "quality"), so the chunk-tier quality climb that once
+# made asteroid reprocessing the canonical legendary-raw source is now inert —
+# the quality-loop kernel gates it to zero quality.  Quality on asteroid-derived
+# items now comes only from the *crushing* step (which still allows quality) or
+# from downstream self-recycle / shuffle loops.
 ASTEROID_REPROCESSING_RECIPES: dict[str, str] = {
     "metallic-asteroid-chunk":  "metallic-asteroid-reprocessing",
     "carbonic-asteroid-chunk":  "carbonic-asteroid-reprocessing",
@@ -315,7 +324,7 @@ def enumerate_shuffle_candidates(data: dict) -> list[ShuffleCandidate]:
     for r in data.get("recipes", []):
         if r.get("subgroup") in ("empty-barrel", "fill-barrel"):
             continue
-        if r.get("category") in ("recycling", "recycling-or-hand-crafting"):
+        if cli.is_recycling(r):
             continue
         ing_set = {x["name"] for x in r.get("ingredients", [])}
         solid_ings = tuple(sorted(ing_set - fluids))
@@ -357,7 +366,7 @@ def enumerate_shuffle_candidates(data: dict) -> list[ShuffleCandidate]:
             out.append(ShuffleCandidate(
                 recipe_key=r["key"],
                 output_item=output,
-                category=r.get("category", ""),
+                category=_primary_category(r),
                 solid_ingredients=solid_ings,
                 fluid_ingredients=fluid_ings,
                 solid_recycle_returns=solid_rec_outputs,
@@ -413,13 +422,12 @@ def enumerate_co_product_drivers(data: dict) -> dict[str, list[dict]]:
 
     fluids = build_fluid_set(data)
     skip_categories = {
-        "recycling", "recycling-or-hand-crafting",
         "crushing",                  # asteroid pipeline handles these
         "captive-spawner-process",   # captive-spawner has its own dispatch
     }
     out: dict[str, list[dict]] = {}
     for r in data.get("recipes", []):
-        if r.get("category") in skip_categories:
+        if cli.is_recycling(r) or any(c in skip_categories for c in cli.recipe_categories(r)):
             continue
         if r.get("subgroup") in ("empty-barrel", "fill-barrel"):
             continue
@@ -456,7 +464,7 @@ def enumerate_co_product_drivers(data: dict) -> dict[str, list[dict]]:
                 "target": tgt["name"],
                 "target_amount": target_amount,
                 "other_outputs": other_outputs,
-                "category": r.get("category"),
+                "category": _primary_category(r),
                 "ingredients": list(r.get("ingredients", [])),
                 "energy_required": float(r.get("energy_required", 1)),
                 "allow_productivity": bool(r.get("allow_productivity", True)),
@@ -557,28 +565,11 @@ TECH_GATES: dict[str, dict] = {
 # starting point for callers who want today's "fully researched" baseline.
 ALL_TECH_UNLOCKED: dict[str, int] = {tech: 1 for tech in TECH_GATES}
 
-# Fallback machine for recipe categories when the primary machine is locked.
-# Source-of-truth: each crafting machine's `crafting_categories` list in the
-# dataset.  `{N}` is substituted with assembler_level at lookup time.
-#
-# Categories without an entry here have NO fallback — the recipe is unreachable
-# under that tech_state and the planner fails-fast (e.g. `metallurgy`,
-# `cryogenics`, `electromagnetics`, `organic` are foundry/cryo/EM/biochamber-only).
-CATEGORY_FALLBACK: dict[str, str] = {
-    # Assembler-3 supports these directly.
-    "electronics":                       "assembling-machine-{N}",
-    "electronics-with-fluid":            "assembling-machine-{N}",
-    "pressing":                          "assembling-machine-{N}",
-    # `*-or-*` variants — primary machine is the premium one, fallback is the
-    # generic machine the category name implies.
-    "electronics-or-assembling":         "assembling-machine-{N}",
-    "metallurgy-or-assembling":          "assembling-machine-{N}",
-    "cryogenics-or-assembling":          "assembling-machine-{N}",
-    "organic-or-assembling":             "assembling-machine-{N}",
-    "organic-or-chemistry":              "chemical-plant",
-    "chemistry-or-cryogenics":           "chemical-plant",
-    "crafting-with-fluid-or-metallurgy": "assembling-machine-{N}",
-}
+# Machine routing around locked machines is derived from the recipe's
+# ``categories`` array and the cli machine registry (see _machine_for_recipe).
+# A recipe that also lists a generic crafting category falls back to the
+# assembler; one that lists another unlocked dedicated machine falls back to it;
+# otherwise it is unreachable under the tech_state and the planner fails-fast.
 
 
 # Recycler retention (standard recycler; quality-only slots).
@@ -590,12 +581,23 @@ RECYCLER_SPEED = 0.5
 CRUSHER_SPEED = 1.0
 CRUSHER_SLOTS = 2
 
-# Machine speeds (from cli.MACHINE_CRAFTING_SPEED; kept here for float math).
+# Machine speeds (from the cli data-driven registry; kept as float for the DP).
 def _machine_speed(machine_key: str) -> float:
-    s = cli.MACHINE_CRAFTING_SPEED.get(machine_key)
-    if s is None:
-        return 1.0
-    return float(s)
+    s = cli._machine_speed(machine_key)
+    return float(s) if s else 1.0
+
+
+def _primary_category(recipe: dict) -> str:
+    """A single representative crafting category for display / routing.
+
+    Prefers a dedicated (non-generic, non-smelting) category so machine routing
+    lands on the premium machine; falls back to the first listed category.
+    """
+    cats = cli.recipe_categories(recipe)
+    for c in cats:
+        if c not in cli.GENERIC_CRAFTING_CATS and c != "smelting":
+            return c
+    return cats[0] if cats else ""
 
 
 def _module_speed_mult(quality_slots: int = 0, prod_slots: int = 0,
@@ -634,24 +636,28 @@ def _machine_for_recipe(
     assembler_level: int,
     locked_machines: frozenset[str],
 ) -> tuple[str, float] | None:
-    """Like cli.get_machine, but routes around locked machines via
-    CATEGORY_FALLBACK. Returns (machine_key, speed) or None if no viable
-    machine exists for the recipe.
+    """Like cli.get_machine, but routes around ``locked_machines`` using the
+    recipe's ``categories`` array.  Returns (machine_key, speed) or None if no
+    viable machine exists under this tech_state.
 
     When ``locked_machines`` is empty the result matches ``cli.get_machine``
     exactly (assembler_level + electric furnace).
     """
-    cat = recipe.get("category", "")
-    primary_key, primary_speed = cli.get_machine(cat, assembler_level, "electric")
+    cats = cli.recipe_categories(recipe)
+    primary_key, primary_speed = cli.get_machine(cats, assembler_level, "electric")
     if primary_key not in locked_machines:
         return (primary_key, float(primary_speed))
-    # Primary machine locked — try the category fallback.
-    fb = CATEGORY_FALLBACK.get(cat)
-    if fb is not None:
-        fb_key = fb.replace("{N}", str(assembler_level))
-        if fb_key not in locked_machines:
-            speed = cli.MACHINE_CRAFTING_SPEED.get(fb_key)
-            return (fb_key, float(speed) if speed is not None else 1.0)
+    # Primary machine locked — fall back to the assembler if the recipe lists a
+    # generic crafting category, else to another unlocked dedicated machine.
+    cat_set = set(cats)
+    if cat_set & cli.GENERIC_CRAFTING_CATS:
+        ak = cli.ASSEMBLER_KEY[assembler_level]
+        if ak not in locked_machines:
+            return (ak, _machine_speed(ak))
+    for c in cats:
+        for mk in cli._CATEGORY_MACHINES.get(c, []):
+            if mk not in locked_machines and cli._MACHINE_CLASS.get(mk) == "dedicated":
+                return (mk, _machine_speed(mk))
     # No fallback — recipe is unreachable under this tech_state.
     return None
 
@@ -822,9 +828,16 @@ def _unused_solve_loop_reference(
         if not craft_recipe.get("allow_productivity", True):
             craft_configs = [(0, q) for (_p, q) in craft_configs if _p == 0]
             craft_configs = list(set(craft_configs))
+        # Filter: if craft recipe disallows quality (allowed_effects), zero out
+        # quality slots — no quality roll can happen at the craft step.
+        if not cli.recipe_allows_quality(craft_recipe):
+            craft_configs = list({(p, 0) for (p, _q) in craft_configs})
 
-    # Recycle configs: quality only (0 prod)
-    if recycle_recipe is None:
+    # Recycle configs: quality only (recycler/reprocessing disallow prod).  When
+    # the recycle recipe itself disallows quality — e.g. 2.1.8 asteroid
+    # reprocessing, whose allowed_effects has no "quality" — no quality modules
+    # can be fitted, so the only config is zero quality slots.
+    if recycle_recipe is None or not cli.recipe_allows_quality(recycle_recipe):
         recycle_configs = [0]
     else:
         recycle_configs = list(range(recycle_slots + 1))
@@ -1120,14 +1133,14 @@ def solve_shuffle_loop(
     # Determine inherent prod from the cast machine.
     if inherent_prod is None:
         machine_key, _ = cli.get_machine(
-            cast_recipe.get("category", ""), 3, "electric",
+            cli.recipe_categories(cast_recipe), 3, "electric",
         )
         inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
 
     # Determine module slots for the cast machine.
     if cast_slots is None:
         machine_key, _ = cli.get_machine(
-            cast_recipe.get("category", ""), 3, "electric",
+            cli.recipe_categories(cast_recipe), 3, "electric",
         )
         slots_map = cli.build_machine_module_slots(data)
         cast_slots = int(slots_map.get(machine_key, 0))
@@ -1319,7 +1332,7 @@ def compute_shuffle_stage(
 
     # Lookup machine + speed for the cast recipe.
     machine_key, base_speed = cli.get_machine(
-        cast_recipe.get("category", ""), 3, "electric",
+        cli.recipe_categories(cast_recipe), 3, "electric",
     )
     qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
     if cast_speed is None:
@@ -2086,7 +2099,7 @@ def scrap_terminal_set(
     # Map every craftable output -> list of its recipes (skip recycling/barrels).
     recipes_by_output: dict[str, list[dict]] = defaultdict(list)
     for r in data.get("recipes", []):
-        if r.get("category") in ("recycling", "recycling-or-hand-crafting"):
+        if cli.is_recycling(r):
             continue
         if r.get("subgroup") in ("empty-barrel", "fill-barrel"):
             continue
@@ -2170,7 +2183,7 @@ def build_recycle_shortcuts(data: dict) -> dict[str, dict]:
     # Container wrap: a recipe whose only solid ingredient is the item, whose
     # output has a recycling recipe that returns the item.
     for C in data.get("recipes", []):
-        if C.get("category") in ("recycling", "recycling-or-hand-crafting"):
+        if cli.is_recycling(C):
             continue
         if C.get("subgroup") in ("empty-barrel", "fill-barrel"):
             continue
@@ -2196,7 +2209,7 @@ def build_recycle_shortcuts(data: dict) -> dict[str, dict]:
                 "retention": o_amt * out_back / n_in,
                 "recycler_time": o_amt * float(crec.get("energy_required", 0.2)) / n_in,
                 "craft_time": float(C.get("energy_required", 0.5)) / n_in,
-                "craft_category": C.get("category", "crafting"),
+                "craft_category": _primary_category(C),
                 "container": container,
             })
 
@@ -2285,7 +2298,7 @@ def enumerate_recycle_routes(data: dict) -> dict[str, list[dict]]:
     # solid, and whose output recycles back into ``item``.  Multi-ingredient
     # wraps are kept; the single-ingredient case is a strict sub-case.
     for C in data.get("recipes", []):
-        if C.get("category") in ("recycling", "recycling-or-hand-crafting"):
+        if cli.is_recycling(C):
             continue
         if C.get("subgroup") in ("empty-barrel", "fill-barrel"):
             continue
@@ -2334,7 +2347,7 @@ def enumerate_recycle_routes(data: dict) -> dict[str, list[dict]]:
                     "retention":      o_amt * out_back / n_in,
                     "recycler_time":  o_amt * float(crec.get("energy_required", 0.2)) / n_in,
                     "craft_time":     float(C.get("energy_required", 0.5)) / n_in,
-                    "craft_category": C.get("category", "crafting"),
+                    "craft_category": _primary_category(C),
                     "container":      container,
                     "wrap_recipe":    C["key"],
                     "co_solids":      co_solids,
@@ -4146,7 +4159,7 @@ def _plan_self_recycle_target(
         )
         if wrap_recipe is not None:
             _wmk2, wm_speed = cli.get_machine(
-                wrap_recipe.get("category", "crafting"), assembler_level, "electric",
+                cli.recipe_categories(wrap_recipe), assembler_level, "electric",
             )
             cm_speed = float(wm_speed)
         cm_speed_f = cm_speed * qm_mult

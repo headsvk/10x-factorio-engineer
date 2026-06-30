@@ -45,7 +45,7 @@ Solver notes
   the reduced system.
 * Productivity and speed module bonuses are applied uniformly per --prod / --speed.
 
-Dataset files (vanilla-2.0.55.json, space-age-2.0.55.json) are vendored in
+Dataset files (vanilla-2.1.8.json, space-age-2.1.8.json) are vendored in
 ./assets/  and automatically downloaded from KirkMcDonald's calculator GitHub repo
 on first run.
 """
@@ -66,8 +66,8 @@ from fractions import Fraction
 DATA_DIR   = os.path.dirname(os.path.abspath(__file__))
 
 DATA_FILES = {
-    "vanilla":   "vanilla-2.0.55.json",
-    "space-age": "space-age-2.0.55.json",
+    "vanilla":   "vanilla-2.1.8.json",
+    "space-age": "space-age-2.1.8.json",
 }
 
 DATA_URLS = {
@@ -78,101 +78,115 @@ DATA_URLS = {
     for k, v in DATA_FILES.items()
 }
 
-# Miner / extractor speeds (game constants -- not stored in data files)
-MINER_SPEED: dict[str, Fraction] = {
-    "electric-mining-drill": Fraction(1, 2),
-    "big-mining-drill":      Fraction(5, 2),   # Space Age only
-    "pumpjack":              Fraction(1),
-}
-OFFSHORE_PUMP_RATE  = Fraction(72000)          # 1200 items/sec × 60 = 72 000 items/min
+# Miner / extractor base (normal-quality) speeds, keyed by drill key.  Populated
+# from mining_drills[].mining_speed[0] in configure_from_dataset().
+MINER_SPEED: dict[str, Fraction] = {}
+# Offshore-pump throughput (items/min) = pumping_speed[0] (items/tick) × 3600.
+# Populated in configure_from_dataset(); the literal is a load-order fallback.
+OFFSHORE_PUMP_RATE: Fraction = Fraction(72000)
 PUMPJACK_CATEGORIES = frozenset(["basic-fluid"])
 
-# Assembler crafting speeds
-ASSEMBLER_SPEED: dict[int, Fraction] = {
-    1: Fraction(1, 2),
-    2: Fraction(3, 4),
-    3: Fraction(5, 4),
-}
+# Assembler crafting-machine keys by configured assembler level.  Speeds come
+# from the data registry (_MACHINE_SPEED), not a hardcoded table.
 ASSEMBLER_KEY: dict[int, str] = {
     1: "assembling-machine-1",
     2: "assembling-machine-2",
     3: "assembling-machine-3",
 }
 
-# Furnace crafting speeds
-FURNACE_SPEED: dict[str, Fraction] = {
-    "stone":    Fraction(1),
-    "steel":    Fraction(2),
-    "electric": Fraction(2),
-}
+# Furnace crafting-machine keys by configured furnace type.
 FURNACE_KEY: dict[str, str] = {
     "stone":    "stone-furnace",
     "steel":    "steel-furnace",
     "electric": "electric-furnace",
 }
 
-# Fixed-machine categories (vanilla + Space Age).
-# Vanilla-only datasets simply never produce Space Age category keys.
-FIXED_MACHINE_FOR_CAT: dict[str, tuple[str, Fraction]] = {
-    # Vanilla ----------------------------------------------------------------
-    "chemistry":                         ("chemical-plant",          Fraction(1)),
-    "oil-processing":                    ("oil-refinery",            Fraction(1)),
-    "centrifuging":                      ("centrifuge",              Fraction(1)),
-    "rocket-building":                   ("rocket-silo",             Fraction(1)),
-    # Space Age --------------------------------------------------------------
-    "cryogenics":                        ("cryogenic-plant",         Fraction(3, 2)),
-    "cryogenics-or-assembling":          ("cryogenic-plant",         Fraction(3, 2)),
-    "chemistry-or-cryogenics":           ("cryogenic-plant",         Fraction(3, 2)),
-    "organic":                           ("biochamber",              Fraction(3, 2)),
-    "organic-or-assembling":             ("biochamber",              Fraction(3, 2)),
-    "organic-or-chemistry":              ("biochamber",              Fraction(3, 2)),
-    "organic-or-hand-crafting":          ("biochamber",              Fraction(3, 2)),
-    "electromagnetics":                  ("electromagnetic-plant",   Fraction(2)),
-    "electronics":                       ("electromagnetic-plant",   Fraction(2)),
-    "electronics-or-assembling":         ("electromagnetic-plant",   Fraction(2)),
-    "electronics-with-fluid":            ("electromagnetic-plant",   Fraction(2)),
-    "metallurgy":                        ("foundry",                 Fraction(4)),
-    "metallurgy-or-assembling":          ("foundry",                 Fraction(4)),
-    "crafting-with-fluid-or-metallurgy": ("foundry",                 Fraction(4)),
-    "crushing":                          ("crusher",                 Fraction(1)),
-    "pressing":                          ("foundry",                 Fraction(4)),
-    "captive-spawner-process":           ("captive-spawner",         Fraction(1)),
-}
+# Generic crafting categories an assembler handles.  A recipe carrying any of
+# these can fall back to an assembler when its premium machine is locked.
+GENERIC_CRAFTING_CATS = frozenset(["crafting", "advanced-crafting", "crafting-with-fluid"])
 
-# Crafting speed by machine key — used by Solver.solve() and resolve_oil() when
-# applying --machine CATEGORY=MACHINE overrides.  Every machine that can appear
-# as an override target must be listed here; unknown keys are silently ignored.
-MACHINE_CRAFTING_SPEED: dict[str, Fraction] = {
-    # Assemblers
-    "assembling-machine-1": Fraction(1, 2),
-    "assembling-machine-2": Fraction(3, 4),
-    "assembling-machine-3": Fraction(5, 4),
-    # Furnaces
-    "stone-furnace":           Fraction(1),
-    "steel-furnace":           Fraction(2),
-    "electric-furnace":        Fraction(2),
-    # Vanilla fixed-machine categories
-    "chemical-plant":          Fraction(1),
-    "oil-refinery":            Fraction(1),
-    "centrifuge":              Fraction(1),
-    "rocket-silo":             Fraction(1),
-    # Space Age fixed-machine categories
-    "cryogenic-plant":         Fraction(3, 2),
-    "biochamber":              Fraction(3, 2),
-    "electromagnetic-plant":   Fraction(2),
-    "foundry":                 Fraction(4),
-    "crusher":                 Fraction(1),
-    "agricultural-tower":      Fraction(1),
-    "captive-spawner":         Fraction(1),
-    # Fulgora recycling (used only by the Fulgora recycling-graph LP path;
-    # the recursive solver never routes here because recycling recipes are
-    # excluded from build_recipe_index).
-    "recycler":                Fraction(1, 2),
-}
+SMELTING_CATS  = frozenset(["smelting"])
+SKIP_SUBGROUPS = frozenset(["empty-barrel", "fill-barrel"])
 
-SMELTING_CATS   = frozenset(["smelting"])
-SKIP_SUBGROUPS  = frozenset(["empty-barrel", "fill-barrel"])
-SKIP_CATEGORIES = frozenset(["recycling", "recycling-or-hand-crafting"])
+
+def _quality_value(arr, level: int) -> Fraction:
+    """Read a per-quality stat as an exact Fraction, clamping to the last index.
+
+    Accepts either a 2.1.8 per-quality array (``arr[level]``) or a plain scalar.
+    Vanilla arrays have length 1, so any level clamps to ``normal``.
+    """
+    if isinstance(arr, list):
+        if not arr:
+            return Fraction(0)
+        return Fraction(str(arr[min(level, len(arr) - 1)]))
+    return Fraction(str(arr if arr is not None else 0))
+
+
+# Data-driven machine registry, populated by register_machines() in load_data.
+_MACHINE_SPEED:     dict[str, Fraction]  = {}   # machine_key -> base (normal) speed
+_CATEGORY_MACHINES: dict[str, list[str]] = {}   # crafting category -> [machine_key, ...]
+_MACHINE_CLASS:     dict[str, str]       = {}   # machine_key -> assembler|furnace|dedicated
+
+
+def register_machines(data: dict) -> None:
+    """Populate the global machine registry from ``crafting_machines``.
+
+    crafting_speed (normal-quality element) and crafting_categories are read
+    straight from the dataset, so machine speeds and category routing are fully
+    data-driven.  Each machine is classed as a furnace (``smelting``), a generic
+    assembler (only GENERIC_CRAFTING_CATS), or a dedicated/premium machine.
+    """
+    _MACHINE_SPEED.clear()
+    _CATEGORY_MACHINES.clear()
+    _MACHINE_CLASS.clear()
+    for m in data.get("crafting_machines", []):
+        key = m.get("key")
+        if not key:
+            continue
+        _MACHINE_SPEED[key] = _quality_value(m.get("crafting_speed"), 0)
+        cats = m.get("crafting_categories", [])
+        for c in cats:
+            _CATEGORY_MACHINES.setdefault(c, []).append(key)
+        if "smelting" in cats:
+            _MACHINE_CLASS[key] = "furnace"
+        elif cats and all(c in GENERIC_CRAFTING_CATS for c in cats):
+            _MACHINE_CLASS[key] = "assembler"
+        else:
+            _MACHINE_CLASS[key] = "dedicated"
+
+
+def _machine_speed(machine_key: str) -> Fraction:
+    """Base (normal-quality) crafting speed for a machine key, 0 if unknown."""
+    return _MACHINE_SPEED.get(machine_key, Fraction(0))
+
+
+def recipe_categories(recipe: dict) -> list[str]:
+    """Crafting categories for a recipe (the 2.1.8 ``categories`` array).
+
+    Falls back to wrapping a legacy single ``category`` string so old-format
+    datasets still resolve.
+    """
+    cats = recipe.get("categories")
+    if cats:
+        return cats
+    legacy = recipe.get("category")
+    return [legacy] if legacy else []
+
+
+def is_recycling(recipe: dict) -> bool:
+    """True for recycling recipes (``recycling`` among the recipe categories)."""
+    return "recycling" in recipe_categories(recipe)
+
+
+def recipe_allows_quality(recipe: dict) -> bool:
+    """True if quality modules may be installed for *recipe* (2.1.8
+    ``allowed_effects``).  Old-format recipes (no ``allowed_effects``) default to
+    allowed.  In 2.1.8 asteroid *reprocessing* recipes omit ``quality``.
+    """
+    ae = recipe.get("allowed_effects")
+    if ae is None:
+        return True
+    return "quality" in ae
 
 # Known Fulgora "wrap-and-recycle" tricks: a base material is crafted into a
 # cheap single-ingredient container which then recycles (shreds) far faster per
@@ -208,37 +222,6 @@ PLANET_MACHINE_UNLOCKS: dict[str, frozenset[str]] = {
     "aquilo":         frozenset(["foundry", "biochamber", "electromagnetic-plant", "cryogenic-plant"]),
     "space-platform": frozenset(),
 }
-
-# When the primary machine for a recipe category is locked at the current
-# location, fall back to the basic machine for the alternate side of the
-# "X-or-Y" category. "_assembler" means "the configured assembler level".
-CATEGORY_LOCATION_FALLBACK: dict[str, str] = {
-    # Assembler-3 (and 2 for fluid variants) directly supports these.
-    "electronics":                       "_assembler",
-    "electronics-with-fluid":            "_assembler",
-    "pressing":                          "_assembler",
-    # `*-or-*` variants — primary is the premium machine, fallback is the
-    # generic machine the category name implies.
-    "electronics-or-assembling":         "_assembler",
-    "metallurgy-or-assembling":          "_assembler",
-    "cryogenics-or-assembling":          "_assembler",
-    "organic-or-assembling":             "_assembler",
-    "organic-or-hand-crafting":          "_assembler",
-    "organic-or-chemistry":              "chemistry",
-    "chemistry-or-cryogenics":           "chemistry",
-    "crafting-with-fluid-or-metallurgy": "_assembler",
-}
-
-# Hard categories that have NO fallback — recipes with these categories can
-# only be produced by their dedicated machine. When that machine is locked at
-# the current location, pick_recipe filters out the recipe entirely.
-HARD_CATEGORY_REQUIRES: dict[str, str] = {
-    "organic":          "biochamber",
-    "metallurgy":       "foundry",
-    "electromagnetics": "electromagnetic-plant",
-    "cryogenics":       "cryogenic-plant",
-}
-
 
 def compute_location_unlocks(location: str | None) -> frozenset[str] | None:
     """Return the set of planet-locked machines unlocked at *location*.
@@ -364,152 +347,162 @@ RESEARCH_PROD_PER_LEVEL: Fraction = Fraction(1, 10)
 # recipes.  Mining drills and labs are uncapped.
 MAX_CRAFTING_PROD: Fraction = Fraction(3)   # +300 %
 
-# Productivity module bonus per filled slot, by tier
-MODULE_PROD_BONUS: dict[int, Fraction] = {
-    0: Fraction(0),
-    1: Fraction(4,  100),   # productivity-module:   +4 % each
-    2: Fraction(6,  100),   # productivity-module-2: +6 % each
-    3: Fraction(10, 100),   # productivity-module-3: +10 % each
-}
+# ---------------------------------------------------------------------------
+# Quality / module / beacon stats — data-driven (populated by
+# configure_from_dataset()).  Read from the 2.1.8 dataset:
+#   * qualities[].level             → quality multipliers / machine-speed bonus
+#   * modules[].effect              → speed/prod/quality/efficiency module stats
+#   * beacon.distribution_effectivity / energy_usage / module_slots
+#   * offshore_pumps[].pumping_speed, mining_drills[].mining_speed
+#   * crafting_machines/.../tile_size, quality_tier_skip_distribution
+# The module-level names are kept (many call sites index them directly); they
+# are filled in at load time rather than hardcoded.  See
+# dev/docs/dataset_2.1.8_additions.md for the fields we vendor on top of upstream.
+# ---------------------------------------------------------------------------
 
-# Valid quality names (enum)
-QUALITY_NAMES: frozenset = frozenset(["normal", "uncommon", "rare", "epic", "legendary"])
-
-# Quality multiplier applied to module bonuses (normal=×1.0 … legendary=×2.5)
-MODULE_QUALITY_MULT: dict[str, Fraction] = {
-    "normal":    Fraction(1),
-    "uncommon":  Fraction(13, 10),   # ×1.3
-    "rare":      Fraction(8,  5),    # ×1.6
-    "epic":      Fraction(19, 10),   # ×1.9
-    "legendary": Fraction(5,  2),    # ×2.5
-}
-
-# Additive crafting-speed bonus from machine quality (applied to base speed)
-MACHINE_QUALITY_SPEED: dict[str, Fraction] = {
-    "normal":    Fraction(0),
-    "uncommon":  Fraction(3,  10),   # +30%
-    "rare":      Fraction(3,  5),    # +60%
-    "epic":      Fraction(9,  10),   # +90%
-    "legendary": Fraction(3,  2),    # +150%
-}
-
-# Beacon distribution effectivity by quality (affects how strongly modules apply)
-BEACON_EFFECTIVITY: dict[str, Fraction] = {
-    "normal":    Fraction(3,  2),    # 1.5
-    "uncommon":  Fraction(17, 10),   # 1.7
-    "rare":      Fraction(19, 10),   # 1.9
-    "epic":      Fraction(21, 10),   # 2.1
-    "legendary": Fraction(5,  2),    # 2.5
-}
-
-# Speed module base bonus per tier per slot (at normal quality)
-SPEED_MODULE_BONUS: dict[int, Fraction] = {
-    1: Fraction(1, 5),    # +20%
-    2: Fraction(3, 10),   # +30%
-    3: Fraction(1, 2),    # +50%
-}
-
-# Speed PENALTY per productivity module slot (negative; NOT quality-scaled)
-PROD_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
-    1: Fraction(-1, 20),   # -5%
-    2: Fraction(-1, 10),   # -10%
-    3: Fraction(-3, 20),   # -15%
-}
-
-# Speed PENALTY per quality module slot (negative; flat -5% all tiers,
-# NOT quality-scaled — only positive module effects scale with module quality)
-QUALITY_MODULE_SPEED_PENALTY: dict[int, Fraction] = {
-    1: Fraction(-1, 20),   # -5%
-    2: Fraction(-1, 20),   # -5%
-    3: Fraction(-1, 20),   # -5%
-}
-
-# Ordered quality tiers (index == tier number). QUALITY_NAMES is the unordered set.
+# Ordered quality tiers (index == positional index into per-quality arrays).
 QUALITY_TIERS: tuple[str, ...] = ("normal", "uncommon", "rare", "epic", "legendary")
 QUALITY_INDEX: dict[str, int] = {q: i for i, q in enumerate(QUALITY_TIERS)}
+QUALITY_NAMES: frozenset = frozenset(QUALITY_TIERS)
 
-# Base per-slot quality CHANCE at normal module quality (game source: quality
-# module T1 = +1%, T2 = +1.5%, T3 = +2.5%). Scaled by MODULE_QUALITY_MULT for
-# higher-quality module housings, same as every other positive module stat.
-QUALITY_MODULE_BONUS: dict[int, Fraction] = {
-    1: Fraction(1, 100),    # +1.0%
-    2: Fraction(3, 200),    # +1.5%
-    3: Fraction(1, 40),     # +2.5%
+# Canonical quality *levels* (legendary jumps 3→5); used only as a fallback for
+# vanilla, whose dataset ships only the ``normal`` tier (the higher tiers are
+# never reached there).  Space Age provides these via qualities[].level.
+_QUALITY_LEVEL_FALLBACK: dict[str, int] = {
+    "normal": 0, "uncommon": 1, "rare": 2, "epic": 3, "legendary": 5,
 }
 
-# Quality PENALTY per speed-module slot.  Space Age "haste makes waste": a speed
-# module reduces quality chance by the SAME magnitude a quality module of the same
-# tier adds (T1 -1%, T2 -1.5%, T3 -2.5%), so a tier-T speed module exactly cancels
-# a tier-T quality module at equal housing quality.  Scaled by MODULE_QUALITY_MULT
-# like the quality bonus it mirrors.  (This is why speed + quality modules in the
-# same machine are self-defeating.)
-SPEED_MODULE_QUALITY_PENALTY: dict[int, Fraction] = {
-    1: Fraction(1, 100),    # -1.0%
-    2: Fraction(3, 200),    # -1.5%
-    3: Fraction(1, 40),     # -2.5%
-}
+# Per-quality multipliers (by quality name).
+MODULE_QUALITY_MULT:   dict[str, Fraction] = {}   # module-effect scaling: 1 + 0.3·level
+MACHINE_QUALITY_SPEED: dict[str, Fraction] = {}   # additive crafting-speed bonus: 0.3·level
+BEACON_EFFECTIVITY:    dict[str, Fraction] = {}   # beacon.distribution_effectivity[idx]
+BEACON_POWER_KW:       dict[str, int]      = {}   # beacon.energy_usage[idx] / 1000
+PUMP_THROUGHPUT:       dict[str, int]      = {}   # offshore pumping_speed[idx] × 3600
 
-# When a quality roll succeeds the item tiers up by +1..+4 with this fixed split
-# (90% +1, 9% +2, 0.9% +3, 0.1% +4). Mass that would exceed the highest UNLOCKED
-# tier folds back onto that tier (you can't roll a quality you haven't researched).
-QUALITY_TIER_SKIP_DIST: tuple[Fraction, ...] = (
-    Fraction(9, 10), Fraction(9, 100), Fraction(9, 1000), Fraction(1, 1000),
-)
+# Per-tier module stats (by module tier 1..3; MODULE_PROD_BONUS also has 0).
+MODULE_PROD_BONUS:            dict[int, Fraction] = {}
+SPEED_MODULE_BONUS:           dict[int, Fraction] = {}
+PROD_MODULE_SPEED_PENALTY:    dict[int, Fraction] = {}
+QUALITY_MODULE_SPEED_PENALTY: dict[int, Fraction] = {}
+QUALITY_MODULE_BONUS:         dict[int, Fraction] = {}
+SPEED_MODULE_QUALITY_PENALTY: dict[int, Fraction] = {}
+MODULE_EFFICIENCY_REDUCTION:  dict[int, Fraction] = {}
+MODULE_CONSUMPTION_PENALTY:   dict[str, dict[int, Fraction]] = {"speed": {}, "prod": {}}
 
-# Number of module slots in a standard beacon (quality-invariant)
+# +1..+4 tier-skip split applied when a quality roll succeeds.
+QUALITY_TIER_SKIP_DIST: tuple[Fraction, ...] = ()
+
+# Number of module slots in a standard beacon.
 BEACON_SLOTS: int = 2
 
-# Fluid pump throughput by pump quality (fluid / minute)
-PUMP_THROUGHPUT: dict[str, int] = {
-    "normal":    72_000,
-    "uncommon":  93_600,
-    "rare":      115_200,
-    "epic":      136_800,
-    "legendary": 180_000,
-}
+# Machine tile footprint (longest dimension) for the beacon-sharing factor.
+MACHINE_SIZE: dict[str, int] = {}
 
-# Beacon idle power draw by beacon housing quality (kW)
-BEACON_POWER_KW: dict[str, int] = {
-    "normal":    480,
-    "uncommon":  400,
-    "rare":      320,
-    "epic":      240,
-    "legendary": 80,
-}
 
-# Tile footprint (longest dimension) used to compute beacon sharing factor
-MACHINE_SIZE: dict[str, int] = {
-    "assembling-machine-1":  3,
-    "assembling-machine-2":  3,
-    "assembling-machine-3":  3,
-    "electric-furnace":      3,
-    "chemical-plant":        3,
-    "centrifuge":            3,
-    "biochamber":            3,
-    "agricultural-tower":    3,
-    "electromagnetic-plant": 4,
-    "crusher":               3,   # 2×3 footprint; use longest dimension
-    "oil-refinery":          5,
-    "foundry":               5,
-    "cryogenic-plant":       5,
-    "captive-spawner":       5,
-    "big-mining-drill":      5,
-    "electric-mining-drill": 3,
-    "rocket-silo":           9,
-}
+def _module_tier(item_key: str) -> int:
+    """Module tier (1/2/3) inferred from the item_key suffix (``-2``/``-3``)."""
+    if item_key.endswith("-3"):
+        return 3
+    if item_key.endswith("-2"):
+        return 2
+    return 1
 
-# Energy consumption penalty from speed/prod modules — NOT quality-scaled
-MODULE_CONSUMPTION_PENALTY: dict[str, dict[int, Fraction]] = {
-    "speed": {1: Fraction(1, 2),  2: Fraction(3, 5),  3: Fraction(7, 10)},
-    "prod":  {1: Fraction(2, 5),  2: Fraction(3, 5),  3: Fraction(4, 5)},
-}
 
-# Efficiency module reduction per slot — IS quality-scaled via MODULE_QUALITY_MULT
-MODULE_EFFICIENCY_REDUCTION: dict[int, Fraction] = {
-    1: Fraction(3, 10),
-    2: Fraction(2, 5),
-    3: Fraction(1, 2),
-}
+def configure_from_dataset(data: dict) -> None:
+    """Populate the per-quality / per-module / beacon / footprint tables.
+
+    Reads the 2.1.8 fields (plus the few vendored on top — see
+    dev/docs/dataset_2.1.8_additions.md) so none of these numbers are hardcoded.
+    Per-quality *arrays* are indexed positionally (QUALITY_INDEX); per-quality
+    *multipliers* use qualities[].level (legendary = 5).
+    """
+    global OFFSHORE_PUMP_RATE, BEACON_SLOTS, QUALITY_TIER_SKIP_DIST
+
+    # --- per-quality multipliers, keyed by quality name (qualities[].level) ---
+    level_by_name = {q["key"]: q.get("level", 0) for q in data.get("qualities", [])}
+    MODULE_QUALITY_MULT.clear()
+    MACHINE_QUALITY_SPEED.clear()
+    for name in QUALITY_TIERS:
+        level = level_by_name.get(name, _QUALITY_LEVEL_FALLBACK[name])
+        MODULE_QUALITY_MULT[name]   = Fraction(1) + Fraction(3, 10) * level
+        MACHINE_QUALITY_SPEED[name] = Fraction(3, 10) * level
+
+    # --- beacon (per-quality arrays, positional) ---
+    beacon = data.get("beacon") or {}
+    dist  = beacon.get("distribution_effectivity")
+    power = beacon.get("energy_usage")
+    BEACON_EFFECTIVITY.clear()
+    BEACON_POWER_KW.clear()
+    for name in QUALITY_TIERS:
+        idx = QUALITY_INDEX[name]
+        BEACON_EFFECTIVITY[name] = _quality_value(dist, idx) if dist is not None else Fraction(0)
+        BEACON_POWER_KW[name]    = int(_quality_value(power, idx) / 1000) if power is not None else 0
+    BEACON_SLOTS = int(beacon.get("module_slots", BEACON_SLOTS))
+
+    # --- offshore pump throughput (items/min = pumping_speed/tick × 3600) ---
+    PUMP_THROUGHPUT.clear()
+    pumps = data.get("offshore_pumps") or []
+    pump_speed = pumps[0].get("pumping_speed") if pumps else None
+    for name in QUALITY_TIERS:
+        rate = (_quality_value(pump_speed, QUALITY_INDEX[name]) * 3600
+                if pump_speed is not None else Fraction(0))
+        PUMP_THROUGHPUT[name] = int(rate)
+    if PUMP_THROUGHPUT.get("normal"):
+        OFFSHORE_PUMP_RATE = Fraction(PUMP_THROUGHPUT["normal"])
+
+    # --- miner / drill base (normal-quality) speeds ---
+    MINER_SPEED.clear()
+    for d in data.get("mining_drills", []):
+        key = d.get("key")
+        if key:
+            MINER_SPEED[key] = _quality_value(d.get("mining_speed"), 0)
+
+    # --- module effects (by tier) ---
+    MODULE_PROD_BONUS.clear()
+    MODULE_PROD_BONUS[0] = Fraction(0)
+    SPEED_MODULE_BONUS.clear()
+    PROD_MODULE_SPEED_PENALTY.clear()
+    QUALITY_MODULE_SPEED_PENALTY.clear()
+    QUALITY_MODULE_BONUS.clear()
+    SPEED_MODULE_QUALITY_PENALTY.clear()
+    MODULE_EFFICIENCY_REDUCTION.clear()
+    MODULE_CONSUMPTION_PENALTY["speed"] = {}
+    MODULE_CONSUMPTION_PENALTY["prod"]  = {}
+    for m in data.get("modules", []):
+        tier = _module_tier(m.get("item_key", ""))
+        eff  = m.get("effect", {})
+        cat  = m.get("category")
+        if cat == "productivity":
+            MODULE_PROD_BONUS[tier]         = Fraction(str(eff.get("productivity", 0)))
+            PROD_MODULE_SPEED_PENALTY[tier] = Fraction(str(eff.get("speed", 0)))
+            MODULE_CONSUMPTION_PENALTY["prod"][tier] = Fraction(str(eff.get("consumption", 0)))
+        elif cat == "speed":
+            SPEED_MODULE_BONUS[tier] = Fraction(str(eff.get("speed", 0)))
+            MODULE_CONSUMPTION_PENALTY["speed"][tier] = Fraction(str(eff.get("consumption", 0)))
+        elif cat == "quality":
+            QUALITY_MODULE_BONUS[tier]         = Fraction(str(eff.get("quality", 0)))
+            QUALITY_MODULE_SPEED_PENALTY[tier] = Fraction(str(eff.get("speed", 0)))
+        elif cat == "efficiency":
+            MODULE_EFFICIENCY_REDUCTION[tier] = -Fraction(str(eff.get("consumption", 0)))
+    # "Haste makes waste": a speed module reduces quality chance by the same
+    # per-tier magnitude a quality module of equal tier adds (derived, not
+    # exported — see dev/docs/dataset_2.1.8_additions.md).
+    for tier, val in QUALITY_MODULE_BONUS.items():
+        SPEED_MODULE_QUALITY_PENALTY[tier] = val
+
+    # --- machine tile footprints (beacon-sharing factor) ---
+    MACHINE_SIZE.clear()
+    for section in ("crafting_machines", "mining_drills", "rocket_silo",
+                    "agricultural_tower"):
+        for m in data.get(section, []):
+            key, size = m.get("key"), m.get("tile_size")
+            if key and size is not None:
+                MACHINE_SIZE[key] = int(size)
+
+    # --- quality tier-skip distribution (+1..+4 split on a successful roll) ---
+    dist_skip = data.get("quality_tier_skip_distribution")
+    if dist_skip:
+        QUALITY_TIER_SKIP_DIST = tuple(Fraction(str(x)) for x in dist_skip)
 
 
 
@@ -581,11 +574,27 @@ def load_data(location: str | None = None) -> dict:
         sys.stderr.write(f"Saved to {path}\n")
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
+    normalize_dataset(data)
+    register_machines(data)
+    configure_from_dataset(data)
     if location is not None:
         valid_keys = {p["key"] for p in data.get("planets", [])}
         if location not in valid_keys:
             sys.exit(f"Unknown location '{location}'. Valid: {sorted(valid_keys)}")
     return data
+
+
+def normalize_dataset(data: dict) -> None:
+    """Bridge 2.1.8 recipe fields to the shape the solver consumes.
+
+    * ``allowed_effects`` (array) → ``allow_productivity`` bool the rest of the
+      code reads.  Old-format datasets already carry ``allow_productivity`` and
+      are left untouched (idempotent).
+    """
+    for r in data.get("recipes", []):
+        ae = r.get("allowed_effects")
+        if ae is not None and r.get("allow_productivity") is None:
+            r["allow_productivity"] = "productivity" in ae
 
 
 # ---------------------------------------------------------------------------
@@ -674,7 +683,7 @@ def build_recipe_index(data: dict) -> dict[str, list]:
     for recipe in data.get("recipes", []):
         if recipe.get("subgroup") in SKIP_SUBGROUPS:
             continue
-        if recipe.get("category") in SKIP_CATEGORIES:
+        if is_recycling(recipe):
             continue
         for result in recipe.get("results", []):
             idx[result["name"]].append(recipe)
@@ -688,13 +697,13 @@ def build_recycling_index(data: dict) -> dict[str, list]:
     recursive solver never uses them).  Only the Fulgora recycling-graph LP
     path reads this index, to model the planet's scrap → recycle → down-recycle
     cascade.  Barrel recipes are excluded; the canonical 'deconstruct' recyclers
-    (category recycling / recycling-or-hand-crafting) are kept.
+    (recipes carrying the ``recycling`` category) are kept.
     """
     idx: dict[str, list] = defaultdict(list)
     for recipe in data.get("recipes", []):
         if recipe.get("subgroup") in SKIP_SUBGROUPS:
             continue
-        if recipe.get("category") not in SKIP_CATEGORIES:
+        if not is_recycling(recipe):
             continue
         for result in recipe.get("results", []):
             idx[result["name"]].append(recipe)
@@ -896,38 +905,82 @@ def _compute_step_power(
 # ---------------------------------------------------------------------------
 
 def get_machine(
-    cat: str,
+    categories,
     assembler_level: int,
     furnace_type: str,
     location_unlocks: frozenset[str] | None = None,
 ) -> tuple[str, Fraction]:
-    """Return (machine_key, crafting_speed) for a recipe category.
+    """Return (machine_key, base_speed) for a recipe's crafting categories.
 
-    When ``location_unlocks`` is provided (non-None), planet-locked advanced
-    machines (foundry / biochamber / EM-plant / cryo-plant) that are not in
-    the set are routed to their basic alternative via CATEGORY_LOCATION_FALLBACK.
-    Categories listed in HARD_CATEGORY_REQUIRES have no fallback and are left
-    pointing at the locked machine — pick_recipe should have filtered them
-    out before reaching here.
+    *categories* is the recipe's ``categories`` array (a single category string
+    is also accepted for back-compat).  Machine candidates and base speeds come
+    from the data-driven registry (``register_machines``):
+
+    * ``smelting`` → the configured furnace.
+    * A dedicated/premium machine wins over the generic assembler.  When the
+      premium machine is planet-locked and not unlocked at *location_unlocks*,
+      it falls back to the assembler if the recipe also lists a generic crafting
+      category, else to another unlocked dedicated machine, else (hard-locked)
+      it returns the locked machine — pick_recipe should have filtered it out.
+    * Otherwise → the assembler at *assembler_level*.
     """
-    if cat in SMELTING_CATS:
-        return FURNACE_KEY[furnace_type], FURNACE_SPEED[furnace_type]
-    if cat in FIXED_MACHINE_FOR_CAT:
-        primary_key, primary_speed = FIXED_MACHINE_FOR_CAT[cat]
-        if (
-            location_unlocks is not None
-            and primary_key in PLANET_LOCKED_MACHINES
-            and primary_key not in location_unlocks
-        ):
-            fb = CATEGORY_LOCATION_FALLBACK.get(cat)
-            if fb == "_assembler":
-                return ASSEMBLER_KEY[assembler_level], ASSEMBLER_SPEED[assembler_level]
-            if fb is not None and fb in FIXED_MACHINE_FOR_CAT:
-                return FIXED_MACHINE_FOR_CAT[fb]
-            # Hard category with no fallback — return the primary (caller is
-            # expected to have filtered the recipe out via pick_recipe).
-        return primary_key, primary_speed
-    return ASSEMBLER_KEY[assembler_level], ASSEMBLER_SPEED[assembler_level]
+    if isinstance(categories, str):
+        categories = [categories]
+    cats = set(categories)
+
+    if cats & SMELTING_CATS:
+        fk = FURNACE_KEY[furnace_type]
+        return fk, _machine_speed(fk)
+
+    has_generic = bool(cats & GENERIC_CRAFTING_CATS)
+
+    dedicated: list[str] = []
+    for c in cats:
+        for mk in _CATEGORY_MACHINES.get(c, []):
+            if _MACHINE_CLASS.get(mk) == "dedicated" and mk not in dedicated:
+                dedicated.append(mk)
+
+    if dedicated:
+        locked_first = sorted(mk for mk in dedicated if mk in PLANET_LOCKED_MACHINES)
+        unlocked_alt = sorted(mk for mk in dedicated if mk not in PLANET_LOCKED_MACHINES)
+        primary = locked_first[0] if locked_first else unlocked_alt[0]
+        if (location_unlocks is not None
+                and primary in PLANET_LOCKED_MACHINES
+                and primary not in location_unlocks):
+            if has_generic:
+                ak = ASSEMBLER_KEY[assembler_level]
+                return ak, _machine_speed(ak)
+            if unlocked_alt:
+                return unlocked_alt[0], _machine_speed(unlocked_alt[0])
+            # Hard-locked: no fallback (pick_recipe should have filtered this).
+        return primary, _machine_speed(primary)
+
+    ak = ASSEMBLER_KEY[assembler_level]
+    return ak, _machine_speed(ak)
+
+
+def recipe_requires_locked_machine(
+    recipe: dict, location_unlocks: frozenset[str] | None
+) -> bool:
+    """True if *recipe* can ONLY run on a planet-locked machine that is locked
+    at the current location (no generic-assembler or unlocked-machine fallback).
+
+    Replaces the old HARD_CATEGORY_REQUIRES table: a recipe is buildable as long
+    as it lists a generic crafting / smelting category, or any candidate machine
+    is either not planet-locked or unlocked here.
+    """
+    if location_unlocks is None:
+        return False
+    cats = set(recipe_categories(recipe))
+    if cats & GENERIC_CRAFTING_CATS or cats & SMELTING_CATS:
+        return False
+    machines = {mk for c in cats for mk in _CATEGORY_MACHINES.get(c, [])}
+    if not machines:
+        return False
+    for mk in machines:
+        if mk not in PLANET_LOCKED_MACHINES or mk in location_unlocks:
+            return False
+    return True
 
 
 def _recipe_valid_for_planet(recipe: dict, planet_props: dict) -> bool:
@@ -984,18 +1037,15 @@ def pick_recipe(
         elif not (overrides and item_key in overrides):
             return None  # all recipes filtered out by planet conditions
 
-    # Machine-unlock filtering: drop recipes whose hard category requires a
-    # planet-locked machine not unlocked at the current location.
-    # "X-or-Y" categories with a fallback are NOT filtered here — get_machine
+    # Machine-unlock filtering: drop recipes that can ONLY run on a planet-locked
+    # machine not unlocked here.  Recipes that also list a generic crafting
+    # category (or another unlocked machine) are NOT filtered — get_machine
     # routes them to the basic alternative instead.
     if location_unlocks is not None:
-        filtered = []
-        for r in candidates:
-            cat = r.get("category", "")
-            required = HARD_CATEGORY_REQUIRES.get(cat)
-            if required is not None and required not in location_unlocks:
-                continue
-            filtered.append(r)
+        filtered = [
+            r for r in candidates
+            if not recipe_requires_locked_machine(r, location_unlocks)
+        ]
         if filtered:
             candidates = filtered
         elif not (overrides and item_key in overrides):
@@ -1610,9 +1660,8 @@ class Solver:
                 break
 
         energy_req = Fraction(str(recipe.get("energy_required", "0.5")))
-        cat        = recipe.get("category", "crafting")
 
-        machine_key, base_speed = self._resolve_machine(recipe_key, cat)
+        machine_key, base_speed = self._resolve_machine(recipe_key, recipe_categories(recipe))
 
         quality_mult    = Fraction(1) + MACHINE_QUALITY_SPEED[self.machine_quality]
         effective_speed = base_speed * quality_mult
@@ -1646,16 +1695,17 @@ class Solver:
             return Fraction(str(round(rate_f, 8)))
         return machines_frac * effective_speed * effective_result * 60 / energy_req
 
-    def _resolve_machine(self, recipe_key: str, cat: str) -> tuple:
+    def _resolve_machine(self, recipe_key: str, categories) -> tuple:
         """
         Return (machine_key, base_speed) respecting recipe-level machine overrides.
-        Priority: recipe_machine_overrides > category default.
+        Priority: recipe_machine_overrides > category→machine resolution.
+        *categories* is the recipe's ``categories`` array.
         """
         if recipe_key in self.recipe_machine_overrides:
             ovr = self.recipe_machine_overrides[recipe_key]
-            if ovr in MACHINE_CRAFTING_SPEED:
-                return ovr, MACHINE_CRAFTING_SPEED[ovr]
-        return get_machine(cat, self.assembler_level, self.furnace_type, self.location_unlocks)
+            if ovr in _MACHINE_SPEED:
+                return ovr, _MACHINE_SPEED[ovr]
+        return get_machine(categories, self.assembler_level, self.furnace_type, self.location_unlocks)
 
     # ------------------------------------------------------------------
     # Core solver
@@ -1717,9 +1767,8 @@ class Solver:
                 break
 
         energy_req = Fraction(str(recipe.get("energy_required", "0.5")))
-        cat        = recipe.get("category", "crafting")
 
-        machine_key, base_speed = self._resolve_machine(recipe_key, cat)
+        machine_key, base_speed = self._resolve_machine(recipe_key, recipe_categories(recipe))
 
         # Machine quality: additive speed bonus applied to base speed
         quality_mult    = Fraction(1) + MACHINE_QUALITY_SPEED[self.machine_quality]
@@ -1927,7 +1976,7 @@ class Solver:
             override_key = self.recipe_overrides.get(oil_item)
             if override_key:
                 candidate = find(override_key)
-                if candidate and candidate.get("category") == "oil-processing":
+                if candidate and "oil-processing" in recipe_categories(candidate):
                     refinery = candidate
                     break
 
@@ -1954,8 +2003,7 @@ class Solver:
         for rkey, info in oil_rates.items():
             rcp    = info["recipe"]
             cycles = info["cycles_per_min"]
-            cat    = rcp.get("category", "oil-processing")
-            machine_key, base_speed = self._resolve_machine(rkey, cat)
+            machine_key, base_speed = self._resolve_machine(rkey, recipe_categories(rcp))
             quality_mult = Fraction(1) + MACHINE_QUALITY_SPEED[self.machine_quality]
             eff_speed    = base_speed * quality_mult
             energy_req   = Fraction(str(rcp.get("energy_required", 5)))
@@ -2036,14 +2084,13 @@ def _fulgora_activity_coeffs(solver: "Solver", recipe: dict) -> dict:
     per-craft amounts (outputs already include the productivity bonus).
     """
     rk   = recipe["key"]
-    cat  = recipe.get("category", "crafting")
     energy = Fraction(str(recipe.get("energy_required", "0.5")))
 
-    if cat in SKIP_CATEGORIES:
+    if is_recycling(recipe):
         machine_key = "recycler"
-        base_speed  = MACHINE_CRAFTING_SPEED["recycler"]
+        base_speed  = _machine_speed("recycler")
     else:
-        machine_key, base_speed = solver._resolve_machine(rk, cat)
+        machine_key, base_speed = solver._resolve_machine(rk, recipe_categories(recipe))
 
     quality_mult = Fraction(1) + MACHINE_QUALITY_SPEED[solver.machine_quality]
     eff_speed    = base_speed * quality_mult
@@ -2165,12 +2212,11 @@ def solve_fulgora(solver: "Solver", data: dict, targets: list) -> dict:
     for r in data.get("recipes", []):
         if r.get("subgroup") in SKIP_SUBGROUPS:
             continue
-        if r.get("category") in SKIP_CATEGORIES:
+        if is_recycling(r):
             continue
         if planet_props and not _recipe_valid_for_planet(r, planet_props):
             continue
-        required = HARD_CATEGORY_REQUIRES.get(r.get("category", ""))
-        if required is not None and unlocks is not None and required not in unlocks:
+        if recipe_requires_locked_machine(r, unlocks):
             continue
         crafting_recipes.append(r)
 

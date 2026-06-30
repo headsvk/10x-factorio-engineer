@@ -198,8 +198,9 @@ class TestFluidTransparency(unittest.TestCase):
     def test_molten_iron_picks_from_ore_not_lava_on_nauvis(self):
         r = qp._pick_recipe_fluid_preferred("molten-iron", self.recipe_idx, self.fluids, self.planet_props)
         assert r is not None
-        # Lava variant is planet-exclusive; should pick the ore variant
-        self.assertEqual(r["key"], "molten-iron")
+        # Lava variant is planet-exclusive; should pick the ore variant.
+        # (2.1.8 renamed the ore-based recipe molten-iron → iron-ore-melting.)
+        self.assertEqual(r["key"], "iron-ore-melting")
 
     def test_fluid_set_contains_molten_iron(self):
         self.assertIn("molten-iron", self.fluids)
@@ -733,15 +734,16 @@ class TestSelfRecycleTarget(unittest.TestCase):
         self.assertGreater(st["craft_machines"], 0.0)
         self.assertGreater(st["recycler_machines"], 0.0)
 
-    def test_tungsten_carbide_auto_compare_picks_path_b(self):
+    def test_tungsten_carbide_auto_compare_picks_path_a(self):
         # V3 item 4: with auto-compare, the planner evaluates both Path A
-        # (self-recycle-target loop) and Path B (ingredient-upcycle).  For
-        # tungsten-carbide, ingredients (tungsten-ore + coal) have viable
-        # quality paths via mined-raw-self-recycle on Vulcanus/Nauvis, so
-        # Path B wins.  Plan should NOT contain a self-recycle-target stage.
+        # (self-recycle-target loop) and Path B (ingredient-upcycle) and picks
+        # the cheaper.  NOTE (2.1.8): the dataset numbers flipped the winner —
+        # the self-recycle loop now beats ingredient-upcycle for tungsten-carbide
+        # (~113 vs ~595 machines), so Path A wins.  The auto-compare note still
+        # records both paths were evaluated.
         out = qp.plan("tungsten-carbide", 60, _data(), planets=["nauvis", "vulcanus"], tech_state=qp.ALL_TECH_UNLOCKED)
         roles = {s.get("role") for s in out["stages"]}
-        self.assertNotIn("self-recycle-target", roles)
+        self.assertIn("self-recycle-target", roles)
         notes = " ".join(out.get("notes", []))
         self.assertIn("auto-compare", notes)
         self.assertIn("ingredient-upcycle", notes)
@@ -1848,7 +1850,10 @@ class TestShuffleEnumeration(unittest.TestCase):
         # V3 item 4: relaxed `allow_productivity=True` filter — buildings,
         # modules, military items, and end-game gear now qualify.  The exact
         # count tracks the dataset; pin it so unintended changes get caught.
-        self.assertEqual(len(cands), 195)
+        # 2.1.8: 186 — several recipes were removed/renamed and some items
+        # (power-armor-mk2, speed-module-3) now self-recycle (their recycling
+        # returns the item itself), so they no longer qualify as shuffles.
+        self.assertEqual(len(cands), 186)
 
     def test_enumerate_excludes_single_output_recyclers(self):
         cands = qp.enumerate_shuffle_candidates(_data())
@@ -2343,17 +2348,18 @@ class TestGlebaTargets(unittest.TestCase):
         )
         self.assertEqual(self_stage["machine"], "cryogenic-plant")
 
-    def test_auto_compare_picks_b_for_tungsten_carbide(self):
-        # Path B (mined-raw-self-recycle of tungsten-ore + coal) beats Path A
-        # for tungsten-carbide.  Verifies the cost gate picks the cheaper path.
+    def test_auto_compare_picks_a_for_tungsten_carbide(self):
+        # Verifies the cost gate picks the cheaper path.  NOTE (2.1.8): the
+        # winner flipped — the self-recycle loop (Path A) now beats Path B
+        # (mined-raw-self-recycle of tungsten-ore + coal) for tungsten-carbide.
         out = qp.plan(
             "tungsten-carbide", 60, _data(),
             planets=["nauvis", "vulcanus"],
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         roles = {s.get("role") for s in out["stages"]}
-        self.assertNotIn("self-recycle-target", roles)
-        self.assertIn("mined-raw-self-recycle", roles)
+        self.assertIn("self-recycle-target", roles)
+        self.assertNotIn("mined-raw-self-recycle", roles)
 
     def test_auto_compare_path_a_wins_when_b_infeasible(self):
         # Path B fails when ingredients require an unlocked planet the user
@@ -2394,18 +2400,23 @@ class TestGlebaTargets(unittest.TestCase):
     def test_shuffle_includes_modules_and_buildings(self):
         cands = qp.enumerate_shuffle_candidates(_data())
         items = {c.output_item for c in cands}
+        # NOTE (2.1.8): speed-module-3 now self-recycles (recycling returns the
+        # module itself), so it is no longer a cross-item shuffle candidate.
         for it in ("biochamber", "agricultural-tower", "lab", "capture-robot-rocket",
                    "productivity-module-3", "efficiency-module-3",
-                   "quality-module-3", "speed-module-3"):
+                   "quality-module-3"):
             self.assertIn(it, items, f"shuffle candidate missing: {it}")
+        self.assertNotIn("speed-module-3", items)
 
     def test_shuffle_includes_military_and_endgame(self):
         cands = qp.enumerate_shuffle_candidates(_data())
         items = {c.output_item for c in cands}
+        # NOTE (2.1.8): power-armor-mk2 now self-recycles (recycling returns the
+        # armor itself), so it is no longer a cross-item shuffle candidate.
         for it in ("tank", "spidertron", "gun-turret", "laser-turret",
-                   "power-armor-mk2", "nuclear-reactor", "roboport",
-                   "artillery-shell"):
+                   "nuclear-reactor", "roboport", "artillery-shell"):
             self.assertIn(it, items, f"shuffle candidate missing: {it}")
+        self.assertNotIn("power-armor-mk2", items)
         # Single-output recyclers must still be excluded.
         for it in ("firearm-magazine", "stone-wall"):
             self.assertNotIn(it, items, f"single-output item should be excluded: {it}")
@@ -3332,21 +3343,26 @@ class TestRecycleShortcut(unittest.TestCase):
         # Direct steel-plate-recycling is 1.0s; the chest wrap is far faster.
         self.assertLess(d["recycler_time"], 0.05)
 
-    def test_concrete_only_self_recycles_via_hazard(self):
-        # concrete-recycling decomposes to stone-brick (no self-return), so the
-        # only self-recycle route is the hazard-concrete wrap.
+    def test_concrete_has_no_single_solid_wrap(self):
+        # NOTE (2.1.8): hazard-concrete-recycling no longer returns concrete (it
+        # now decomposes to stone-brick + iron-ore), so the single-ingredient
+        # hazard-concrete wrap is dead.  No single-solid container recycles back
+        # to concrete, so concrete drops out of build_recycle_shortcuts.  (The
+        # multi-ingredient wrap via heating-tower is found by the plan instead —
+        # see test_concrete_plan_uses_heating_tower_wrap.)
         sc = qp.build_recycle_shortcuts(_data())
-        self.assertIn("concrete", sc)
-        self.assertEqual(sc["concrete"]["container"], "hazard-concrete")
-        self.assertAlmostEqual(sc["concrete"]["retention"], 0.25, places=3)
+        self.assertNotIn("concrete", sc)
 
-    def test_concrete_plan_uses_hazard_wrap(self):
+    def test_concrete_plan_uses_heating_tower_wrap(self):
+        # NOTE (2.1.8): with the hazard-concrete wrap dead, the only container
+        # that recycles back to concrete is heating-tower (boiler + heat-pipe +
+        # concrete); its co-ingredients are sourced at normal quality.
         out = qp.plan(
             "concrete", 60, _data(), planets=["nauvis", "fulgora"],
             tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
         )
         st = next(s for s in out["stages"] if s["role"] == "self-recycle-target")
-        self.assertEqual(st["container"], "hazard-concrete")
+        self.assertEqual(st["container"], "heating-tower")
         # Wrap moves load onto fast assemblers, leaving few recyclers.
         self.assertGreater(st["container_machines"], 0.0)
         self.assertLess(st["recycler_machines"], st["craft_machines"])
@@ -3472,7 +3488,9 @@ class TestEnumerateRecycleRoutes(unittest.TestCase):
         # additive.
         sc = qp.build_recycle_shortcuts(_data())
         self.assertEqual(sc["steel-plate"]["container"], "steel-chest")
-        self.assertEqual(sc["concrete"]["container"], "hazard-concrete")
+        # NOTE (2.1.8): hazard-concrete-recycling no longer returns concrete, so
+        # the single-solid concrete wrap is gone and concrete drops out here.
+        self.assertNotIn("concrete", sc)
         # holmium-plate falls back to direct self-recycle in the OLD API
         # (no single-solid-ingredient wrap exists for it).
         self.assertIsNone(sc["holmium-plate"]["container"])
