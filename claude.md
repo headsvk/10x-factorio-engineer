@@ -235,7 +235,7 @@ QUALITY_NAMES = frozenset(["normal", "uncommon", "rare", "epic", "legendary"])
 QUALITY_TIERS = ("normal", "uncommon", "rare", "epic", "legendary")
 QUALITY_INDEX = {q: i for i, q in enumerate(QUALITY_TIERS)}
 
-# Base per-slot quality CHANCE at normal module quality (T1 +1%, T2 +1.5%,
+# Base per-slot quality CHANCE at normal module quality (T1 +1%, T2 +2%,
 # T3 +2.5%); scaled by MODULE_QUALITY_MULT like every other positive stat.
 QUALITY_MODULE_BONUS: dict[int, Fraction] = {
     1: Fraction(1, 100), 2: Fraction(3, 200), 3: Fraction(1, 40),
@@ -508,7 +508,7 @@ per-step `quality_output` split, identical to the recursive path.
 ## Quality-Module Output (`--max-quality`, `--quality-pickout`)
 
 `cli.py` models the quality tier of crafted output. Quality modules give a
-per-craft upgrade chance `q_chance` (`quality_chance_from_specs`: T1 +1% / T2 +1.5%
+per-craft upgrade chance `q_chance` (`quality_chance_from_specs`: T1 +1% / T2 +2%
 / T3 +2.5% per slot, ×`MODULE_QUALITY_MULT`, slot-scaled, clamped). Speed modules
 SUBTRACT quality at the same per-tier magnitude (`SPEED_MODULE_QUALITY_PENALTY`,
 "haste makes waste") — both in the same machine AND transmitted from a beacon
@@ -665,7 +665,7 @@ python -m unittest dev.test_cli -v
 | `TestMachineInherentProd` | `build_machine_prod_bonus` returns 1/2 for foundry/EM-plant/biochamber and 0 for assembler/furnace; `_compute_module_effects` returns the machine built-in prod even when `allow_prod=False` (modules gated, inherent not) and 0 for non-inherent machines; EM-plant electronic-circuit machine count is 2/3 of the no-inherent baseline |
 | `TestSimplexLP` | Direct unit tests for `_lp_minimize`: basic optimum with exact `Fraction` output; picks the cheaper variable; `infeasible` when an item has no producer (all-zero row, b>0); `unbounded` detection; fractional optimum (2.5 each on a symmetric cover) |
 | `TestFulgoraRecyclingLP` | End-to-end `--location fulgora` LP via subprocess: `scrap` is the only solid raw and no asteroid-crushing steps; binding-constraint throughput (battery 60/min → 1500 scrap on `recycler`); `scrap-recycling-productivity` reduces scrap demand in the LP (+10 %/level → 1500/1.1 at L1, 1500/1.2 at L2); by-products surface in `co_products`; holmium-ore/stone resolve with no `--bus-item` (EM-science 90/min → 9800 scrap); cascade uses `iron-gear-wheel-recycling` not asteroids; speed modules flow into LP coefficients and reduce machine counts; `--step-machines` rejected on fulgora; `FULGORA_WRAP_ROUTES` entries are valid single-ingredient wrap recipes with existing `<wrap>-recycling`; production_steps are emitted as a strict sources-last bill of materials (target first, `scrap-recycling` last; every step below ALL its consumers) — `format_output` uses a longest-path level sort for `--location fulgora` (recursive/tree locations keep the DFS pre-order) |
-| `TestQualityChanceHelpers` | Unit tests for `quality_chance_from_specs` (T2=1.5%/slot base, tier+quality scaling, prod modules ignored, **speed modules subtract — a tier-T speed module cancels a tier-T quality module at equal housing quality (incl. legendary); partial penalty nets correctly; clamps to 0 with no quality modules**, slot-scaling caps at machine slots, clamp to 1.0, zero when no slots) and `quality_tier_probs` (legendary-cap 90/9/0.9/0.1 split sums to 1; rare-cap folds +2/+3/+4 mass onto rare; normal-only cap folds everything back to normal) |
+| `TestQualityChanceHelpers` | Unit tests for `quality_chance_from_specs` (T2=2%/slot base, tier+quality scaling, prod modules ignored, **speed modules subtract — a tier-T speed module cancels a tier-T quality module at equal housing quality (incl. legendary); partial penalty nets correctly; clamps to 0 with no quality modules**, slot-scaling caps at machine slots, clamp to 1.0, zero when no slots) and `quality_tier_probs` (legendary-cap 90/9/0.9/0.1 split sums to 1; rare-cap folds +2/+3/+4 mass onto rare; normal-only cap folds everything back to normal) |
 | `TestQualityPickout` | End-to-end `--quality-pickout` via subprocess: recursive path scales the quality step up so normal output == demand and extracts uncommon/rare/epic (capped at `--max-quality`, no legendary key); aggregated `quality_yield` matches the per-step `quality_output` >normal split; pick-out raises machine count vs the reporting-only run; reporting-only (no flag) leaves machine count at nominal and emits no `quality_yield` (informational split sums to the flowing rate); pick-out flag with no quality modules extracts nothing; Fulgora LP pick-out (accumulator 5×quality-2 → normal 50/min + rare-capped extraction); `--max-quality rare` suppresses epic/legendary even with legendary T3 modules; human format renders the three quality sections; **speed modules in a beacon reduce the step's quality (`test_beacon_speed_modules_reduce_quality`: a speed beacon lowers `quality_yield`, enough beacons cancel it to `{}`)** |
 
 ### `dev/test_quality_planner.py` (322 tests)
