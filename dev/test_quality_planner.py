@@ -3347,25 +3347,26 @@ class TestRecycleShortcut(unittest.TestCase):
         # NOTE (2.1.8): hazard-concrete-recycling no longer returns concrete (it
         # now decomposes to stone-brick + iron-ore), so the single-ingredient
         # hazard-concrete wrap is dead.  No single-solid container recycles back
-        # to concrete, so concrete drops out of build_recycle_shortcuts.  (The
-        # multi-ingredient wrap via heating-tower is found by the plan instead —
-        # see test_concrete_plan_uses_heating_tower_wrap.)
+        # to concrete, so concrete drops out of build_recycle_shortcuts.
         sc = qp.build_recycle_shortcuts(_data())
         self.assertNotIn("concrete", sc)
 
-    def test_concrete_plan_uses_heating_tower_wrap(self):
-        # NOTE (2.1.8): with the hazard-concrete wrap dead, the only container
-        # that recycles back to concrete is heating-tower (boiler + heat-pipe +
-        # concrete); its co-ingredients are sourced at normal quality.
+    def test_concrete_is_not_a_wrap_target(self):
+        # NOTE (2.1.8): with the hazard-concrete wrap dead, concrete was removed
+        # from SELF_RECYCLE_TARGETS — the only loop-closing container left
+        # (heating-tower) drags in boiler + heat-pipe and recycles slowly, so it
+        # is not a viable quality wrap.  Concrete now plans as a normal craft
+        # with no self-recycle-target / wrap stage.
+        self.assertNotIn("concrete", qp.SELF_RECYCLE_TARGETS)
         out = qp.plan(
             "concrete", 60, _data(), planets=["nauvis", "fulgora"],
             tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
         )
-        st = next(s for s in out["stages"] if s["role"] == "self-recycle-target")
-        self.assertEqual(st["container"], "heating-tower")
-        # Wrap moves load onto fast assemblers, leaving few recyclers.
-        self.assertGreater(st["container_machines"], 0.0)
-        self.assertLess(st["recycler_machines"], st["craft_machines"])
+        self.assertIsNone(out.get("error"))
+        roles = {s.get("role") for s in out["stages"]}
+        self.assertNotIn("self-recycle-target", roles)
+        containers = {s.get("container") for s in out["stages"]}
+        self.assertNotIn("heating-tower", containers)
 
     def test_wrap_keeps_yield_but_cuts_recycler_time(self):
         # The chest wrap retention matches the direct steel-plate self-recycle
