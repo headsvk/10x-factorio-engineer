@@ -1651,6 +1651,72 @@ class TestLocationFulgora(unittest.TestCase):
         self.assertIn("tungsten-ore", str(cm.exception))
         self.assertIn("vulcanus", str(cm.exception))
 
+    def test_fluid_chain_produces_sulfuric_acid(self):
+        # processing-unit consumes sulfuric-acid; Fulgora has heavy-oil oceans,
+        # so the planner delegates the acid sub-chain to cli.py and emits
+        # fluid-chain stages instead of listing sulfuric-acid as an external raw.
+        out = self._plan("quality-module-2")
+        fc = [s for s in out["stages"] if s["role"] == "fluid-chain"]
+        self.assertTrue(fc, "expected at least one fluid-chain stage")
+        recipes = {s["recipe"] for s in fc}
+        self.assertIn("sulfuric-acid", recipes)
+        # Every fluid-chain stage runs on the chemical plant and is tagged with
+        # the top-level fluid it serves.
+        for s in fc:
+            self.assertEqual(s["machine"], "chemical-plant")
+            self.assertEqual(s["fluid_target"], "sulfuric-acid")
+            self.assertGreaterEqual(s["machine_count"], 0.0)
+
+    def test_fluid_input_is_pumped_raw_not_acid(self):
+        # The resolved fluid raw must be the true pumped raw (heavy-oil), not the
+        # intermediate sulfuric-acid that cli.py now produces locally.
+        out = self._plan("quality-module-2")
+        self.assertIn("heavy-oil", out["fluid_input"])
+        self.assertNotIn("sulfuric-acid", out["fluid_input"])
+        self.assertGreater(out["fluid_input"]["heavy-oil"], 0)
+
+    def test_fluid_chain_scrap_draw_credited(self):
+        # The acid sub-chain draws scrap-derived solids (ice, iron-plate); these
+        # are reported separately and credited against scrap overflow rather than
+        # growing the scrap input.
+        out = self._plan("quality-module-2")
+        draw = out["fluid_chain_scrap_draw"]
+        self.assertTrue(draw, "expected scrap-derived draws from the fluid chain")
+        self.assertTrue(all(v > 0 for v in draw.values()))
+        # Drawn solids must be a subset of the scrap-source overflow basket
+        # (scrap-reachable), confirming they come for free from the cascade.
+        cascade = set(qp.build_scrap_cascade(_data())["depth_amounts"])
+        for it in draw:
+            self.assertIn(it, cascade, it)
+
+    def test_fluid_chain_folds_into_totals(self):
+        # The fluid sub-chain's machines + power must be part of the plan totals,
+        # and surface as a 'fluid-chain' role in the cost breakdown.
+        out = self._plan("quality-module-2")
+        fc = [s for s in out["stages"] if s["role"] == "fluid-chain"]
+        fc_machines = sum(s["machine_count"] for s in fc)
+        self.assertGreater(fc_machines, 0)
+        # Total machine count is the sum across every emitted stage, fluid chain
+        # included.
+        all_machines = sum(
+            s.get("machine_count", 0.0) for s in out["stages"]
+        )
+        self.assertAlmostEqual(out["total_machine_count"], all_machines, places=6)
+        self.assertIn("fluid-chain", out["summary"]["by_role"])
+
+    def test_non_fulgora_keeps_fluid_as_raw(self):
+        # Regression guard: off Fulgora the fluid handling is unchanged — fluids
+        # stay quality-transparent raws and no fluid-chain stage is emitted.
+        out = qp.plan(
+            "processing-unit", 1, _data(),
+            target_tier=self.RARE,
+            planets=["nauvis", "vulcanus"],
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertIn("sulfuric-acid", out["fluid_input"])
+        self.assertEqual(out["fluid_chain_scrap_draw"], {})
+        self.assertNotIn("fluid-chain", {s["role"] for s in out["stages"]})
+
 
 class TestStageSummary(unittest.TestCase):
     """V3 small: summary.by_role aggregates machine_count + power_kw per

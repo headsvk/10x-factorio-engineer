@@ -31,7 +31,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (275 tests, stdlib only)
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
-  test_quality_planner.py   # unittest suite (322 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (328 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -172,7 +172,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-269 CLI tests + 315 quality-planner tests, stdlib only.
+275 CLI tests + 328 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner
 
@@ -237,6 +237,14 @@ python dev/quality_planner.py --item holmium-plate --rate 60 --planets fulgora
 # when a chunk would be needed (e.g. molten-iron needs calcite -> Vulcanus).
 python dev/quality_planner.py --item iron-plate --rate 60 \
     --planets nauvis,vulcanus --no-asteroids
+
+# Fulgora build location: scrap-only sourcing (no asteroid platform). Fluids
+# consumed by the chain (e.g. sulfuric-acid for processing-unit) are produced
+# locally from Fulgora's heavy-oil — they appear as `fluid-chain` stages and
+# `fluid_input` lists `heavy-oil`, not the intermediate fluid.
+python dev/quality_planner.py --item quality-module-2 --rate 1 \
+    --target-quality rare --module-quality rare --quality-module-tier 2 \
+    --location fulgora --assembly-modules
 ```
 
 Reachable items today:

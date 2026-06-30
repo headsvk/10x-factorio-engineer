@@ -69,6 +69,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass, field
@@ -4818,6 +4819,90 @@ def _plan_self_feed_target(
 # Planner
 # ---------------------------------------------------------------------------
 
+def _plan_fluid_chain_via_cli(
+    fluid_demand: dict[str, float],
+    location: str,
+    data: dict,
+    fluids: frozenset[str],
+) -> dict:
+    """Delegate fluid sub-chain production to ``cli.py`` (Fulgora only).
+
+    The quality planner's own recipe selector is not wired for oil/sulfur fluid
+    chains (it picks ``advanced-carbonic-asteroid-crushing`` for ``sulfur`` and
+    dies under ``--no-asteroids``), whereas ``cli.py`` solves them correctly.  So
+    for every demanded fluid we shell out to ``cli.py --item <fluid> --rate <r>
+    --location <location>`` with *every* scrap-reachable solid bussed in
+    (``--bus-item``).  Bussing the solids stops ``cli.py`` from recursing into ore
+    — those intermediates (ice, iron-plate, …) come for free from the scrap
+    cascade's overflow, so they must not grow the scrap input.
+
+    Returns ``{stages, fluid_raws, scrap_draw, unresolved}``:
+      * ``stages`` — one ``role="fluid-chain"`` stage per ``cli`` production step
+        (``recipe``/``machine``/``machine_count``/``rate_per_min``/``fluid_target``).
+      * ``fluid_raws`` — true pumped raws (e.g. ``heavy-oil``) ``cli`` bottoms out
+        at; these replace the demanded fluid in ``fluid_input``.
+      * ``scrap_draw`` — scrap-reachable solids/bus items the sub-chain consumes
+        (credited against scrap-source overflow, NOT added to scrap input).
+      * ``unresolved`` — fluids ``cli`` could not solve (nonzero exit / bad JSON);
+        left as raws so the plan still completes.
+    """
+    cascade = build_scrap_cascade(data)["depth_amounts"]
+    bus_solids = sorted(k for k in cascade if k not in fluids)
+    cli_path = os.path.join(_CLI_DIR, "cli.py")
+    stages: list[dict] = []
+    fluid_raws: dict[str, float] = {}
+    scrap_draw: dict[str, float] = {}
+    unresolved: dict[str, float] = {}
+    for fluid, rate in sorted(fluid_demand.items()):
+        if rate <= 0:
+            continue
+        cmd = [
+            sys.executable, cli_path,
+            "--item", fluid, "--rate", repr(float(rate)),
+            "--location", location,
+        ]
+        for solid in bus_solids:
+            cmd += ["--bus-item", solid]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                unresolved[fluid] = unresolved.get(fluid, 0.0) + float(rate)
+                continue
+            res = json.loads(proc.stdout)
+        except (OSError, ValueError):
+            unresolved[fluid] = unresolved.get(fluid, 0.0) + float(rate)
+            continue
+        for step in res.get("production_steps", []):
+            outputs = step.get("outputs") or {}
+            # cli emits per-item output rates (no single rate_per_min); use the
+            # output matching the recipe key, else the largest output (display
+            # only — totals/power key off machine_count).
+            rate_pm = outputs.get(step.get("recipe"))
+            if rate_pm is None:
+                rate_pm = max(outputs.values(), default=0.0)
+            stages.append({
+                "role": "fluid-chain",
+                "recipe": step.get("recipe"),
+                "machine": step.get("machine"),
+                "machine_count": float(step.get("machine_count", 0.0) or 0.0),
+                "rate_per_min": float(rate_pm or 0.0),
+                "fluid_target": fluid,
+            })
+        for rk, rv in (res.get("raw_resources") or {}).items():
+            if rk in fluids:
+                fluid_raws[rk] = fluid_raws.get(rk, 0.0) + float(rv)
+            else:
+                scrap_draw[rk] = scrap_draw.get(rk, 0.0) + float(rv)
+        for bk, bv in (res.get("bus_inputs") or {}).items():
+            scrap_draw[bk] = scrap_draw.get(bk, 0.0) + float(bv)
+    return {
+        "stages": stages,
+        "fluid_raws": fluid_raws,
+        "scrap_draw": scrap_draw,
+        "unresolved": unresolved,
+    }
+
+
 def plan(
     item_key: str,
     rate: float,
@@ -5681,6 +5766,26 @@ def plan(
                 },
             })
 
+    # ---- Fluid sub-chains (Fulgora) ----
+    # Fulgora has heavy-oil oceans, so fluids consumed by the chain (e.g.
+    # sulfuric-acid for processing-unit) are produced locally, not treated as
+    # external raws.  The planner's own recipe selector isn't wired for oil/
+    # sulfur chains, so delegate to cli.py (see _plan_fluid_chain_via_cli).  Only
+    # Fulgora alters fluid handling; every other location keeps fluids as
+    # quality-transparent raws.
+    fluid_chain_stages: list[dict] = []
+    fluid_chain_scrap_draw: dict[str, float] = {}
+    resolved_fluid_input: dict[str, float] = dict(fluid_raws_demand)
+    if fulgora_mode and fluid_raws_demand:
+        fc = _plan_fluid_chain_via_cli(fluid_raws_demand, "fulgora", data, fluids)
+        fluid_chain_stages = fc["stages"]
+        fluid_chain_scrap_draw = fc["scrap_draw"]
+        # Replace the demanded fluids with cli's true pumped raws (heavy-oil);
+        # carry through anything cli could not resolve so the plan still lists it.
+        resolved_fluid_input = dict(fc["fluid_raws"])
+        for fl, amt in fc["unresolved"].items():
+            resolved_fluid_input[fl] = resolved_fluid_input.get(fl, 0.0) + amt
+
     # Aggregate normal-quality inputs from any self-recycle-target intermediate
     # sub-plans this plan() level's walker DIRECTLY dispatched.  Recursive Path B
     # plan() calls have already aggregated their own inner intermediates into
@@ -5706,6 +5811,7 @@ def plan(
         + sum(s["machine_count"] for s in normal_chain_stages)
         + sum(s["machine_count"] for s in driver_stages)
         + sum(s["machine_count"] for s in scrap_stages)
+        + sum(s["machine_count"] for s in fluid_chain_stages)
     )
 
     # Annotate per-stage power and total (V3 power accounting).
@@ -5713,7 +5819,7 @@ def plan(
     all_stages_for_power = (
         stages + crushing_stages + reprocessing_stages
         + mined_recycle_stages + shuffle_stages + normal_chain_stages
-        + driver_stages + scrap_stages
+        + driver_stages + scrap_stages + fluid_chain_stages
     )
     for st in all_stages_for_power:
         st["power_kw"] = _stage_power_kw(st, machine_power_w)
@@ -5766,6 +5872,17 @@ def plan(
             notes.append(
                 f"stage {st['recipe']} uses fluid-transparent input ({list(st['fluid_inputs'].keys())})"
             )
+    # Fulgora fluid sub-chain: flag where its scrap-derived solid inputs come
+    # from (the scrap-source overflow), so the user doesn't size extra scrap.
+    if fluid_chain_scrap_draw:
+        draws = ", ".join(
+            f"{amt:.2f} {_humanize(it)}/min"
+            for it, amt in sorted(fluid_chain_scrap_draw.items(), key=lambda x: -x[1])
+        )
+        notes.append(
+            f"fluid sub-chain draws {draws} of scrap-derived solids — credited "
+            f"against scrap-source overflow, not added to scrap input"
+        )
     # Agricultural-tower constraint: yumako / jellynut are harvested only by
     # agricultural towers, which have 0 module slots — harvest output is
     # always normal-quality.  When the chain demands them legendary, the
@@ -5807,7 +5924,8 @@ def plan(
         "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
         "asteroid_input": asteroid_input,
         "mined_input": mined_input,
-        "fluid_input": fluid_raws_demand,
+        "fluid_input": resolved_fluid_input,
+        "fluid_chain_scrap_draw": fluid_chain_scrap_draw,
         "normal_solid_input": normal_solid_input,
         "normal_fluid_input": normal_fluid_input,
         "shuffle_byproduct_legendary": shuffle_byproduct_legendary,
@@ -5821,6 +5939,7 @@ def plan(
         "scrap_overflow": scrap_overflow,
         "stages": (
             scrap_stages
+            + fluid_chain_stages
             + reprocessing_stages
             + crushing_stages
             + mined_recycle_stages
@@ -6137,6 +6256,13 @@ def format_human(out: dict) -> str:
                 f"{st['co_product_per_min']:.2f} {tier} {_humanize(st['target'])}/min "
                 f"({st['machine_count']:.2f} × {_humanize(st['machine'])}, "
                 f"overflow [{ofs}])"
+            )
+        elif role == "fluid-chain":
+            L.append(
+                f"  [fluid-chain]  {st['recipe']}: "
+                f"{st['rate_per_min']:.2f}/min "
+                f"({st['machine_count']:.2f} × {_humanize(st['machine'])} "
+                f"-> {_humanize(st['fluid_target'])})"
             )
         else:
             fluids = f", fluids=[{','.join(st['fluid_inputs'])}]" if st.get("fluid_inputs") else ""

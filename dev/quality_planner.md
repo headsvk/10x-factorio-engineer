@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-06-29. Tests: `python -m unittest dev.test_quality_planner -v` — **322 tests, all passing, ~2.0 s.**
+**Last updated:** 2026-06-30. Tests: `python -m unittest dev.test_quality_planner -v` — **328 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -27,6 +27,7 @@ Currently shipped:
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
 - **Fulgora build location (`--location fulgora`, 2026-06-29)** — scrap-only sourcing. There is no asteroid platform on Fulgora, so `_pick_recipe_fluid_preferred` drops ore (`RAW_TO_CHUNK`) and `molten-*` routes (`forbid_ore_routes`), forcing metals to terminate at their scrap-reachable plate form (e.g. `copper-cable` from the scrap-sourced `copper-plate` instead of `casting-copper-cable`). The asteroid-reprocessing / crushing path is gated off and base materials come from the existing scrap-recycling quality source. Only `fulgora` alters sourcing; other `--location` values just unlock that planet.
+- **Fulgora fluid sub-chains (2026-06-30)** — fluids consumed by a Fulgora chain (e.g. `sulfuric-acid` for `processing-unit`) are produced locally from Fulgora's heavy-oil oceans rather than listed as external raws. The planner's own recipe selector isn't wired for oil/sulfur chains (it picks `advanced-carbonic-asteroid-crushing` for `sulfur` and dies under `--no-asteroids`), so `_plan_fluid_chain_via_cli` **delegates** each fluid to `cli.py` (subprocess, `--item <fluid> --rate <r> --location fulgora` with every scrap-reachable solid bussed in via `--bus-item` so `cli` never recurses into ore). Each `cli` production step becomes a `fluid-chain` stage (`chemical-plant`, tagged with `fluid_target`); `fluid_input` then lists the true pumped raw (`heavy-oil`) instead of the intermediate fluid. Scrap-derived solids the sub-chain consumes (ice, iron-plate) surface as `fluid_chain_scrap_draw` and are credited against scrap-source overflow — they do **not** grow the scrap input. Fluid-chain machines + power fold into `total_machine_count` / `total_power_mw` / `summary.by_role`. Fulgora-only: every other location keeps fluids as quality-transparent raws. On `cli` failure (nonzero exit / bad JSON) the fluid falls back to being listed as a raw.
 - **Inherent prod in demand propagation (2026-06-29)** — `walk_recipe_tree` Pass 1 now applies the machine's inherent prod (foundry/EM-plant/biochamber +50%) when propagating ingredient/raw demand, matching Pass 2's machine-count math. Previously inherent prod was dropped in Pass 1 unless `--assembly-modules` was set, inflating every upstream demand (and machine count) by the compounding inherent factor across the chain (e.g. Fulgora quality-module scrap input and processing-unit sulfuric-acid both read ~1.5–3× too high). The self-feed LP (`solve_self_feed_target_loop`) likewise now applies the module **speed** penalty per config (crafter prod+quality slots, recycler quality slots).
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
 - **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`. Quality-module *tier* is not gated by `--tech` — `--quality-module-tier` is self-declaring (you'd only request a tier you have).
@@ -526,7 +527,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **315 tests**, 43 classes.
+`dev/test_quality_planner.py` — **328 tests**, 44 classes.
 
 | Class | Coverage |
 |---|---|
@@ -552,6 +553,7 @@ MACHINE_INHERENT_PROD = {
 | `TestStagePower` | Every stage has `power_kw`; compound stages split correctly; biochamber reports 0 (burner) |
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` to assembly + crusher + recycler; legendary cuts machine count by 1/2.5 |
 | `TestNoAsteroids` | `--no-asteroids` routes via `MINED_RAW_NO_ASTEROID_FALLBACK`; fail-fast names the missing planet |
+| `TestLocationFulgora` | `--location fulgora` scrap-only sourcing: zero `asteroid_input`, metals from scrap, `forbid_ore_routes` picks plain `copper-cable`, auto-unlocks EM-plant + recycler, unsourceable solid fail-fast. **Fluid sub-chains:** qm2 plan emits a `fluid-chain` stage producing `sulfuric-acid` on `chemical-plant` (tagged `fluid_target`); `fluid_input` holds `heavy-oil` not `sulfuric-acid`; `fluid_chain_scrap_draw` (ice/iron-plate) is scrap-reachable and credited against overflow; fluid-chain machines fold into `total_machine_count` + `summary.by_role`; off-Fulgora `processing-unit` keeps `sulfuric-acid` as a raw with no fluid-chain stage. |
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
 | `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, partial-lock baseline parity, `_parse_tech_state` validation (machine techs only), `tech_state` is a required kwarg |
