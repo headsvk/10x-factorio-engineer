@@ -4,6 +4,7 @@
         "allowed_effects": [ "consumption", "speed", "pollution" ],
         "distribution_effectivity": [ 1.5 ],
         "energy_usage": [ 480000.0 ],
+        "module_slots": 2,
         "profile": [ 1, 0.7071, 0.5773, 0.5, 0.4472, 0.4082, 0.3779, 0.3535, 0.3333, 0.3162, 0.3015, 0.2886, 0.2773, 0.2672, 0.2581, 0.25, 0.2425, 0.2357, 0.2294, 0.2236, 0.2182, 0.2132, 0.2085, 0.2041, 0.2, 0.1961, 0.1924, 0.1889, 0.1856, 0.1825, 0.1796, 0.1767, 0.174, 0.1714, 0.169, 0.1666, 0.1643, 0.1622, 0.1601, 0.1581, 0.1561, 0.1543, 0.1524, 0.1507, 0.149, 0.1474, 0.1458, 0.1443, 0.1428, 0.1414, 0.14, 0.1386, 0.1373, 0.136, 0.1348, 0.1336, 0.1324, 0.1313, 0.1301, 0.129, 0.128, 0.127, 0.1259, 0.125, 0.124, 0.123, 0.1221, 0.1212, 0.1203, 0.1195, 0.1186, 0.1178, 0.117, 0.1162, 0.1154, 0.1147, 0.1139, 0.1132, 0.1125, 0.1118, 0.1111, 0.1104, 0.1097, 0.1091, 0.1084, 0.1078, 0.1072, 0.1066, 0.1059, 0.1054, 0.1048, 0.1042, 0.1036, 0.1031, 0.1025, 0.102, 0.1015, 0.101, 0.1005, 0.1 ]
     },
     "belts": [ {
@@ -83,7 +84,8 @@
             "en": "Assembling machine 1"
         },
         "module_slots": 0,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 3
     }, {
         "allowed_effects": [ "consumption", "speed", "productivity", "pollution", "quality" ],
         "crafting_categories": [ "crafting", "advanced-crafting", "crafting-with-fluid" ],
@@ -102,7 +104,8 @@
             "en": "Assembling machine 2"
         },
         "module_slots": 2,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 3
     }, {
         "allowed_effects": [ "consumption", "speed", "productivity", "pollution", "quality" ],
         "crafting_categories": [ "crafting", "advanced-crafting", "crafting-with-fluid" ],
@@ -121,7 +124,8 @@
             "en": "Assembling machine 3"
         },
         "module_slots": 4,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 3
     }, {
         "allowed_effects": [ "consumption", "speed", "productivity", "pollution", "quality" ],
         "crafting_categories": [ "centrifuging" ],
@@ -140,7 +144,8 @@
             "en": "Centrifuge"
         },
         "module_slots": 2,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 3
     }, {
         "allowed_effects": [ "consumption", "speed", "productivity", "pollution", "quality" ],
         "crafting_categories": [ "chemistry" ],
@@ -159,7 +164,8 @@
             "en": "Chemical plant"
         },
         "module_slots": 3,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 3
     }, {
         "allowed_effects": [ "consumption", "speed", "productivity", "pollution" ],
         "crafting_categories": [ "oil-processing" ],
@@ -178,7 +184,8 @@
             "en": "Oil refinery"
         },
         "module_slots": 3,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 5
     }, {
         "allowed_effects": [ "consumption", "speed", "productivity", "pollution", "quality" ],
         "crafting_categories": [ "smelting" ],
@@ -197,7 +204,8 @@
             "en": "Electric furnace"
         },
         "module_slots": 2,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 3
     }, {
         "allowed_effects": [ "speed", "consumption", "pollution" ],
         "crafting_categories": [ "smelting" ],
@@ -217,7 +225,8 @@
             "en": "Steel furnace"
         },
         "module_slots": 0,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 2
     }, {
         "allowed_effects": [ "speed", "consumption", "pollution" ],
         "crafting_categories": [ "smelting" ],
@@ -237,7 +246,8 @@
             "en": "Stone furnace"
         },
         "module_slots": 0,
-        "prod_bonus": 0
+        "prod_bonus": 0,
+        "tile_size": 2
     } ],
     "fluids": [ {
         "default_temperature": 25,
@@ -3619,7 +3629,8 @@
         "mining_speed": [ 0.25 ],
         "module_slots": 0,
         "resource_categories": [ "basic-solid" ],
-        "takes_fluid": false
+        "takes_fluid": false,
+        "tile_size": 2
     }, {
         "energy_source": {
             "emissions_per_minute": {
@@ -3637,7 +3648,8 @@
         "mining_speed": [ 0.5 ],
         "module_slots": 3,
         "resource_categories": [ "basic-solid" ],
-        "takes_fluid": true
+        "takes_fluid": true,
+        "tile_size": 3
     }, {
         "energy_source": {
             "emissions_per_minute": {
@@ -3655,7 +3667,8 @@
         "mining_speed": [ 1.0 ],
         "module_slots": 2,
         "resource_categories": [ "basic-fluid" ],
-        "takes_fluid": false
+        "takes_fluid": false,
+        "tile_size": 3
     } ],
     "modules": [ {
         "category": "efficiency",
@@ -3760,6 +3773,7 @@
             "en": "Normal"
         }
     } ],
+    "quality_tier_skip_distribution": [ 0.9, 0.09, 0.009, 0.001 ],
     "recipes": [ {
         "allowed_effects": [ "consumption", "speed", "pollution", "quality" ],
         "categories": [ "crafting" ],
@@ -8638,7 +8652,8 @@
         "localized_name": {
             "en": "Rocket silo"
         },
-        "module_slots": 4
+        "module_slots": 4,
+        "tile_size": 9
     } ],
     "spoilage": [],
     "sprites": {
