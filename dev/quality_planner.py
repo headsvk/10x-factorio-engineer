@@ -58,6 +58,7 @@ Usage
         [--enable-shuffle NAME ...] [--enable-shuffles all]
         [--enable-driver RECIPE_KEY ...] [--enable-drivers all]
         [--no-asteroids]
+        [--miner electric|big]                             # drill fleet for solid raws (default electric)
         [--format json|human]
 
 Stdlib only.  Shares the Space Age dataset with cli.py.
@@ -73,6 +74,7 @@ import subprocess
 import sys
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass, field
+from fractions import Fraction
 
 # Import from cli.py (sibling directory)
 _CLI_DIR = os.path.join(
@@ -2508,8 +2510,21 @@ def _hot_spot_suggestions(
     lds_active = (
         "all" in active_shuffles or "low-density-structure" in active_shuffles
     )
+    # The advisor reasons about PRODUCTION hot spots; the `mining` role is a
+    # separate axis (its own lever — mining-prod research / --enable-shuffle to
+    # cut raw demand — is C5 work).  Measure each role's share against the
+    # production (non-mining) total so adding miner counting in C1 doesn't dilute
+    # the existing suggestions below their threshold.
+    prod_total = sum(
+        float(b.get("machines", 0.0)) for r, b in by_role.items() if r != "mining"
+    )
     for role, bucket in by_role.items():
-        pct = float(bucket.get("machines_pct", 0.0))
+        if role == "mining":
+            continue
+        pct = (
+            float(bucket.get("machines", 0.0)) / prod_total * 100.0
+            if prod_total > 0 else 0.0
+        )
         if pct < threshold_pct:
             continue
         if role == "asteroid-reprocessing":
@@ -4923,6 +4938,7 @@ def plan(
     forbid_ore_routes: bool = False,
     tech_state: dict[str, int],
     target_tier: int = 4,
+    miner_type: str = "electric",
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -5801,6 +5817,44 @@ def plan(
             for r, amt in sub.get("normal_fluid_input", {}).items():
                 normal_fluid_input[r] = normal_fluid_input.get(r, 0.0) + float(amt)
 
+    machine_power_w = cli.build_machine_power_w(data)
+
+    # ---- Miner counting (C1) ----
+    # Size the drill fleet for the solid raws the plan consumes (scrap + planet-
+    # mined ores) via cli.compute_miners, so the mining footprint isn't invisible.
+    # Mining-productivity research (carried in research_levels, +10%/level,
+    # uncapped) reduces the count.  Drills render as `mining` stages in
+    # out["stages"] (Option A) so they fold into the totals and `by_role` like any
+    # other stage.  Asteroid chunks are caught in space, not mined; fluids report
+    # a yield% via cli (no drill count) — both are excluded here.
+    miner_stages: list[dict] = []
+    solid_raw_rates: dict[str, Fraction] = {}
+    for src in (scrap_input, mined_input):
+        for it, amt in src.items():
+            if amt and amt > 0:
+                solid_raw_rates[it] = (
+                    solid_raw_rates.get(it, Fraction(0)) + Fraction(str(amt))
+                )
+    if solid_raw_rates:
+        miners = cli.compute_miners(
+            solid_raw_rates,
+            cli.build_resource_info(data),
+            miner_type,
+            machine_power_w=machine_power_w,
+            mining_productivity_level=research_levels.get("mining-productivity", 0),
+        )
+        for it, entry in sorted(miners.items()):
+            if "machine_count" not in entry:
+                continue  # fluids report required_yield_pct, not a drill count
+            miner_stages.append({
+                "role": "mining",
+                "item": it,
+                "recipe": f"mine-{it}",
+                "machine": entry["machine"],
+                "machine_count": float(entry["machine_count"]),
+                "rate_per_min": float(entry.get("rate_per_min", 0.0)),
+            })
+
     # Total machine count
     total_machines = (
         sum(s["machine_count"] for s in stages)
@@ -5812,14 +5866,14 @@ def plan(
         + sum(s["machine_count"] for s in driver_stages)
         + sum(s["machine_count"] for s in scrap_stages)
         + sum(s["machine_count"] for s in fluid_chain_stages)
+        + sum(s["machine_count"] for s in miner_stages)
     )
 
     # Annotate per-stage power and total (V3 power accounting).
-    machine_power_w = cli.build_machine_power_w(data)
     all_stages_for_power = (
         stages + crushing_stages + reprocessing_stages
         + mined_recycle_stages + shuffle_stages + normal_chain_stages
-        + driver_stages + scrap_stages + fluid_chain_stages
+        + driver_stages + scrap_stages + fluid_chain_stages + miner_stages
     )
     for st in all_stages_for_power:
         st["power_kw"] = _stage_power_kw(st, machine_power_w)
@@ -5938,7 +5992,8 @@ def plan(
         "scrap_input": scrap_input,
         "scrap_overflow": scrap_overflow,
         "stages": (
-            scrap_stages
+            miner_stages
+            + scrap_stages
             + fluid_chain_stages
             + reprocessing_stages
             + crushing_stages
@@ -5991,6 +6046,7 @@ def plan(
             no_asteroids=no_asteroids,
             forbid_ore_routes=forbid_ore_routes,
             tech_state=tech_state,
+            miner_type=miner_type,
         )
         if baseline["total_machine_count"] < total_machines:
             baseline.setdefault("notes", []).append(
@@ -6020,6 +6076,7 @@ def plan(
             no_asteroids=no_asteroids,
             forbid_ore_routes=forbid_ore_routes,
             tech_state=tech_state,
+            miner_type=miner_type,
         )
         if baseline["total_machine_count"] < total_machines:
             baseline.setdefault("notes", []).append(
@@ -6263,6 +6320,12 @@ def format_human(out: dict) -> str:
                 f"{st['rate_per_min']:.2f}/min "
                 f"({st['machine_count']:.2f} × {_humanize(st['machine'])} "
                 f"-> {_humanize(st['fluid_target'])})"
+            )
+        elif role == "mining":
+            L.append(
+                f"  [mining]       {_humanize(st['item'])}: "
+                f"{st['rate_per_min']:.2f}/min "
+                f"({st['machine_count']:.2f} × {_humanize(st['machine'])})"
             )
         else:
             fluids = f", fluids=[{','.join(st['fluid_inputs'])}]" if st.get("fluid_inputs") else ""
@@ -6515,6 +6578,17 @@ def parse_args() -> argparse.Namespace:
             "tech with LEVEL=1."
         ),
     )
+    p.add_argument(
+        "--miner", default="electric", choices=["electric", "big"],
+        help=(
+            "Mining drill used to size the solid-raw fleet (scrap, mined ores). "
+            "Mirrors cli.py: 'electric' = electric-mining-drill, 'big' = "
+            "big-mining-drill (5x speed, needed for hard-solid like tungsten). "
+            "Counts + power fold into the totals as a 'mining' stage role. "
+            "Mining-productivity research (--research mining-productivity=N) "
+            "reduces the count."
+        ),
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
 
@@ -6580,6 +6654,7 @@ def main() -> None:
             location=args.location,
             tech_state=tech_state,
             target_tier=target_tier,
+            miner_type=args.miner,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)

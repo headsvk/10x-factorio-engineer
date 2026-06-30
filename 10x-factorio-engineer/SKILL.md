@@ -1007,8 +1007,15 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--enable-driver RECIPE_KEY ...]                       # harvest a recipe's co-product to cover a leaf raw
     [--enable-drivers all]                                 # try every co-product driver (cost-gated)
     [--no-asteroids]                                       # no space platform yet
+    [--miner electric|big]                                 # drill fleet for solid raws (default electric)
     [--format json|human]                                  # default: human
 ```
+
+`--miner` sizes the mining-drill fleet for the plan's solid raws (scrap +
+planet-mined ores) and folds the counts + power into the totals as a `mining`
+stage role; pass `--research mining-productivity=N` to reduce it. (Asteroid
+chunks are caught in space and fluids report a pump yield%, so neither gets
+drills.)
 
 **Tech state is required.** Without `--tech` flags the planner fails-fast on
 the recycler check.  Ask the player which tech they have, then list the

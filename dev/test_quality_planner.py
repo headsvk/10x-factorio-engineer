@@ -1353,7 +1353,14 @@ class TestMachineQuality(unittest.TestCase):
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # +150% speed → 1/2.5 = 40% machines; allow some slack for rounding.
-        ratio = out_legend["total_machine_count"] / out_normal["total_machine_count"]
+        # Compare PRODUCTION machines only: --machine-quality speeds up crafting
+        # machines, but miners (the `mining` role) don't get the quality speed
+        # bonus until C2, so including them would mask the crafting reduction.
+        def _prod_machines(out):
+            return sum(
+                s["machine_count"] for s in out["stages"] if s.get("role") != "mining"
+            )
+        ratio = _prod_machines(out_legend) / _prod_machines(out_normal)
         self.assertLess(ratio, 0.5)
         self.assertGreater(ratio, 0.3)
 
@@ -1434,6 +1441,97 @@ class TestMachineQuality(unittest.TestCase):
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertGreater(out["total_machine_count"], 0)
+
+
+class TestPlannerMiners(unittest.TestCase):
+    """C1: the planner sizes a drill fleet for its solid raws (scrap + planet-
+    mined ores) via cli.compute_miners and folds the counts/power into the totals
+    as a `mining` stage role.  --miner electric|big mirrors cli.py; mining-prod
+    research reduces the count.  Asteroid chunks (caught in space) and fluids
+    (yield%, no count) get no drills."""
+
+    RARE = qp.QUALITY_INDEX["rare"]
+
+    def _fulgora_qm2(self, **kw):
+        return qp.plan(
+            "quality-module-2", 1, _data(),
+            target_tier=self.RARE, module_quality="rare", quality_module_tier=2,
+            location="fulgora", assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED, **kw,
+        )
+
+    def test_scrap_emits_mining_stage(self):
+        out = self._fulgora_qm2(miner_type="big")
+        mining = [s for s in out["stages"] if s["role"] == "mining"]
+        self.assertEqual(len(mining), 1)
+        st = mining[0]
+        self.assertEqual(st["item"], "scrap")
+        self.assertEqual(st["machine"], "big-mining-drill")
+        self.assertGreater(st["machine_count"], 0)
+        self.assertGreater(st["rate_per_min"], 0)
+
+    def test_big_vs_electric_speed_ratio(self):
+        big = self._fulgora_qm2(miner_type="big")
+        ele = self._fulgora_qm2(miner_type="electric")
+        bc = next(s for s in big["stages"] if s["role"] == "mining")["machine_count"]
+        ec = next(s for s in ele["stages"] if s["role"] == "mining")["machine_count"]
+        self.assertEqual(
+            next(s for s in ele["stages"] if s["role"] == "mining")["machine"],
+            "electric-mining-drill",
+        )
+        # big drill base speed 2.5 vs electric 0.5 = 5x -> 1/5 the count.
+        self.assertAlmostEqual(bc / ec, 0.2, delta=1e-3)
+
+    def test_mining_prod_reduces_count(self):
+        base = self._fulgora_qm2(miner_type="big")
+        prod = self._fulgora_qm2(miner_type="big",
+                                 research_levels={"mining-productivity": 20})
+        bc = next(s for s in base["stages"] if s["role"] == "mining")["machine_count"]
+        pc = next(s for s in prod["stages"] if s["role"] == "mining")["machine_count"]
+        # +200% prod at L20 -> count divided by 3.
+        self.assertAlmostEqual(pc, bc / 3.0, delta=1e-2)
+
+    def test_miners_fold_into_totals(self):
+        out = self._fulgora_qm2(miner_type="big")
+        mining = [s for s in out["stages"] if s["role"] == "mining"]
+        mc = sum(s["machine_count"] for s in mining)
+        self.assertGreater(mc, 0)
+        # Total == sum over all stages (Option A invariant: miners are stages).
+        all_mc = sum(s.get("machine_count", 0.0) for s in out["stages"])
+        self.assertAlmostEqual(out["total_machine_count"], all_mc, places=6)
+        # by_role carries a `mining` bucket with power.
+        self.assertIn("mining", out["summary"]["by_role"])
+        self.assertGreater(out["summary"]["by_role"]["mining"]["power_kw"], 0)
+        self.assertGreater(out["total_power_mw"], 0)
+
+    def test_human_format_renders_mining(self):
+        text = qp.format_human(self._fulgora_qm2(miner_type="big"))
+        self.assertIn("[mining]", text)
+        self.assertIn("Scrap", text)
+
+    def test_mined_raw_counts_miners(self):
+        # Non-Fulgora: a mined raw through the main plan body (iron-ore via
+        # --no-asteroids self-recycle) also gets a drill stage.  recycling=1 only
+        # keeps the foundry locked, so iron-plate stays on the electric-furnace
+        # iron-ore route (no calcite/casting that would need an asteroid).
+        out = qp.plan(
+            "iron-plate", 60, _data(),
+            no_asteroids=True, planets=["nauvis"], miner_type="big",
+            tech_state={"recycling": 1},
+        )
+        mining = [s for s in out["stages"] if s["role"] == "mining"]
+        self.assertTrue(any(s["item"] == "iron-ore" for s in mining))
+
+    def test_asteroid_only_has_no_miners(self):
+        # Asteroid chunks are caught in space, not mined -> no mining stage.
+        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        self.assertEqual([s for s in out["stages"] if s["role"] == "mining"], [])
+
+    def test_default_miner_is_electric(self):
+        # plan() default miner_type is electric (matches cli.py default).
+        out = self._fulgora_qm2()
+        st = next(s for s in out["stages"] if s["role"] == "mining")
+        self.assertEqual(st["machine"], "electric-mining-drill")
 
 
 class TestNoAsteroids(unittest.TestCase):

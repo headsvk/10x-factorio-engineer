@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-06-30. Tests: `python -m unittest dev.test_quality_planner -v` — **328 tests, all passing, ~2.0 s.**
+**Last updated:** 2026-06-30. Tests: `python -m unittest dev.test_quality_planner -v` — **336 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -27,6 +27,7 @@ Currently shipped:
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
 - **Fulgora build location (`--location fulgora`, 2026-06-29)** — scrap-only sourcing. There is no asteroid platform on Fulgora, so `_pick_recipe_fluid_preferred` drops ore (`RAW_TO_CHUNK`) and `molten-*` routes (`forbid_ore_routes`), forcing metals to terminate at their scrap-reachable plate form (e.g. `copper-cable` from the scrap-sourced `copper-plate` instead of `casting-copper-cable`). The asteroid-reprocessing / crushing path is gated off and base materials come from the existing scrap-recycling quality source. Only `fulgora` alters sourcing; other `--location` values just unlock that planet.
+- **Miner counting (2026-06-30, C1)** — the planner now sizes a mining-drill fleet for its solid raws (scrap + planet-mined ores) via `cli.compute_miners` and folds the counts + power into `total_machine_count` / `total_power_mw` / `summary.by_role` as a `mining` stage role (rendered as `[mining]` lines in Production Stages). `--miner electric|big` mirrors `cli.py`; mining-productivity research (`--research mining-productivity=N`, +10%/level uncapped) reduces the count. Asteroid chunks are caught in space (no drills); fluids report a yield% via `cli` (no drill count) — both excluded. The hot-spot advisor measures its thresholds against *production* (non-mining) machines so the addition doesn't dilute its existing suggestions. **Limitation:** only the main `plan()` body counts miners — the `_plan_self_recycle_target` / `_plan_self_feed_target` / `choose_path_self_recycle` early-return paths do not yet (e.g. a bare `tungsten-carbide` target shows no miners). Part of the Fulgora-realism plan (`dev/fulgora-realism-plan.md`).
 - **Fulgora fluid sub-chains (2026-06-30)** — fluids consumed by a Fulgora chain (e.g. `sulfuric-acid` for `processing-unit`) are produced locally from Fulgora's heavy-oil oceans rather than listed as external raws. The planner's own recipe selector isn't wired for oil/sulfur chains (it picks `advanced-carbonic-asteroid-crushing` for `sulfur` and dies under `--no-asteroids`), so `_plan_fluid_chain_via_cli` **delegates** each fluid to `cli.py` (subprocess, `--item <fluid> --rate <r> --location fulgora` with every scrap-reachable solid bussed in via `--bus-item` so `cli` never recurses into ore). Each `cli` production step becomes a `fluid-chain` stage (`chemical-plant`, tagged with `fluid_target`); `fluid_input` then lists the true pumped raw (`heavy-oil`) instead of the intermediate fluid. Scrap-derived solids the sub-chain consumes (ice, iron-plate) surface as `fluid_chain_scrap_draw` and are credited against scrap-source overflow — they do **not** grow the scrap input. Fluid-chain machines + power fold into `total_machine_count` / `total_power_mw` / `summary.by_role`. Fulgora-only: every other location keeps fluids as quality-transparent raws. On `cli` failure (nonzero exit / bad JSON) the fluid falls back to being listed as a raw.
 - **Inherent prod in demand propagation (2026-06-29)** — `walk_recipe_tree` Pass 1 now applies the machine's inherent prod (foundry/EM-plant/biochamber +50%) when propagating ingredient/raw demand, matching Pass 2's machine-count math. Previously inherent prod was dropped in Pass 1 unless `--assembly-modules` was set, inflating every upstream demand (and machine count) by the compounding inherent factor across the chain (e.g. Fulgora quality-module scrap input and processing-unit sulfuric-acid both read ~1.5–3× too high). The self-feed LP (`solve_self_feed_target_loop`) likewise now applies the module **speed** penalty per config (crafter prod+quality slots, recycler quality slots).
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
@@ -130,6 +131,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--enable-driver RECIPE` | none | Repeatable. Activate a co-product driver by recipe key (e.g. `molten-iron-from-lava` to harvest stone for `stone-wall @ vulcanus`). Driver primary becomes overflow. See `enumerate_co_product_drivers` for the candidate list. |
 | `--enable-drivers all` | off | Try every driver candidate, picking the highest-yield driver per mined-recycle leaf. Cost-gated against the no-driver baseline. Mutually exclusive with `--enable-driver`. |
 | `--no-asteroids` | off | Skip asteroid path; route iron-ore/copper-ore/ice/calcite via planet self-recycle |
+| `--miner {electric,big}` | `electric` | Mining drill used to size the solid-raw fleet (scrap + planet-mined ores). Mirrors `cli.py`. Counts + power fold into the totals as a `mining` stage role; `--research mining-productivity=N` reduces them. Asteroid chunks (caught in space) and fluids (yield%, no count) get no drills |
 | `--tech NAME=LEVEL` | empty | Repeatable. Tech research state (machine/building unlocks only). **Without any `--tech` flag, NOTHING is researched and the plan fails-fast on the recycler check.** Valid names: `recycling`, `tungsten-carbide`, `electromagnetic-plant`, `cryogenic-plant`, `biochamber`. To replicate the fully-researched baseline list every tech with `=1`. |
 | `--format {human,json}` | `human` | Output format |
 
@@ -201,6 +203,8 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `cross-item-shuffle` | plan() | foundry+recycler | LDS cast + recycle. Splits machine count between `foundry_machines` and `recycler_machines`. Has `byproduct_legendary`, `byproduct_credited`, `byproduct_overflow`, `fluid_demand` |
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
 | `co-product-driver` | plan() | per recipe | Driven activation: recipe runs purely for its non-primary solid output (e.g. `molten-iron-from-lava` for stone). Has `target`, `co_product_per_min`, `crafts_per_min`, `inputs`, `overflow_outputs` |
+| `fluid-chain` | plan() (Fulgora) | chemical-plant | One `cli.py` production step of a delegated Fulgora fluid sub-chain (e.g. sulfuric-acid for processing-unit). Has `recipe`, `rate_per_min`, `fluid_target` |
+| `mining` | plan() | electric/big-mining-drill | Drill fleet for one solid raw (scrap or a planet-mined ore), sized by `cli.compute_miners`. Has `item`, `recipe` (`mine-<item>`), `rate_per_min`. `--miner` picks the drill; mining-prod research reduces the count. Main `plan()` body only (not the self-recycle/self-feed early-return paths) |
 
 ---
 
@@ -527,7 +531,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **328 tests**, 44 classes.
+`dev/test_quality_planner.py` — **336 tests**, 45 classes.
 
 | Class | Coverage |
 |---|---|
@@ -551,7 +555,8 @@ MACHINE_INHERENT_PROD = {
 | `TestAssemblyModules` | `--assembly-modules` cuts machines >5×; `_assembly_prod_bonus` helper edge cases |
 | `TestGlebaPartial` | Gleba bio-targets (bioflux, plastic-bar→bioplastic, sulfur→biosulfur, lubricant→biolubricant). **Spoilage NOT modelled.** |
 | `TestStagePower` | Every stage has `power_kw`; compound stages split correctly; biochamber reports 0 (burner) |
-| `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` to assembly + crusher + recycler; legendary cuts machine count by 1/2.5 |
+| `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` to assembly + crusher + recycler; legendary cuts machine count by 1/2.5 (production machines only — miners don't get the speed bonus until C2) |
+| `TestPlannerMiners` (C1) | `--miner electric\|big` sizes a drill fleet for solid raws via `cli.compute_miners`: scrap emits a `mining` stage; big vs electric differ 1:5 by base speed; `--research mining-productivity=20` cuts the count to 1/3; miners fold into `total_machine_count`/`total_power_mw`/`summary.by_role` (Option A: `total == sum(stages)`); `format_human` renders `[mining]`; a mined raw on the main body (iron-ore via `--no-asteroids`) counts too; asteroid-only plans get no miners; default miner is electric |
 | `TestNoAsteroids` | `--no-asteroids` routes via `MINED_RAW_NO_ASTEROID_FALLBACK`; fail-fast names the missing planet |
 | `TestLocationFulgora` | `--location fulgora` scrap-only sourcing: zero `asteroid_input`, metals from scrap, `forbid_ore_routes` picks plain `copper-cable`, auto-unlocks EM-plant + recycler, unsourceable solid fail-fast. **Fluid sub-chains:** qm2 plan emits a `fluid-chain` stage producing `sulfuric-acid` on `chemical-plant` (tagged `fluid_target`); `fluid_input` holds `heavy-oil` not `sulfuric-acid`; `fluid_chain_scrap_draw` (ice/iron-plate) is scrap-reachable and credited against overflow; fluid-chain machines fold into `total_machine_count` + `summary.by_role`; off-Fulgora `processing-unit` keeps `sulfuric-acid` as a raw with no fluid-chain stage. |
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
