@@ -2385,7 +2385,7 @@ class TestProbabilisticOutputs(unittest.TestCase):
         self.assertAlmostEqual(float(step["outputs"]["uranium-235"]), 0.007 / 0.993, places=6)
 
     def test_space_platform_crushing_co_products(self):
-        # oxide-asteroid-crushing returns the chunk at 0.3 probability (2.1.8).
+        # oxide-asteroid-crushing returns the chunk at 0.3 probability.
         # Solving for 18 ice/min (5 ice/chunk): 3.6 cycles/min consumed,
         # 1.08/min returned as co-product, 2.52/min net from collectors.
         s = _solver("space-platform")
@@ -2969,7 +2969,7 @@ class TestLocationFilter(unittest.TestCase):
 
         # Raw resources must be only asteroid chunks — no planet imports needed.
         # Values reflect net demand after 30% chunk recycling from basic crushing
-        # (2.1.8 raised the chunk-return probability 0.2 → 0.3, net factor 0.7):
+        # (chunk-return probability 0.3, net factor 0.7):
         #   metallic: iron-plate needs 36 ore/min, ore from 36/20=1.8 cycles×0.7=1.26
         #   carbonic: 18 carbon/min ÷ 10 carbon/chunk × 0.7 = 1.26/min
         #   oxide:    18 ice/min    ÷  5 ice/chunk    × 0.7 = 2.52/min

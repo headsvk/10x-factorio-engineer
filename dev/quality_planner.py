@@ -2318,6 +2318,10 @@ def enumerate_recycle_routes(data: dict) -> dict[str, list[dict]]:
             n_in = float(self_ing.get("amount", 0))
             if n_in <= 0:
                 continue
+            # Prune ridiculously slow/expensive wraps (e.g. speed-module-3, quantum-processor)
+            # that act as traps for the quality planner's heuristic.
+            if float(C.get("energy_required", 0.5)) / n_in > 5.0:
+                continue
             # Normalised co-ingredient amounts (per 1 item-atom in).
             co_solids = [
                 {"name": s["name"], "amount": float(s.get("amount", 0)) / n_in}

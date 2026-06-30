@@ -410,7 +410,7 @@
         },
         "module_slots": 4,
         "prod_bonus": 0,
-        "tile_size": 2
+        "tile_size": 4
     }, {
         "allowed_effects": [ "speed", "consumption", "pollution" ],
         "crafting_categories": [ "smelting" ],
@@ -7119,9 +7119,14 @@
         },
         "order": "a[energy]-c[big-electric-pole]",
         "results": [ {
-            "amount": 1,
-            "name": "big-electric-pole",
-            "probability": 0.25
+            "amount": 2.0,
+            "name": "iron-stick"
+        }, {
+            "amount": 1.25,
+            "name": "steel-plate"
+        }, {
+            "amount": 1.0,
+            "name": "copper-cable"
         } ],
         "subgroup": "energy-pipe-distribution"
     }, {
@@ -8307,9 +8312,14 @@
         },
         "order": "c[cargo-landing-pad]",
         "results": [ {
-            "amount": 1,
-            "name": "cargo-landing-pad",
-            "probability": 0.25
+            "amount": 50.0,
+            "name": "concrete"
+        }, {
+            "amount": 6.25,
+            "name": "steel-plate"
+        }, {
+            "amount": 2.5,
+            "name": "processing-unit"
         } ],
         "subgroup": "space-interactors"
     }, {
@@ -8598,9 +8608,17 @@
         },
         "order": "f[centrifuge]",
         "results": [ {
-            "amount": 1,
-            "name": "centrifuge",
-            "probability": 0.25
+            "amount": 25.0,
+            "name": "concrete"
+        }, {
+            "amount": 12.5,
+            "name": "steel-plate"
+        }, {
+            "amount": 25.0,
+            "name": "advanced-circuit"
+        }, {
+            "amount": 25.0,
+            "name": "iron-gear-wheel"
         } ],
         "subgroup": "production-machine"
     }, {
@@ -10845,9 +10863,11 @@
         },
         "order": "d[loader]-c[express-loader]",
         "results": [ {
-            "amount": 1,
-            "name": "express-loader",
-            "probability": 0.25
+            "amount": 1.25,
+            "name": "express-transport-belt"
+        }, {
+            "amount": 0.25,
+            "name": "fast-loader"
         } ],
         "subgroup": "belt"
     }, {
@@ -11451,9 +11471,11 @@
         },
         "order": "e[flamethrower]",
         "results": [ {
-            "amount": 1,
-            "name": "flamethrower",
-            "probability": 0.25
+            "amount": 1.25,
+            "name": "steel-plate"
+        }, {
+            "amount": 2.5,
+            "name": "iron-gear-wheel"
         } ],
         "subgroup": "gun"
     }, {
@@ -14798,7 +14820,7 @@
     }, {
         "allowed_effects": [ "consumption", "speed", "pollution", "quality" ],
         "categories": [ "recycling" ],
-        "energy_required": 0.03125,
+        "energy_required": 0.125,
         "icon_col": 12,
         "icon_row": 22,
         "ingredients": [ {
@@ -14809,11 +14831,10 @@
         "localized_name": {
             "en": "Nutrients recycling"
         },
-        "order": "c[nutrients]-b[nutrients]",
+        "order": "c[nutrients]-a[spoilage]",
         "results": [ {
-            "amount": 1,
-            "name": "nutrients",
-            "probability": 0.25
+            "amount": 2.5,
+            "name": "spoilage"
         } ],
         "subgroup": "agriculture-processes"
     }, {
@@ -15844,9 +15865,20 @@
         },
         "order": "e[power-armor-mk2]",
         "results": [ {
-            "amount": 1,
-            "name": "power-armor-mk2",
-            "probability": 0.25
+            "amount": 25.0,
+            "name": "efficiency-module"
+        }, {
+            "amount": 25.0,
+            "name": "speed-module"
+        }, {
+            "amount": 15.0,
+            "name": "processing-unit"
+        }, {
+            "amount": 10.0,
+            "name": "electric-engine-unit"
+        }, {
+            "amount": 7.5,
+            "name": "low-density-structure"
         } ],
         "subgroup": "armor"
     }, {
@@ -16590,9 +16622,11 @@
         },
         "order": "d[quality]-a[quality-module-1]",
         "results": [ {
-            "amount": 1,
-            "name": "quality-module",
-            "probability": 0.25
+            "amount": 1.25,
+            "name": "electronic-circuit"
+        }, {
+            "amount": 1.25,
+            "name": "advanced-circuit"
         } ],
         "subgroup": "module"
     }, {
@@ -17260,9 +17294,14 @@
         },
         "order": "b[concrete]-c[refined]",
         "results": [ {
-            "amount": 1,
-            "name": "refined-concrete",
-            "probability": 0.25
+            "amount": 0.5,
+            "name": "concrete"
+        }, {
+            "amount": 0.2,
+            "name": "iron-stick"
+        }, {
+            "amount": 0.025,
+            "name": "steel-plate"
         } ],
         "subgroup": "terrain"
     }, {
@@ -17399,9 +17438,14 @@
         },
         "order": "b[storage]-e[requester-chest]",
         "results": [ {
-            "amount": 1,
-            "name": "requester-chest",
-            "probability": 0.25
+            "amount": 0.25,
+            "name": "steel-chest"
+        }, {
+            "amount": 0.75,
+            "name": "electronic-circuit"
+        }, {
+            "amount": 0.25,
+            "name": "advanced-circuit"
         } ],
         "subgroup": "logistic-network"
     }, {
@@ -18723,9 +18767,17 @@
         },
         "order": "a[speed]-c[speed-module-3]",
         "results": [ {
-            "amount": 1,
-            "name": "speed-module-3",
-            "probability": 0.25
+            "amount": 1.0,
+            "name": "speed-module-2"
+        }, {
+            "amount": 1.25,
+            "name": "advanced-circuit"
+        }, {
+            "amount": 1.25,
+            "name": "processing-unit"
+        }, {
+            "amount": 0.25,
+            "name": "tungsten-carbide"
         } ],
         "subgroup": "module"
     }, {
@@ -19822,9 +19874,11 @@
         },
         "order": "e[railgun-ammo]-a[basic]",
         "results": [ {
-            "amount": 1,
-            "name": "tesla-ammo",
-            "probability": 0.25
+            "amount": 0.25,
+            "name": "supercapacitor"
+        }, {
+            "amount": 0.25,
+            "name": "plastic-bar"
         } ],
         "subgroup": "ammo"
     }, {

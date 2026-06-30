@@ -45,7 +45,7 @@ Solver notes
   the reduced system.
 * Productivity and speed module bonuses are applied uniformly per --prod / --speed.
 
-Dataset files (vanilla-2.1.8.json, space-age-2.1.8.json) are vendored in
+Dataset files (vanilla-2.1.9.json, space-age-2.1.9.json) are vendored in
 ./assets/  and automatically downloaded from KirkMcDonald's calculator GitHub repo
 on first run.
 """
@@ -66,8 +66,8 @@ from fractions import Fraction
 DATA_DIR   = os.path.dirname(os.path.abspath(__file__))
 
 DATA_FILES = {
-    "vanilla":   "vanilla-2.1.8.json",
-    "space-age": "space-age-2.1.8.json",
+    "vanilla":   "vanilla-2.1.9.json",
+    "space-age": "space-age-2.1.9.json",
 }
 
 DATA_URLS = {
