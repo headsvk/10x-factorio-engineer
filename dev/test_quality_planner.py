@@ -1629,6 +1629,24 @@ class TestLocationFulgora(unittest.TestCase):
         self.assertIn("fulgora", out["planets"])
         self.assertEqual(out["asteroid_input"], {})
 
+    def test_fulgora_auto_unlocks_em_plant_and_recycler(self):
+        # Building on Fulgora implies the recycler + electromagnetic plant (the
+        # planet's native machines) even when tech_state omits them.  The plan
+        # must succeed (no recycler fail-fast) AND route electronics recipes to
+        # the EM plant — not fall back to assembling-machine-3, which would lose
+        # the inherent +50% prod and the 5th module slot.
+        out = qp.plan(
+            "quality-module-2", 1, _data(),
+            target_tier=self.RARE, location="fulgora",
+            tech_state={},  # nothing explicitly researched
+        )
+        assembly = {
+            s["recipe"]: s["machine"] for s in out["stages"] if s["role"] == "assembly"
+        }
+        self.assertIn("quality-module-2", assembly)
+        for recipe, machine in assembly.items():
+            self.assertEqual(machine, "electromagnetic-plant", recipe)
+
     def test_unsourceable_solid_errors(self):
         # A target needing a non-scrap-reachable solid (tungsten-ore) on Fulgora
         # fails fast pointing at the planet that would supply it.

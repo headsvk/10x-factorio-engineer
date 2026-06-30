@@ -4872,6 +4872,16 @@ def plan(
     # On Fulgora the asteroid reprocessing / crushing path is physically
     # unavailable, so reuse the no-asteroid gating for those stage blocks.
     no_asteroids = no_asteroids or fulgora_mode
+    # Fulgora ships with the recycler and electromagnetic plant unlocked — they
+    # are the planet's native machines and you cannot do any scrap-recycling
+    # quality work without them.  Treat those techs as researched when building
+    # on Fulgora (matching cli.py, which assumes the EM plant there).  Without
+    # this the planner silently falls back to assembling-machine-3 for the
+    # electronics recipes, losing the EM plant's inherent +50% prod and its 5th
+    # module slot — and forcing the recycler fail-fast below to reject Fulgora
+    # plans that omitted --tech recycling=1.
+    if fulgora_mode:
+        tech_state = {**tech_state, "recycling": 1, "electromagnetic-plant": 1}
     # Module/machine quality default to the target tier and may not exceed it:
     # you can't have modules or machines of a quality you haven't researched
     # (and if you've researched epic/legendary you'd be targeting it, not rare).
