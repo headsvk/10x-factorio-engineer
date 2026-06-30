@@ -6520,6 +6520,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Output uses Unicode glyphs (×, —, →, ≈, …). On Windows the console / a
+    # redirected pipe defaults to cp1252, which renders these as � (em dash,
+    # multiply) or hard-crashes with UnicodeEncodeError (arrow → is not cp1252-
+    # encodable). Force UTF-8 on our streams so output is identical on Windows
+    # and Linux. No-op on Linux (already UTF-8); done in main() — not at import —
+    # so importing this module as a library never mutates a caller's streams.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     args = parse_args()
     data = cli.load_data("nauvis")
     research = _parse_research(args.research)

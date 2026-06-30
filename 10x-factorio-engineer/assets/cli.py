@@ -3435,6 +3435,18 @@ Examples:
 
 
 def main() -> None:
+    # Output / error messages use Unicode glyphs (×, —, →, ≤, ≥). On Windows the
+    # console / a redirected pipe defaults to cp1252, which renders some as � and
+    # hard-crashes on others (→ is not cp1252-encodable). Force UTF-8 on our
+    # streams so output is identical on Windows and Linux. No-op on Linux
+    # (already UTF-8); done in main() — not at import — so importing this module
+    # as a library (quality_planner.py does) never mutates a caller's streams.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     args  = parse_args()
 
     # Parse --recipe ITEM=RECIPE
