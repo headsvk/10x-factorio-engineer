@@ -29,9 +29,9 @@ dev/
   sample/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
-  test_cli.py               # unittest suite (272 tests, stdlib only)
+  test_cli.py               # unittest suite (275 tests, stdlib only)
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
-  test_quality_planner.py   # unittest suite (315 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (322 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs

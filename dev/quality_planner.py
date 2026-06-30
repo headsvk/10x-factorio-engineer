@@ -29,6 +29,12 @@ V2 additions:
     source for plastic-bar when it beats the direct self-recycle loop.
   * Planet-local quality sources: Fulgora scrap-recycling (holmium-ore
     + all the recyclables) and Vulcanus tungsten-carbide self-recycle.
+  * ``--location`` build axis (mirrors cli.py).  ``--location fulgora``
+    unlocks Fulgora AND switches to scrap-only sourcing: there is no
+    asteroid platform, so base materials come from the scrap-recycling
+    quality source and metals terminate at their scrap-reachable plate
+    form (no casting/molten-ore routes).  Only ``fulgora`` alters
+    sourcing today; other locations merely unlock that planet.
 
 Still fails fast on unsupported chains, but with specific hints about
 which ``--planets`` flag would unblock them.
@@ -39,6 +45,7 @@ Usage
         --tech NAME=LEVEL ...                              # REQUIRED (e.g. recycling=1)
         [--target-quality uncommon|rare|epic|legendary]    # default: legendary (goal tier)
         [--planets nauvis,vulcanus,fulgora,gleba,aquilo]
+        [--location nauvis|vulcanus|fulgora|gleba|aquilo]   # build location; fulgora = scrap-only sourcing
         [--module-quality normal|uncommon|rare|epic|legendary]
         [--quality-module-tier 1|2|3]
         [--assembler-level 2|3]
@@ -2601,6 +2608,7 @@ def _pick_recipe_fluid_preferred(
     planet_props: dict | None = None,
     locked_machines: frozenset[str] = frozenset(),
     assembler_level: int = 3,
+    forbid_ore_routes: bool = False,
 ) -> dict | None:
     """Like cli.pick_recipe, but prefer recipes whose FLUID ingredients do not
     introduce planet-exclusive raws.
@@ -2616,6 +2624,13 @@ def _pick_recipe_fluid_preferred(
     Recipes whose machine is locked (via ``locked_machines``) AND have no
     category fallback are dropped, so a foundry-locked tech_state correctly
     routes iron-plate to electric-furnace instead of casting-iron.
+
+    ``forbid_ore_routes`` (Fulgora build location): there is no asteroid platform
+    and no ore mining, so recipes consuming a mined ore (``RAW_TO_CHUNK``) or an
+    ore-derived ``molten-*`` fluid are dropped.  This forces metals to terminate
+    at their scrap-reachable plate form (e.g. ``copper-cable`` from
+    ``copper-plate`` instead of ``casting-copper-cable`` from ``molten-copper``),
+    so the walker stops at the scrap-source terminals.
     """
     candidates = recipe_idx.get(item_key, [])
     if not candidates:
@@ -2625,7 +2640,11 @@ def _pick_recipe_fluid_preferred(
         for ing in r.get("ingredients", []):
             name = ing["name"]
             if name in RAW_TO_CHUNK:
+                if forbid_ore_routes:
+                    return True   # no asteroid platform on Fulgora
                 continue  # asteroid-sourced, always allowed
+            if forbid_ore_routes and name.startswith("molten-"):
+                return True       # ore-derived fluid — no lava/ore on Fulgora
             if not _planet_unlocks_item(name, planets):
                 return True
         return False
@@ -2683,6 +2702,7 @@ def walk_recipe_tree(
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
     no_asteroids: bool = False,
+    forbid_ore_routes: bool = False,
     *,
     tech_state: dict[str, int],
     _cache: "_DispatchCache | None" = None,
@@ -2734,13 +2754,20 @@ def walk_recipe_tree(
     # (RAW_TO_CHUNK) + asteroid chunks + Nauvis-offshore water.  We do NOT
     # auto-include every Nauvis resource: items like coal/stone are solids
     # that need a dedicated quality source (self-recycle) to become legendary.
-    if no_asteroids:
+    if forbid_ore_routes:
+        # Fulgora build location: no asteroid platform and no ore mining.  Keep
+        # only the quality-transparent FLUID raws from the asteroid-baseline set
+        # (e.g. water); every solid base material must come from the scrap source
+        # (or a planet self-recycle path).  Asteroid chunks and ores are excluded
+        # so the walker can never route a metal back to a mined ore.
+        base_raw_set: set[str] = {r for r in RAW_TO_CHUNK if r in fluids}
+    elif no_asteroids:
         # Asteroids disabled: only items reachable via planet mining can be raws.
         # iron-ore / copper-ore / ice / calcite become raws when their planet is
         # unlocked (handled below via MINED_RAW_NO_ASTEROID_FALLBACK).  Asteroid
         # chunks are not raws — anything that would route to them must come
         # from a planet self-recycle path or fail-fast.
-        base_raw_set: set[str] = set()
+        base_raw_set = set()
         for raw, raw_planets in MINED_RAW_NO_ASTEROID_FALLBACK.items():
             if any(p in planets for p in raw_planets):
                 base_raw_set.add(raw)
@@ -2833,6 +2860,7 @@ def walk_recipe_tree(
         recipe = _pick_recipe_fluid_preferred(
             current, recipe_idx, fluids, planets, planet_props,
             locked_machines=locked_machines, assembler_level=assembler_level,
+            forbid_ore_routes=forbid_ore_routes,
         )
         if recipe is None:
             if current in raw_set:
@@ -2844,24 +2872,24 @@ def walk_recipe_tree(
         if per_craft_output <= 0:
             continue
         research_prod = _research_prod_for_recipe(recipe["key"], research_levels)
-        # Module prod (matches what we'll apply in the second pass — must be
-        # consistent so demand propagation upstream lines up).
-        if assembly_modules:
-            mr_p1 = _machine_for_recipe(recipe, assembler_level, locked_machines)
-            if mr_p1 is None:
-                raise ValueError(
-                    f"ERROR: cannot produce '{current}' — recipe "
-                    f"'{recipe['key']}' requires a locked machine for category "
-                    f"'{recipe.get('category')}'.  Add the corresponding --tech "
-                    f"flag (one of: {sorted(TECH_GATES.keys())})."
-                )
+        # Prod for demand propagation MUST equal what Pass 2 applies so the
+        # upstream ingredient/raw quantities line up.  That means the machine's
+        # inherent prod (foundry / EM-plant / biochamber +50%) always counts —
+        # it applies whether or not --assembly-modules adds prod-module slots on
+        # top.  (Previously inherent prod was dropped here unless --assembly-
+        # modules was set, inflating every upstream demand by the inherent
+        # factor — e.g. processing-unit's sulfuric-acid read 25 instead of ~16.7.)
+        mr_p1 = _machine_for_recipe(recipe, assembler_level, locked_machines)
+        if mr_p1 is None:
+            # Locked machine with no fallback — Pass 2 raises the canonical error;
+            # here we just skip the inherent bonus so demand stays finite.
+            module_prod_p1 = 0.0
+        else:
             machine_key_p1, _ = mr_p1
             module_prod_p1, _ = _assembly_prod_bonus(
                 machine_key_p1, recipe, slots_map,
                 assembly_modules, assembly_module_quality, prod_module_tier,
             )
-        else:
-            module_prod_p1 = 0.0
         eff_prod = 1.0 + research_prod + module_prod_p1
         if eff_prod > 4.0:
             eff_prod = 4.0
@@ -2929,6 +2957,7 @@ def walk_recipe_tree(
                 machine_quality=machine_quality,
                 active_shuffles=_dispatch_env.get("active_shuffles"),
                 no_asteroids=no_asteroids,
+                forbid_ore_routes=forbid_ore_routes,
                 target_tier=_dispatch_env.get("target_tier", 4),
                 _cache=_cache,
                 _in_flight=_in_flight | {inter},
@@ -2975,6 +3004,7 @@ def walk_recipe_tree(
         recipe = _pick_recipe_fluid_preferred(
             item, recipe_idx, fluids, planets, planet_props,
             locked_machines=locked_machines, assembler_level=assembler_level,
+            forbid_ore_routes=forbid_ore_routes,
         )
         if recipe is None:
             raw_demand[item] += demand[item]
@@ -3385,8 +3415,22 @@ def solve_self_feed_target_loop(
     craft_time = float(craft_recipe.get("energy_required", 1.0))
     rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
     # Machine cost coefficients: machines per craft/min (resp. recycle/min).
-    kc = craft_time / (machine_speed_eff * 60.0)
-    kr = rec_time / (rec_speed_eff * 60.0)
+    # These depend on the module loadout: prod + quality modules in the crafter
+    # and quality modules in the recycler each slow the machine (-5%/slot etc.,
+    # `_module_speed_mult`), so the coefficient is config-dependent.  A loadout
+    # with more (slow) modules costs more machines for the same throughput, which
+    # the corner search must see to trade module count against speed.
+    def kc_for(cp: int, cq: int) -> float:
+        return craft_time / (
+            machine_speed_eff
+            * _module_speed_mult(quality_slots=cq, prod_slots=cp, prod_tier=prod_module_tier)
+            * 60.0
+        )
+
+    def kr_for(rq: int) -> float:
+        return rec_time / (
+            rec_speed_eff * _module_speed_mult(quality_slots=rq) * 60.0
+        )
 
     # Module config grid: full slots only (empty slots are dominated).
     if recipe_allow_prod:
@@ -3504,8 +3548,11 @@ def solve_self_feed_target_loop(
                     )
                 if drain_per_unit <= 1e-12:
                     continue
+                kc_per_tier = [kc_for(cps[q], cqs[q]) for q in (0, 1, 2, 3)]
+                kr_per_tier = [kr_for(rqs[q]) for q in (0, 1, 2, 3)]
                 cost_per_unit = sum(
-                    x_unit[q] * kc + y_unit[q] * kr for q in (0, 1, 2, 3)
+                    x_unit[q] * kc_per_tier[q] + y_unit[q] * kr_per_tier[q]
+                    for q in (0, 1, 2, 3)
                 )
                 ratio = cost_per_unit / drain_per_unit
                 if ratio < best_ratio:
@@ -3522,8 +3569,8 @@ def solve_self_feed_target_loop(
                         "y_unit": list(y_unit),
                         "drain_per_unit": drain_per_unit,
                         "cost_per_unit": cost_per_unit,
-                        "kc": kc,
-                        "kr": kr,
+                        "kc_per_tier": list(kc_per_tier),
+                        "kr_per_tier": list(kr_per_tier),
                         "retention": retention,
                         "self_in": self_in,
                         "self_out_amt": self_out_amt,
@@ -3862,6 +3909,7 @@ def _env_signature(
     no_asteroids: bool,
     active_shuffles: frozenset[str] | None = None,
     target_tier: int = 4,
+    forbid_ore_routes: bool = False,
 ) -> tuple:
     """Tuple of all kwargs that affect the Path A vs Path B winner.
 
@@ -3884,6 +3932,7 @@ def _env_signature(
         bool(no_asteroids),
         sh,
         int(target_tier),
+        bool(forbid_ore_routes),
     )
 
 
@@ -3903,6 +3952,7 @@ def _plan_self_recycle_target(
     machine_quality: str = "normal",
     active_shuffles: frozenset[str] | None = None,
     no_asteroids: bool = False,
+    forbid_ore_routes: bool = False,
     target_tier: int = 4,
     _cache: "_DispatchCache | None" = None,
     _in_flight: frozenset[str] = frozenset(),
@@ -3929,6 +3979,7 @@ def _plan_self_recycle_target(
     craft_recipe = _pick_recipe_fluid_preferred(
         item_key, recipe_idx, fluids, planets, planet_props,
         locked_machines=locked_machines, assembler_level=assembler_level,
+        forbid_ore_routes=forbid_ore_routes,
     )
     if craft_recipe is None:
         raise ValueError(f"ERROR: no craft recipe for '{item_key}'")
@@ -4154,6 +4205,7 @@ def _plan_self_recycle_target(
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
+                    forbid_ore_routes=forbid_ore_routes,
                     tech_state=tech_state,
                     _cache=_cache,
                     _in_flight=_in_flight,
@@ -4322,6 +4374,7 @@ def choose_path_self_recycle(
     machine_quality: str = "normal",
     active_shuffles: frozenset[str] | None = None,
     no_asteroids: bool = False,
+    forbid_ore_routes: bool = False,
     target_tier: int = 4,
     _cache: _DispatchCache,
     _in_flight: frozenset[str] = frozenset(),
@@ -4355,6 +4408,7 @@ def choose_path_self_recycle(
         no_asteroids=no_asteroids,
         active_shuffles=active_shuffles,
         target_tier=target_tier,
+        forbid_ore_routes=forbid_ore_routes,
     )
     decision_key = (item_key, env)
 
@@ -4373,6 +4427,7 @@ def choose_path_self_recycle(
                 machine_quality=machine_quality,
                 active_shuffles=active_shuffles,
                 no_asteroids=no_asteroids,
+                forbid_ore_routes=forbid_ore_routes,
                 target_tier=target_tier,
                 _cache=_cache,
                 _in_flight=_in_flight | {item_key},
@@ -4395,6 +4450,7 @@ def choose_path_self_recycle(
                 prod_module_tier=prod_module_tier,
                 machine_quality=machine_quality,
                 no_asteroids=no_asteroids,
+                forbid_ore_routes=forbid_ore_routes,
                 tech_state=tech_state,
                 target_tier=target_tier,
                 _force_tree_walk=True,
@@ -4510,6 +4566,7 @@ def _plan_self_feed_target(
     assembly_modules: bool = False,
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
+    forbid_ore_routes: bool = False,
     target_tier: int = 4,
 ) -> dict:
     """Plan a chain whose target is a self-FEED recipe (ingredient = output).
@@ -4530,6 +4587,7 @@ def _plan_self_feed_target(
     craft_recipe = _pick_recipe_fluid_preferred(
         item_key, recipe_idx, fluids, planets, planet_props,
         locked_machines=locked_machines, assembler_level=assembler_level,
+        forbid_ore_routes=forbid_ore_routes,
     )
     if craft_recipe is None:
         raise ValueError(f"ERROR: no craft recipe for '{item_key}'")
@@ -4573,10 +4631,10 @@ def _plan_self_feed_target(
     scale = rate / drain_per_unit
     x = [float(v) * scale for v in plan_data["x_unit"]]
     y = [float(v) * scale for v in plan_data["y_unit"]]
-    kc = float(plan_data["kc"])
-    kr = float(plan_data["kr"])
-    craft_machines_per_tier = [x[q] * kc for q in range(target_tier)]
-    recycler_machines_per_tier = [y[q] * kr for q in range(target_tier)]
+    kc_per_tier = [float(v) for v in plan_data["kc_per_tier"]]
+    kr_per_tier = [float(v) for v in plan_data["kr_per_tier"]]
+    craft_machines_per_tier = [x[q] * kc_per_tier[q] for q in range(target_tier)]
+    recycler_machines_per_tier = [y[q] * kr_per_tier[q] for q in range(target_tier)]
     craft_machines_total = sum(craft_machines_per_tier)
     recycler_machines_total = sum(recycler_machines_per_tier)
     crafts_per_min_total = sum(x)
@@ -4608,6 +4666,7 @@ def _plan_self_feed_target(
                 assembly_module_quality=module_quality,
                 prod_module_tier=prod_module_tier,
                 machine_quality=machine_quality,
+                forbid_ore_routes=forbid_ore_routes,
                 tech_state=tech_state,
             )
         except ValueError:
@@ -4753,6 +4812,8 @@ def plan(
     prod_module_tier: int = 3,
     machine_quality: str = "normal",
     no_asteroids: bool = False,
+    location: str | None = None,
+    forbid_ore_routes: bool = False,
     tech_state: dict[str, int],
     target_tier: int = 4,
     _force_tree_walk: bool = False,
@@ -4767,6 +4828,15 @@ def plan(
     ``planets`` is the set of planets the player has unlocked.  An empty or
     ``None`` value reverts to V1 behaviour (asteroid-only, Nauvis baseline).
 
+    ``location`` is the single planet the factory is *built on* (mirrors
+    ``cli.py --location``).  ``--location fulgora`` unlocks Fulgora and switches
+    to scrap-only sourcing: there is no asteroid platform, so base materials come
+    from the scrap-recycling quality source and metals terminate at their
+    scrap-reachable plate form.  ``forbid_ore_routes`` is the internal bool this
+    derives (``location == "fulgora"``); it is propagated to recursive ``plan()``
+    / dispatch calls.  Only ``fulgora`` currently alters sourcing — other
+    locations merely unlock that planet.
+
     ``tech_state`` is a required keyword argument: ``dict[tech_name → level]``.
     Empty dict = nothing researched (fail-fast on the recycler check).  Use
     ``ALL_TECH_UNLOCKED`` for the "fully researched" baseline.
@@ -4776,6 +4846,14 @@ def plan(
     for items that would otherwise route through ``_plan_self_recycle_target``.
     """
     research_levels = research_levels or {}
+    # Build location: Fulgora forces scrap-only sourcing (no asteroid platform).
+    # ``forbid_ore_routes`` may also arrive directly from a recursive plan() /
+    # dispatch call that already derived it.
+    fulgora_mode = location == "fulgora"
+    forbid_ore_routes = forbid_ore_routes or fulgora_mode
+    # On Fulgora the asteroid reprocessing / crushing path is physically
+    # unavailable, so reuse the no-asteroid gating for those stage blocks.
+    no_asteroids = no_asteroids or fulgora_mode
     # Module/machine quality default to the target tier and may not exceed it:
     # you can't have modules or machines of a quality you haven't researched
     # (and if you've researched epic/legendary you'd be targeting it, not rare).
@@ -4794,6 +4872,14 @@ def plan(
             "you haven't researched. Lower --machine-quality or raise --target-quality."
         )
     planets_fs: frozenset[str] = frozenset(planets) if planets else frozenset()
+    # --location unlocks the planet it builds on (so its local raws are
+    # available without also having to pass --planets).
+    if location:
+        if location not in KNOWN_PLANETS:
+            raise ValueError(
+                f"ERROR: unknown --location '{location}'; valid: {list(KNOWN_PLANETS)}"
+            )
+        planets_fs = planets_fs | {location}
     # Validate planet names against the known list.
     unknown = planets_fs - set(KNOWN_PLANETS)
     if unknown:
@@ -4842,6 +4928,7 @@ def plan(
             assembly_modules=assembly_modules,
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
+            forbid_ore_routes=forbid_ore_routes,
             target_tier=target_tier,
         )
 
@@ -4864,6 +4951,7 @@ def plan(
             machine_quality=machine_quality,
             active_shuffles=frozenset(active_shuffles) if active_shuffles else None,
             no_asteroids=no_asteroids,
+            forbid_ore_routes=forbid_ore_routes,
             target_tier=target_tier,
             _cache=_cache,
             _in_flight=_in_flight,
@@ -4915,6 +5003,7 @@ def plan(
         prod_module_tier=prod_module_tier,
         machine_quality=machine_quality,
         no_asteroids=no_asteroids,
+        forbid_ore_routes=forbid_ore_routes,
         tech_state=tech_state,
         _cache=_cache,
         _in_flight=_in_flight,
@@ -5009,6 +5098,7 @@ def plan(
                 prod_module_tier=prod_module_tier,
                 machine_quality=machine_quality,
                 no_asteroids=no_asteroids,
+                forbid_ore_routes=forbid_ore_routes,
                 tech_state=tech_state,
                 _cache=_cache,
                 _in_flight=_in_flight,
@@ -5046,6 +5136,7 @@ def plan(
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
+                    forbid_ore_routes=forbid_ore_routes,
                     tech_state=tech_state,
                     _cache=_cache,
                     _in_flight=_in_flight,
@@ -5077,6 +5168,7 @@ def plan(
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
+                    forbid_ore_routes=forbid_ore_routes,
                     tech_state=tech_state,
                     _cache=_cache,
                     _in_flight=_in_flight,
@@ -5157,6 +5249,7 @@ def plan(
                 prod_module_tier=prod_module_tier,
                 machine_quality=machine_quality,
                 no_asteroids=no_asteroids,
+                forbid_ore_routes=forbid_ore_routes,
                 tech_state=tech_state,
                 _cache=_cache,
                 _in_flight=_in_flight,
@@ -5288,6 +5381,7 @@ def plan(
                     prod_module_tier=prod_module_tier,
                     machine_quality=machine_quality,
                     no_asteroids=no_asteroids,
+                    forbid_ore_routes=forbid_ore_routes,
                     tech_state=tech_state,
                     _cache=_cache,
                     _in_flight=_in_flight,
@@ -5744,6 +5838,7 @@ def plan(
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
             no_asteroids=no_asteroids,
+            forbid_ore_routes=forbid_ore_routes,
             tech_state=tech_state,
         )
         if baseline["total_machine_count"] < total_machines:
@@ -5772,6 +5867,7 @@ def plan(
             prod_module_tier=prod_module_tier,
             machine_quality=machine_quality,
             no_asteroids=no_asteroids,
+            forbid_ore_routes=forbid_ore_routes,
             tech_state=tech_state,
         )
         if baseline["total_machine_count"] < total_machines:
@@ -6162,6 +6258,17 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--location", default=None, choices=list(KNOWN_PLANETS),
+        help=(
+            "Single planet the factory is BUILT on (mirrors cli.py --location). "
+            "Unlocks that planet's raws. --location fulgora additionally switches "
+            "to scrap-only sourcing: no asteroid platform, so base materials come "
+            "from the scrap-recycling quality source and metals terminate at "
+            "their scrap-reachable plate form. Only 'fulgora' alters sourcing "
+            "today; other values just unlock that planet."
+        ),
+    )
+    p.add_argument(
         "--assembly-modules", action="store_true",
         help=(
             "Fill assembly-stage machine slots with prod modules "
@@ -6300,6 +6407,7 @@ def main() -> None:
             prod_module_tier=args.prod_module_tier,
             machine_quality=args.machine_quality,
             no_asteroids=args.no_asteroids,
+            location=args.location,
             tech_state=tech_state,
             target_tier=target_tier,
         )

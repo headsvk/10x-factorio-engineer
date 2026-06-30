@@ -669,9 +669,12 @@ class TestLDSShuffleWiring(unittest.TestCase):
             byproduct_credits={"copper-plate": 100.0},
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
-        # copper-ore demand should drop by 100 (1:1 via molten-copper chain).
+        # copper-ore demand should drop by the credited copper-plate scaled down
+        # by the inherent foundry prod of the two casting steps it would skip
+        # (casting-copper and molten-copper, each +50%): 100 / (1.5 * 1.5) = 44.44.
         self.assertAlmostEqual(
-            raws_base["copper-ore"] - raws_credited["copper-ore"], 100.0, delta=1e-3,
+            raws_base["copper-ore"] - raws_credited["copper-ore"],
+            100.0 / (1.5 * 1.5), delta=1e-3,
         )
 
     def test_byproduct_overflow_flagged_in_notes(self):
@@ -1217,12 +1220,15 @@ class TestGlebaPartial(unittest.TestCase):
             planets=["gleba"], assembly_modules=True,
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
-        # Biochambers have 4 slots and +50% inherent prod → big drop.
+        # Biochambers have 4 slots; --assembly-modules adds prod modules on top of
+        # the +50% inherent prod that the baseline already applies, so the extra
+        # drop is ~2.75x (not the ~3x+ seen when the baseline wrongly omitted
+        # inherent prod).
         self.assertLess(
-            out_on["total_machine_count"], out_off["total_machine_count"] / 3,
+            out_on["total_machine_count"], out_off["total_machine_count"] / 2.5,
         )
         self.assertLess(
-            out_on["mined_input"]["yumako"], out_off["mined_input"]["yumako"] / 3,
+            out_on["mined_input"]["yumako"], out_off["mined_input"]["yumako"] / 2.5,
         )
 
     def test_yumako_self_recycle_yield(self):
@@ -1316,8 +1322,10 @@ class TestStagePower(unittest.TestCase):
             planets=["nauvis"], assembly_modules=True,
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
-        # Modules cut machine count → power drops proportionally.
-        self.assertLess(out_on["total_power_mw"], out_off["total_power_mw"] / 5)
+        # Modules cut machine count → power drops proportionally.  The baseline
+        # already applies inherent prod, so the extra prod-module drop is ~3x
+        # (not the ~5x seen when the baseline wrongly omitted inherent prod).
+        self.assertLess(out_on["total_power_mw"], out_off["total_power_mw"] / 2.5)
 
     def test_human_format_shows_total_power(self):
         out = qp.plan("electronic-circuit", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
@@ -1547,6 +1555,85 @@ class TestNoAsteroids(unittest.TestCase):
         # No asteroid line should appear with values; mined-raw section visible.
         self.assertIn("(none)", text)  # asteroid section empty
         self.assertIn("Mined Raws", text)
+
+
+class TestLocationFulgora(unittest.TestCase):
+    """--location fulgora: scrap-only sourcing.  No asteroid platform, so base
+    materials come from the scrap-recycling quality source and metals terminate
+    at their scrap-reachable plate form (no casting/molten-ore routes)."""
+
+    RARE = qp.QUALITY_INDEX["rare"]
+
+    def _plan(self, item, **kw):
+        return qp.plan(
+            item, 1, _data(),
+            target_tier=self.RARE,
+            location="fulgora",
+            tech_state=qp.ALL_TECH_UNLOCKED,
+            **kw,
+        )
+
+    def test_no_asteroid_input(self):
+        # The Fulgora plan must not pull asteroid chunks or run asteroid stages.
+        out = self._plan("quality-module-2")
+        self.assertEqual(out["asteroid_input"], {})
+        roles = {s["role"] for s in out["stages"]}
+        self.assertNotIn("asteroid-reprocessing", roles)
+        self.assertNotIn("raw-crushing", roles)
+        # Scrap is the base quality source.
+        self.assertIn("scrap", out["scrap_input"])
+        self.assertGreater(out["scrap_input"]["scrap"], 0)
+        self.assertIn("scrap-quality-source", roles)
+
+    def test_metals_sourced_from_scrap(self):
+        # copper-plate is scrap-reachable, so it must come from the scrap source
+        # (here as overflow of the scrap basket) rather than asteroid copper-ore.
+        out = self._plan("quality-module-2")
+        self.assertEqual(out["asteroid_input"], {})
+        self.assertEqual(out["mined_input"], {})
+        self.assertIn("copper-plate", out["scrap_overflow"])
+
+    def test_recipe_selection_forbids_ore_routes(self):
+        # With forbid_ore_routes the walker must pick the plain copper-cable
+        # recipe (from the scrap-reachable copper-plate), NOT casting-copper-cable
+        # (molten-copper -> copper-ore -> asteroid).
+        ridx = qp.cli.build_recipe_index(_data())
+        fluids = qp.build_fluid_set(_data())
+        r_off = qp._pick_recipe_fluid_preferred(
+            "copper-cable", ridx, fluids, frozenset({"fulgora"}),
+        )
+        r_on = qp._pick_recipe_fluid_preferred(
+            "copper-cable", ridx, fluids, frozenset({"fulgora"}),
+            forbid_ore_routes=True,
+        )
+        self.assertEqual(r_off["key"], "casting-copper-cable")
+        self.assertEqual(r_on["key"], "copper-cable")
+
+    def test_q2_and_q3_plan_rare(self):
+        # Both quality modules plan at rare with scrap as the sole base source.
+        for item in ("quality-module-2", "quality-module-3"):
+            out = self._plan(item)
+            self.assertEqual(out["asteroid_input"], {}, item)
+            self.assertGreater(out["scrap_input"]["scrap"], 0, item)
+            self.assertGreater(out["total_machine_count"], 0, item)
+
+    def test_location_implies_unlock(self):
+        # --location fulgora unlocks Fulgora without an explicit --planets fulgora.
+        out = qp.plan(
+            "quality-module-2", 1, _data(),
+            target_tier=self.RARE, location="fulgora",
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        )
+        self.assertIn("fulgora", out["planets"])
+        self.assertEqual(out["asteroid_input"], {})
+
+    def test_unsourceable_solid_errors(self):
+        # A target needing a non-scrap-reachable solid (tungsten-ore) on Fulgora
+        # fails fast pointing at the planet that would supply it.
+        with self.assertRaises(ValueError) as cm:
+            self._plan("tungsten-plate")
+        self.assertIn("tungsten-ore", str(cm.exception))
+        self.assertIn("vulcanus", str(cm.exception))
 
 
 class TestStageSummary(unittest.TestCase):
@@ -3846,6 +3933,24 @@ class TestModuleSpeedPenalty(unittest.TestCase):
             qp._module_speed_mult = orig
         self.assertGreater(base, no_pen)
         self.assertLess(base / no_pen, 1.12)  # crushers dominate; foundry steps unaffected
+
+    def test_wired_into_self_feed_lp(self):
+        # The self-feed LP (pentapod-egg) now applies the module speed penalty
+        # per config: the crafter's prod+quality slots and the recycler's quality
+        # slots each slow the machine, raising machine counts vs an unpenalised run.
+        data = _data()
+        base = qp.plan(
+            "pentapod-egg", 60, data, planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        )["total_machine_count"]
+        orig = qp._module_speed_mult
+        try:
+            qp._module_speed_mult = lambda *a, **k: 1.0
+            no_pen = qp.plan(
+                "pentapod-egg", 60, data, planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+            )["total_machine_count"]
+        finally:
+            qp._module_speed_mult = orig
+        self.assertGreater(base, no_pen)
 
 
 if __name__ == "__main__":

@@ -4004,12 +4004,37 @@ class TestQualityChanceHelpers(unittest.TestCase):
             Fraction(25, 1000) * Fraction(5, 2),
         )
 
-    def test_quality_chance_ignores_non_quality_modules(self):
+    def test_quality_chance_ignores_prod_speed_subtracts(self):
+        # Prod modules don't affect quality; speed modules SUBTRACT it but with no
+        # quality modules the negative total clamps to 0.
         specs = [
             {"count": 4, "type": "prod", "tier": 3, "quality": "normal"},
             {"count": 1, "type": "speed", "tier": 3, "quality": "normal"},
         ]
         self.assertEqual(cli.quality_chance_from_specs(specs, 5), Fraction(0))
+
+    def test_quality_chance_speed_cancels_quality_same_tier(self):
+        # "Haste makes waste": a tier-T speed module cancels a tier-T quality
+        # module at equal housing quality.  2 quality-3 + 2 speed-3 over 4 slots → 0.
+        specs = [
+            {"count": 2, "type": "quality", "tier": 3, "quality": "normal"},
+            {"count": 2, "type": "speed", "tier": 3, "quality": "normal"},
+        ]
+        self.assertEqual(cli.quality_chance_from_specs(specs, 4), Fraction(0))
+        # Legendary housings cancel too (both scale ×2.5).
+        leg = [
+            {"count": 2, "type": "quality", "tier": 3, "quality": "legendary"},
+            {"count": 2, "type": "speed", "tier": 3, "quality": "legendary"},
+        ]
+        self.assertEqual(cli.quality_chance_from_specs(leg, 4), Fraction(0))
+
+    def test_quality_chance_speed_partial_penalty(self):
+        # 3 quality-3 (+7.5%) + 1 speed-3 (−2.5%) over 4 slots = +5%.
+        specs = [
+            {"count": 3, "type": "quality", "tier": 3, "quality": "normal"},
+            {"count": 1, "type": "speed", "tier": 3, "quality": "normal"},
+        ]
+        self.assertEqual(cli.quality_chance_from_specs(specs, 4), Fraction(5, 100))
 
     def test_quality_chance_slot_scaling(self):
         # Request 8 quality modules but only 4 slots → effective 4.
@@ -4079,6 +4104,27 @@ class TestQualityPickout(unittest.TestCase):
         # Aggregated quality_yield matches the per-step >normal split.
         qy = out["quality_yield"]["electronic-circuit"]
         self.assertAlmostEqual(qy["uncommon"], qo["uncommon"], places=6)
+
+    def test_beacon_speed_modules_reduce_quality(self):
+        # Speed modules in a beacon reduce the affected machine's quality chance
+        # ("haste makes waste"), scaled by beacon transmission.  Adding a speed
+        # beacon to a quality-module step lowers the extracted quality_yield;
+        # enough speed beacons cancel it entirely.
+        common = [
+            "--item", "electronic-circuit", "--rate", "60", "--location", "nauvis",
+            "--recipe-modules", "electronic-circuit=4:quality:3:normal",
+            "--quality-pickout", "--max-quality", "uncommon",
+        ]
+        no_beacon = _run_cli(*common)
+        light = _run_cli(*common, "--recipe-beacon", "electronic-circuit=1:1:speed:3:normal")
+        heavy = _run_cli(*common, "--recipe-beacon", "electronic-circuit=2:2:speed:3:normal")
+        base_q = no_beacon["quality_yield"]["electronic-circuit"]["uncommon"]
+        light_q = light["quality_yield"]["electronic-circuit"]["uncommon"]
+        # A speed beacon strictly lowers the extracted quality.
+        self.assertGreater(base_q, light_q)
+        self.assertGreater(light_q, 0.0)
+        # Enough speed beacons (penalty >= machine quality) cancel it entirely.
+        self.assertEqual(heavy.get("quality_yield", {}), {})
 
     def test_pickout_raises_machine_count_vs_no_pickout(self):
         base = _run_cli(

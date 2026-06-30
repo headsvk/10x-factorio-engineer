@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-05-26. Tests: `python -m unittest dev.test_quality_planner -v` — **315 tests, all passing, ~2.0 s.**
+**Last updated:** 2026-06-29. Tests: `python -m unittest dev.test_quality_planner -v` — **322 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -26,6 +26,8 @@ Currently shipped:
 - Gleba bio-raws (yumako, jellynut, pentapod-egg) — **no spoilage timing**
 - Per-stage power accounting (`total_power_mw`)
 - `--no-asteroids` early-game gating
+- **Fulgora build location (`--location fulgora`, 2026-06-29)** — scrap-only sourcing. There is no asteroid platform on Fulgora, so `_pick_recipe_fluid_preferred` drops ore (`RAW_TO_CHUNK`) and `molten-*` routes (`forbid_ore_routes`), forcing metals to terminate at their scrap-reachable plate form (e.g. `copper-cable` from the scrap-sourced `copper-plate` instead of `casting-copper-cable`). The asteroid-reprocessing / crushing path is gated off and base materials come from the existing scrap-recycling quality source. Only `fulgora` alters sourcing; other `--location` values just unlock that planet.
+- **Inherent prod in demand propagation (2026-06-29)** — `walk_recipe_tree` Pass 1 now applies the machine's inherent prod (foundry/EM-plant/biochamber +50%) when propagating ingredient/raw demand, matching Pass 2's machine-count math. Previously inherent prod was dropped in Pass 1 unless `--assembly-modules` was set, inflating every upstream demand (and machine count) by the compounding inherent factor across the chain (e.g. Fulgora quality-module scrap input and processing-unit sulfuric-acid both read ~1.5–3× too high). The self-feed LP (`solve_self_feed_target_loop`) likewise now applies the module **speed** penalty per config (crafter prod+quality slots, recycler quality slots).
 - Stage cost summary (`summary.by_role`) + hot-spot advisor notes
 - **Tech-state gating (`--tech NAME=LEVEL`)** — locks recycler / foundry / EM-plant / cryo-plant / biochamber. **Default is LOCKED**: a bare `python dev/quality_planner.py ...` call now fails-fast on the recycler check; users must list their unlocked tech with `--tech recycling=1 --tech tungsten-carbide=1 ...`. Quality-module *tier* is not gated by `--tech` — `--quality-module-tier` is self-declaring (you'd only request a tier you have).
 - **Incidental co-product credit (2026-05-14)** — non-primary SOLID outputs of walker-activated assembly recipes are credited against existing chain demand.  `molten-iron-from-lava` / `molten-copper-from-lava` give stone byproducts; Gleba `*-processing` recipes give seeds; `iron-bacteria` / `copper-bacteria` give spoilage; centrifuge recipes give the other uranium isotope.  Surplus surfaces as `incidental_byproduct_overflow`.
@@ -88,15 +90,15 @@ python dev/quality_planner.py --item stone-wall --rate 60 \
 
 ## Regression anchors
 
-Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-05-26 after the inherent-prod fix (machine built-in +50% always applies) **and the module-speed-penalty fix** (quality modules −5%/slot in recyclers/crushers, prod modules per-tier in assembly — see changelog). The penalty only moves the machine-count column; input rates are unchanged:
+Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-06-29 after the **Pass-1 inherent-prod demand fix** (the walker now divides upstream ingredient/raw demand by the machine's inherent +50% prod, matching Pass-2 machine counts — previously inherent prod was dropped in demand propagation unless `--assembly-modules` was set, inflating both machine counts AND input rates by the compounding inherent factor across the chain):
 
 | target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
 |---|---|---|---|---|---|
-| `iron-plate` | — | 20.0 | metallic 281, oxide 28 | — | — |
-| `processing-unit` | nauvis | ~1 062 | metallic 6750, oxide 731 | coal 321 874 | petroleum-gas 2 400, sulfuric-acid 300 |
-| `artillery-shell` | nauvis,vulcanus | ~6 100 | carbonic 5 625, oxide 1 842 | coal 643 749, tungsten-ore 2.57M | lava 9 300 |
+| `iron-plate` | — | 9.1 | metallic 125, oxide 12 | — | — |
+| `processing-unit` | nauvis | ~352 | metallic 1259, oxide 137 | coal 143 055 | petroleum-gas 1 067, sulfuric-acid 200 |
+| `artillery-shell` | nauvis,vulcanus | ~4 592 | carbonic 5 625, oxide 1 569 | coal 643 749, tungsten-ore 1.72M | lava 3 467 |
 
-With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` drops from ~1 062 machines to **~19.9 machines** — modules off is the conservative baseline (but inherent machine prod still applies even there). The assembly-modules figure is higher than the pre-penalty estimate because pure prod modules now carry their −5/−10/−15%-per-slot speed cost (the planner models no speed modules/beacons to offset it).
+With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` is **~19.9 machines** (unchanged by the Pass-1 fix — the assembly-modules path already applied inherent prod in demand propagation). Modules-off is the conservative baseline (but inherent machine prod now correctly applies there too). Prod modules carry their −5/−10/−15%-per-slot speed cost (the planner models no speed modules/beacons to offset it).
 
 These are sanity checks, not committed expectations. If a refactor moves them, investigate the cause rather than rubber-stamping.
 
@@ -114,6 +116,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--rate N` | required | Target items per minute (at `--target-quality`) |
 | `--target-quality Q` | `legendary` | Goal quality tier. The quality loops stop here instead of pushing to legendary (e.g. `rare` treats rare-or-better as success — much cheaper than full legendary). Choices: `uncommon,rare,epic,legendary` |
 | `--planets P1,P2,…` | empty | Unlocked planets. Empty = asteroid-only. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
+| `--location P` | none | Single planet the factory is **built on** (mirrors `cli.py --location`). Unlocks that planet's raws. **`--location fulgora` additionally switches to scrap-only sourcing**: no asteroid platform, so base materials come from the scrap-recycling quality source and metals terminate at their scrap-reachable plate form (no casting/molten-ore routes). Only `fulgora` alters sourcing today; other values just unlock that planet. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo` |
 | `--module-quality Q` | `--target-quality` | Quality of quality-modules in loops. Defaults to (and may not exceed) `--target-quality` — you can't have modules of a quality you haven't researched. Choices: `normal,uncommon,rare,epic,legendary` |
 | `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules. Self-declaring — not gated by `--tech` (you'd only request a tier you've researched). |
 | `--assembler-level {2,3}` | `3` | Assembler tier for non-categorised recipes |
@@ -319,11 +322,13 @@ Raw set:
 - Always: asteroid chunks + chunk-derived raws (`RAW_TO_CHUNK`) + water.
 - With `--planets`: union in each unlocked planet's fluids + mined solids from `MINED_RAW_PLANETS`.
 - With `--no-asteroids`: substitute `MINED_RAW_NO_ASTEROID_FALLBACK` (iron-ore, copper-ore, ice, calcite per planet) for the asteroid raws.
+- With `--location fulgora` (`forbid_ore_routes`): only the quality-transparent FLUID raws of `RAW_TO_CHUNK` (water) survive; solid ores/chunks are dropped so no metal can route back to a mined ore. Combined with the recipe-selection filter (ore + `molten-*` routes rejected), metals terminate at their scrap-reachable plate form and the scrap source supplies them.
 
 Routing per leaf raw:
 - Fluid → `fluid_input` (quality-transparent).
-- Asteroid chunk → asteroid-reprocessing path (skipped under `--no-asteroids`).
+- Asteroid chunk → asteroid-reprocessing path (skipped under `--no-asteroids` / `--location fulgora`).
 - Mined raw with planet unlocked → `mined-raw-self-recycle`.
+- Scrap-reachable solid (Fulgora) → scrap-quality-source basket.
 - Otherwise → fail-fast with actionable `add --planets X` hint.
 
 ### Shuffle enumeration + selection

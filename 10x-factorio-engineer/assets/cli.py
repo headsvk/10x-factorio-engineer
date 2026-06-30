@@ -14,7 +14,7 @@ Usage:
                   [--max-quality QUALITY]
                   [--quality-pickout]
                   [--modules MACHINE=COUNT:TYPE:TIER:QUALITY]   # repeatable
-                  [--beacon MACHINE=COUNT:TIER:QUALITY]         # repeatable
+                  [--beacon MACHINE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY]  # repeatable
                   [--recipe ITEM=RECIPE]                        # repeatable
                   [--recipe-machine RECIPE=MACHINE]             # repeatable
                   [--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY]  # repeatable
@@ -437,6 +437,18 @@ QUALITY_MODULE_BONUS: dict[int, Fraction] = {
     3: Fraction(1, 40),     # +2.5%
 }
 
+# Quality PENALTY per speed-module slot.  Space Age "haste makes waste": a speed
+# module reduces quality chance by the SAME magnitude a quality module of the same
+# tier adds (T1 -1%, T2 -1.5%, T3 -2.5%), so a tier-T speed module exactly cancels
+# a tier-T quality module at equal housing quality.  Scaled by MODULE_QUALITY_MULT
+# like the quality bonus it mirrors.  (This is why speed + quality modules in the
+# same machine are self-defeating.)
+SPEED_MODULE_QUALITY_PENALTY: dict[int, Fraction] = {
+    1: Fraction(1, 100),    # -1.0%
+    2: Fraction(3, 200),    # -1.5%
+    3: Fraction(1, 40),     # -2.5%
+}
+
 # When a quality roll succeeds the item tiers up by +1..+4 with this fixed split
 # (90% +1, 9% +2, 0.9% +3, 0.1% +4). Mass that would exceed the highest UNLOCKED
 # tier folds back onto that tier (you can't roll a quality you haven't researched).
@@ -507,11 +519,13 @@ MODULE_EFFICIENCY_REDUCTION: dict[int, Fraction] = {
 # ---------------------------------------------------------------------------
 
 def quality_chance_from_specs(specs: list, slots: int) -> Fraction:
-    """Total per-craft quality-upgrade chance from the quality modules in *specs*.
+    """Total per-craft quality-upgrade chance from the modules in *specs*.
 
     Mirrors the slot-scaling used by _compute_module_effects (a machine never
-    runs more modules than it has slots). Only ``type == "quality"`` specs count.
-    Result is clamped to [0, 1].
+    runs more modules than it has slots).  Quality modules ADD chance; speed
+    modules SUBTRACT it ("haste makes waste" — a tier-T speed module cancels a
+    tier-T quality module at equal housing quality).  Both scale with module
+    quality.  Result is clamped to [0, 1].
     """
     if not specs or slots <= 0:
         return Fraction(0)
@@ -521,9 +535,12 @@ def quality_chance_from_specs(specs: list, slots: int) -> Fraction:
     scale = Fraction(min(slots, total_requested), total_requested)
     q = Fraction(0)
     for spec in specs:
+        eff_count = Fraction(spec["count"]) * scale
+        mult = MODULE_QUALITY_MULT[spec["quality"]]
         if spec.get("type") == "quality":
-            eff_count = Fraction(spec["count"]) * scale
-            q += eff_count * QUALITY_MODULE_BONUS[spec["tier"]] * MODULE_QUALITY_MULT[spec["quality"]]
+            q += eff_count * QUALITY_MODULE_BONUS[spec["tier"]] * mult
+        elif spec.get("type") == "speed":
+            q -= eff_count * SPEED_MODULE_QUALITY_PENALTY[spec["tier"]] * mult
     if q < 0:
         return Fraction(0)
     if q > 1:
@@ -1543,6 +1560,34 @@ class Solver:
                 )
         return effectivity * sqrt_count * speed_sum
 
+    def _beacon_quality_penalty(self, beacon_spec: dict | None) -> Fraction:
+        """
+        Quality-chance penalty transmitted by SPEED modules in the beacon.
+
+        Space Age "haste makes waste" applies through beacons too: a speed module
+        in a beacon reduces the affected machine's quality chance by
+        SPEED_MODULE_QUALITY_PENALTY, scaled by the SAME beacon transmission
+        (effectivity × sqrt(count)) as the speed bonus.  Mirrors
+        _compute_beacon_speed but with the quality-penalty table.  Returned as a
+        rounded Fraction (sqrt is irrational) so the net q_chance stays exact-ish.
+        Returns 0 when no beacon or no speed modules.
+        """
+        if not beacon_spec or beacon_spec.get("count", 0) == 0:
+            return Fraction(0)
+        pen_sum = Fraction(0)
+        for mod in beacon_spec["modules"]:
+            if mod["type"] == "speed":
+                pen_sum += (
+                    Fraction(mod["count"])
+                    * SPEED_MODULE_QUALITY_PENALTY[mod["tier"]]
+                    * MODULE_QUALITY_MULT[mod["quality"]]
+                )
+        if pen_sum == 0:
+            return Fraction(0)
+        effectivity = float(BEACON_EFFECTIVITY[self.beacon_quality])
+        total = effectivity * math.sqrt(beacon_spec["count"]) * float(pen_sum)
+        return Fraction(str(round(total, 10)))
+
     def rate_for_machines(self, item_key: str, machines: float) -> Fraction:
         """
         Return the items/min output rate that ``machines`` machines produce for
@@ -1581,17 +1626,18 @@ class Solver:
 
         effective_result = result_amount * (Fraction(1) + prod_bonus)
 
+        beacon_spec        = self._get_beacon(recipe_key, machine_key)
+        beacon_speed_bonus = self._compute_beacon_speed(beacon_spec)
+
         # Pickout: only the normal-tier fraction of the output counts toward the
         # requested rate (the rest is siphoned off as higher quality).
         if self.quality_pickout:
             q_chance = quality_chance_from_specs(
                 specs, self.machine_module_slots.get(machine_key, 0)
             )
+            q_chance = max(Fraction(0), q_chance - self._beacon_quality_penalty(beacon_spec))
             if q_chance > 0:
                 effective_result = effective_result * (Fraction(1) - q_chance)
-
-        beacon_spec        = self._get_beacon(recipe_key, machine_key)
-        beacon_speed_bonus = self._compute_beacon_speed(beacon_spec)
 
         machines_frac = Fraction(str(machines))
         if beacon_speed_bonus:
@@ -1699,8 +1745,15 @@ class Solver:
         # Scaling the cycles up by 1/normal_frac keeps the normal-tier yield equal
         # to demand. With pickout off (or no quality modules) normal_frac == 1 and
         # everything below collapses to the original nominal-flow behaviour.
+        # Beacon speed bonus (may introduce float — sqrt is irrational)
+        beacon_spec        = self._get_beacon(recipe_key, machine_key)
+        beacon_speed_bonus = self._compute_beacon_speed(beacon_spec)
+
         slots      = self.machine_module_slots.get(machine_key, 0)
+        # Net quality chance: machine quality modules minus the quality penalty
+        # transmitted by any speed modules in the beacon ("haste makes waste").
         q_chance   = quality_chance_from_specs(specs, slots)
+        q_chance   = max(Fraction(0), q_chance - self._beacon_quality_penalty(beacon_spec))
         pickout    = self.quality_pickout and q_chance > 0
         normal_frac = (Fraction(1) - q_chance) if pickout else Fraction(1)
         if pickout and normal_frac <= 0:
@@ -1712,10 +1765,6 @@ class Solver:
 
         effective_result_normal = effective_result * normal_frac
         cycles_per_min   = rate / effective_result_normal
-
-        # Beacon speed bonus (may introduce float — sqrt is irrational)
-        beacon_spec        = self._get_beacon(recipe_key, machine_key)
-        beacon_speed_bonus = self._compute_beacon_speed(beacon_spec)
 
         if beacon_speed_bonus:
             eff_speed_total = float(effective_speed) * (1.0 + beacon_speed_bonus)
@@ -2030,6 +2079,9 @@ def _fulgora_activity_coeffs(solver: "Solver", recipe: dict) -> dict:
     # gross_outputs preserves the full per-craft output for that reporting.
     gross_outputs = dict(outputs)
     q_chance = quality_chance_from_specs(specs, solver.machine_module_slots.get(machine_key, 0))
+    # Speed modules in the beacon reduce quality ("haste makes waste"), scaled by
+    # the same transmission as the speed bonus.
+    q_chance = max(Fraction(0), q_chance - solver._beacon_quality_penalty(beacon_spec))
     pickout  = solver.quality_pickout and q_chance > 0
     if pickout:
         normal_frac = Fraction(1) - q_chance

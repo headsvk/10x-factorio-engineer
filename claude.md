@@ -122,9 +122,9 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
 | `dev/update_research.py` | Applies a research-level change to a factory state and re-runs only the affected lines (`python dev/update_research.py TECH=LEVEL ... [--state PATH] [--dry-run] [--list]`; default state = `dev/my-factory.json`). Use this instead of hand-editing `research_levels` + manually re-running lines — it reconstructs each line's CLI command from its `cli_args` + shared top-level config, re-solves the affected lines, and rewrites their `cli_result` (LF output). Mining-prod re-runs miner lines; recipe-prod re-runs lines whose steps touch a boosted recipe; lab-only techs (`research-productivity` / `lab-research-speed`) update the field but trigger no re-run. See the **research-level updates** workflow note below. |
-| `dev/test_cli.py` | `unittest` suite (272 tests, stdlib only) — dev only |
-| `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains |
-| `dev/test_quality_planner.py` | `unittest` suite (315 tests) for quality_planner |
+| `dev/test_cli.py` | `unittest` suite (275 tests, stdlib only) — dev only |
+| `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains. `--location fulgora` switches to scrap-only sourcing (no asteroid platform; metals terminate at scrap-reachable plates via `forbid_ore_routes`) |
+| `dev/test_quality_planner.py` | `unittest` suite (322 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
@@ -175,6 +175,7 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `build_machine_power_w(data)` | `{machine_key: watts}` for electric machines only (burners excluded); scans `crafting_machines`, `agricultural_tower`, `rocket_silo`, `mining_drills` |
 | `build_machine_prod_bonus(data)` | `{machine_key: Fraction}` built-in productivity from the dataset's `prod_bonus` (foundry/EM-plant/biochamber = 1/2, else 0). Applied in `_compute_module_effects` to **every** recipe regardless of `allow_productivity` (that flag only gates modules/beacons) |
 | `_beacon_sharing_factor(machine_key)` | Returns how many machines share each physical beacon (4 for ≤4-tile machines, 2 for 5–7-tile, 1 for ≥8-tile) |
+| `Solver._beacon_quality_penalty(beacon_spec)` | Quality-chance penalty from SPEED modules in the beacon, scaled by the same transmission as `_compute_beacon_speed` (`effectivity × sqrt(count)`). Subtracted from `quality_chance_from_specs` at each step ("haste makes waste" applies through beacons too). Rounded `Fraction`; 0 when no speed modules |
 | `_compute_step_power(...)` | Returns `(power_kw, power_kw_ceil, beacon_power_kw)` for a production step using module/beacon config |
 | `compute_location_unlocks(location)` | Return the `frozenset` of planet-locked advanced machines unlocked at `location` (e.g. Vulcanus → `{foundry}`). `None` for `location=None` (legacy "all unlocked"). |
 | `get_machine(cat, assembler_level, furnace_type, location_unlocks=None)` | Maps recipe category → `(machine_key, speed)`. When `location_unlocks` is given, planet-locked machines that aren't in the set are routed to the basic alternative via `CATEGORY_LOCATION_FALLBACK`. |
@@ -189,7 +190,7 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `build_recycling_index(data)` | `{output_item: [recycling_recipe, ...]}` — recycling recipes only (excluded from `build_recipe_index`); read only by the Fulgora LP |
 | `solve_fulgora(solver, data, targets)` | Fulgora recycling-graph LP entry point; builds the activity set, solves, populates `solver.steps`/`raw_resources`/`surplus`; see "Fulgora Recycling LP" below |
 | `_fulgora_activity_coeffs(solver, recipe)` | Per-craft LP coefficients (machine, machine_coef, io with module/quality/prod effects) for one activity. Under `--quality-pickout`, scales each activity's outputs by the normal-tier fraction and returns `q_chance`/`pickout`/`gross_outputs` for post-solve quality accounting |
-| `quality_chance_from_specs(specs, slots)` | Total per-craft quality-upgrade chance from the quality modules in `specs` (slot-scaled like `_compute_module_effects`, clamped 0..1) |
+| `quality_chance_from_specs(specs, slots)` | Net per-craft quality-upgrade chance from `specs` (slot-scaled like `_compute_module_effects`, clamped 0..1). Quality modules ADD chance; speed modules SUBTRACT it (`SPEED_MODULE_QUALITY_PENALTY`, "haste makes waste" — a tier-T speed module cancels a tier-T quality module at equal housing quality); both scale with module quality |
 | `quality_tier_probs(q_total, max_index)` | Length-5 per-tier probability vector for a normal-tier craft; mass above `max_index` (highest unlocked tier) folds onto it |
 
 ### `Solver` class state
@@ -237,6 +238,14 @@ QUALITY_INDEX = {q: i for i, q in enumerate(QUALITY_TIERS)}
 # Base per-slot quality CHANCE at normal module quality (T1 +1%, T2 +1.5%,
 # T3 +2.5%); scaled by MODULE_QUALITY_MULT like every other positive stat.
 QUALITY_MODULE_BONUS: dict[int, Fraction] = {
+    1: Fraction(1, 100), 2: Fraction(3, 200), 3: Fraction(1, 40),
+}
+
+# Quality PENALTY per speed-module slot (Space Age "haste makes waste"): same
+# magnitude as the quality bonus of the same tier, so a tier-T speed module
+# cancels a tier-T quality module at equal housing quality. Quality-scaled like
+# the bonus. Subtracted in quality_chance_from_specs.
+SPEED_MODULE_QUALITY_PENALTY: dict[int, Fraction] = {
     1: Fraction(1, 100), 2: Fraction(3, 200), 3: Fraction(1, 40),
 }
 
@@ -310,6 +319,11 @@ beacon_speed(recipe) =
     × BEACON_SLOTS
     × SPEED_MODULE_BONUS[tier] × MODULE_QUALITY_MULT[module_quality]
 ```
+
+Speed modules in a beacon also transmit a QUALITY penalty (same `effectivity ×
+sqrt(count)` scaling), so the net per-step quality chance is
+`quality_chance_from_specs(machine_specs) − _beacon_quality_penalty(beacon)`,
+clamped at 0. Enough speed beacons drive quality output to 0.
 
 Effective machine speed:
 ```
@@ -495,7 +509,12 @@ per-step `quality_output` split, identical to the recursive path.
 
 `cli.py` models the quality tier of crafted output. Quality modules give a
 per-craft upgrade chance `q_chance` (`quality_chance_from_specs`: T1 +1% / T2 +1.5%
-/ T3 +2.5% per slot, ×`MODULE_QUALITY_MULT`, slot-scaled, clamped). A normal-tier
+/ T3 +2.5% per slot, ×`MODULE_QUALITY_MULT`, slot-scaled, clamped). Speed modules
+SUBTRACT quality at the same per-tier magnitude (`SPEED_MODULE_QUALITY_PENALTY`,
+"haste makes waste") — both in the same machine AND transmitted from a beacon
+(`Solver._beacon_quality_penalty`, scaled by `effectivity × sqrt(count)`), so
+speed + quality cancel tier-for-tier and enough speed beacons drive quality to 0.
+A normal-tier
 craft lands at tier `s` with probability `quality_tier_probs(q, max_index)` — the
 90/9/0.9/0.1 cascade with mass above `--max-quality` (highest UNLOCKED tier) folded
 onto the cap.
@@ -607,7 +626,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 272 tests covering:
+`dev/test_cli.py` contains 275 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -625,7 +644,7 @@ python -m unittest dev.test_cli -v
 | `TestSimpleCoalLiquefaction` | `simple-coal-liquefaction` (Space Age); coal+calcite+sulfuric-acid in raw; no crude-oil; cracking for petgas |
 | `TestGlebaMachineRouting` | `organic` → biochamber (no assembler); `pressing` → foundry (count=1/16 for transport-belt); `captive-spawner-process` → captive-spawner with zero inputs |
 | `TestNutrientsRecipes` | Default picks `nutrients-from-yumako-mash` via `RECIPE_DEFAULTS` (not fish); no circular dependency; fish route still available via `--recipe` override; bioflux override full biochamber chain |
-| `TestBeaconConfig` | `--beacon MACHINE=COUNT:TIER:QUALITY` computes speed via sqrt formula; `beacon_speed_bonus` in step output; `machine_count` becomes float; beacon quality effectivity (1.5/1.7/1.9/2.1/2.5); per-recipe override via `--recipe-beacon` |
+| `TestBeaconConfig` | `--beacon MACHINE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` computes speed via sqrt formula; `beacon_speed_bonus` in step output; `machine_count` becomes float; beacon quality effectivity (1.5/1.7/1.9/2.1/2.5); per-recipe override via `--recipe-beacon` |
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |
 | `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
@@ -646,10 +665,10 @@ python -m unittest dev.test_cli -v
 | `TestMachineInherentProd` | `build_machine_prod_bonus` returns 1/2 for foundry/EM-plant/biochamber and 0 for assembler/furnace; `_compute_module_effects` returns the machine built-in prod even when `allow_prod=False` (modules gated, inherent not) and 0 for non-inherent machines; EM-plant electronic-circuit machine count is 2/3 of the no-inherent baseline |
 | `TestSimplexLP` | Direct unit tests for `_lp_minimize`: basic optimum with exact `Fraction` output; picks the cheaper variable; `infeasible` when an item has no producer (all-zero row, b>0); `unbounded` detection; fractional optimum (2.5 each on a symmetric cover) |
 | `TestFulgoraRecyclingLP` | End-to-end `--location fulgora` LP via subprocess: `scrap` is the only solid raw and no asteroid-crushing steps; binding-constraint throughput (battery 60/min → 1500 scrap on `recycler`); `scrap-recycling-productivity` reduces scrap demand in the LP (+10 %/level → 1500/1.1 at L1, 1500/1.2 at L2); by-products surface in `co_products`; holmium-ore/stone resolve with no `--bus-item` (EM-science 90/min → 9800 scrap); cascade uses `iron-gear-wheel-recycling` not asteroids; speed modules flow into LP coefficients and reduce machine counts; `--step-machines` rejected on fulgora; `FULGORA_WRAP_ROUTES` entries are valid single-ingredient wrap recipes with existing `<wrap>-recycling`; production_steps are emitted as a strict sources-last bill of materials (target first, `scrap-recycling` last; every step below ALL its consumers) — `format_output` uses a longest-path level sort for `--location fulgora` (recursive/tree locations keep the DFS pre-order) |
-| `TestQualityChanceHelpers` | Unit tests for `quality_chance_from_specs` (T2=1.5%/slot base, tier+quality scaling, ignores non-quality modules, slot-scaling caps at machine slots, clamp to 1.0, zero when no slots) and `quality_tier_probs` (legendary-cap 90/9/0.9/0.1 split sums to 1; rare-cap folds +2/+3/+4 mass onto rare; normal-only cap folds everything back to normal) |
-| `TestQualityPickout` | End-to-end `--quality-pickout` via subprocess: recursive path scales the quality step up so normal output == demand and extracts uncommon/rare/epic (capped at `--max-quality`, no legendary key); aggregated `quality_yield` matches the per-step `quality_output` >normal split; pick-out raises machine count vs the reporting-only run; reporting-only (no flag) leaves machine count at nominal and emits no `quality_yield` (informational split sums to the flowing rate); pick-out flag with no quality modules extracts nothing; Fulgora LP pick-out (accumulator 5×quality-2 → normal 50/min + rare-capped extraction); `--max-quality rare` suppresses epic/legendary even with legendary T3 modules; human format renders the three quality sections |
+| `TestQualityChanceHelpers` | Unit tests for `quality_chance_from_specs` (T2=1.5%/slot base, tier+quality scaling, prod modules ignored, **speed modules subtract — a tier-T speed module cancels a tier-T quality module at equal housing quality (incl. legendary); partial penalty nets correctly; clamps to 0 with no quality modules**, slot-scaling caps at machine slots, clamp to 1.0, zero when no slots) and `quality_tier_probs` (legendary-cap 90/9/0.9/0.1 split sums to 1; rare-cap folds +2/+3/+4 mass onto rare; normal-only cap folds everything back to normal) |
+| `TestQualityPickout` | End-to-end `--quality-pickout` via subprocess: recursive path scales the quality step up so normal output == demand and extracts uncommon/rare/epic (capped at `--max-quality`, no legendary key); aggregated `quality_yield` matches the per-step `quality_output` >normal split; pick-out raises machine count vs the reporting-only run; reporting-only (no flag) leaves machine count at nominal and emits no `quality_yield` (informational split sums to the flowing rate); pick-out flag with no quality modules extracts nothing; Fulgora LP pick-out (accumulator 5×quality-2 → normal 50/min + rare-capped extraction); `--max-quality rare` suppresses epic/legendary even with legendary T3 modules; human format renders the three quality sections; **speed modules in a beacon reduce the step's quality (`test_beacon_speed_modules_reduce_quality`: a speed beacon lowers `quality_yield`, enough beacons cancel it to `{}`)** |
 
-### `dev/test_quality_planner.py` (315 tests)
+### `dev/test_quality_planner.py` (322 tests)
 
 Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-partial LDS-shuffle wiring:
 
@@ -690,7 +709,8 @@ Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-part
 | `TestEnumerateRecycleRoutes` (Reddit wrap-and-recycle) | `enumerate_recycle_routes` returns ALL self-recycle candidates per item including multi-solid-ingredient wraps (which `build_recycle_shortcuts` deliberately filters out). Each descriptor exposes `retention`, `recycler_time`, `craft_time`, `craft_category`, `container`, `wrap_recipe`, `co_solids`, `co_fluids`, `co_byproducts`. Verifies: dict keyed by item; cached by `id(data)`; direct self-recycle entry present (e.g. for holmium-plate); single-ingredient wraps preserved (e.g. steel-chest for steel-plate); multi-ingredient wraps surface for holmium-plate (electromagnetic-plant, supercapacitor, …); co-ingredient amounts normalised per 1 item-atom in; routes sorted by `(-retention, recycler_time)`; recycling recipes never leak in as wraps; `build_recycle_shortcuts` byte-identical (purely additive). |
 | `TestWrapDP` (Reddit wrap-and-recycle) | `solve_self_recycle_target_loop` gains optional wrap-craft `(wp, wq)` dimensions via `wrap_route` + `wrap_machine_slots` kwargs. Cycle DP composes wrap-craft quality roll with container-recycle quality roll (2 rolls per pass instead of 1). Wrap-craft prod scales retention by `(1 + wrap_prod)`. Verifies: default call (no wrap) is byte-identical to pre-extension behaviour; supplying a wrap route + slots strictly improves yield; `wrap_machine_slots=0` skips wrap path even when route is provided; `wrap_allow_prod=False` forces `wp=0` in best config; search-space remains additive (20 holmium calls @ 5 slots in <1s); per-tier configs gain `wrap_prod`/`wrap_quality` fields when active. End-to-end `plan('holmium-plate')` activates the wrap path, drops total machines from ~666 (baseline) to <500 (`supercapacitor` wrap via EM-plant); co-ingredients (superconductor, electronic-circuit, battery) appear in `normal_solid_input`; emits `wrap-and-recycle via …` note; linear scaling under rate doubling holds. `_choose_wrap_route` two-tier selection: single-ingredient wraps (`co_solids=[]`) take priority — e.g. steel-plate stays on steel-chest, concrete on hazard-concrete — so the cleanup never switches their wrap recipe even though they now get the second quality roll.  Falls back to multi-ingredient wraps only when no single-ingredient option exists (the holmium-plate case).  Returns `(None, None)` when called with non-self items in `_in_flight` (cycle-prevention) but runs when only self is in flight (genuine top-level). |
 | `TestModuleConfigSurface` | Quality-loop stages surface their quality-module config. `scrap-quality-source` stage carries `module_config_per_tier` (every recycler slot = `4x quality-N-Q`); `format_human` renders a `modules:` sub-line for scrap / asteroid-reprocessing / mined-raw stages (these previously showed no modules, only assembly prod). `_module_config_summary` collapses uniform per-tier configs to one string, lists per-tier when they differ, and handles empty / `0x` (no modules). |
-| `TestModuleSpeedPenalty` | `_module_speed_mult`: quality modules −5%/slot (×0.8 at 4), prod modules −5/−10/−15% per tier, combined penalties, floored at 0.2 (−80% speed floor). Verifies the penalty is wired into the loop stages — neutralising it lowers the asteroid-crusher-dominated iron-plate plan by ~×1.11. (Self-feed LP not yet covered — part 2.) |
+| `TestModuleSpeedPenalty` | `_module_speed_mult`: quality modules −5%/slot (×0.8 at 4), prod modules −5/−10/−15% per tier, combined penalties, floored at 0.2 (−80% speed floor). Verifies the penalty is wired into the loop stages — neutralising it lowers the asteroid-crusher-dominated iron-plate plan by ~×1.11 — **and into the self-feed LP** (`test_wired_into_self_feed_lp`: pentapod-egg machine count drops when the penalty is neutralised; the crafter's prod+quality slots and recycler's quality slots are applied per config). |
+| `TestLocationFulgora` | `--location fulgora` scrap-only sourcing. Verifies: quality-module-2/-3 @ rare produce **zero** `asteroid_input` and no `asteroid-reprocessing`/`raw-crushing` stages (scrap is the sole base source, `scrap-quality-source` role present); metals route from scrap (copper-plate in `scrap_overflow`, empty `mined_input`); `_pick_recipe_fluid_preferred(..., forbid_ore_routes=True)` returns plain `copper-cable` (not `casting-copper-cable`); `--location fulgora` implies the Fulgora unlock without explicit `--planets`; an unsourceable solid (`tungsten-plate` → tungsten-ore) fails fast naming `vulcanus`. |
 
 ---
 

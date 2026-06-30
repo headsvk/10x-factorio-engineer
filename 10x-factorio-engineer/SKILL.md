@@ -994,6 +994,7 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     --tech NAME=LEVEL                                      # REQUIRED. Repeat for each unlocked tech.
     [--target-quality uncommon|rare|epic|legendary]        # default: legendary (the goal tier — see note above)
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
+    [--location nauvis|vulcanus|fulgora|gleba|aquilo]      # build location; --location fulgora = scrap-only sourcing
     [--module-quality normal|uncommon|rare|epic|legendary] # default: matches --target-quality; may not exceed it
     [--quality-module-tier 1|2|3]                          # default: 3
     [--assembler-level 2|3]                                # default: 3
@@ -1030,6 +1031,17 @@ common "fully researched" case use:
 - `aquilo` unlocks ammonia, fluorine, lithium-brine, ice-as-raw
 
 Without `--planets`, only asteroid-reachable items work (iron, copper, stone, ice, calcite, carbon, sulfur via crushing).
+
+### Build location flag (`--location`)
+
+`--location PLANET` says the factory is *built on* that planet (mirrors cli.py).
+It unlocks that planet's raws, and **`--location fulgora` additionally switches
+to scrap-only sourcing** — Fulgora has no asteroid platform, so base materials
+come from the scrap-recycling quality source and metals terminate at their
+scrap-reachable plate form (no asteroid reprocessing, no casting/molten-ore
+routes). Use it whenever the player is producing quality items *on Fulgora*
+(e.g. "what's the cost of rare quality-module-3 on Fulgora"). Only `fulgora`
+alters sourcing today; other `--location` values just unlock that planet.
 
 ### Common flags to recommend
 
