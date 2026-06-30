@@ -195,9 +195,12 @@ def recipe_allows_quality(recipe: dict) -> bool:
 # "<wrap>-recycling" recipe becomes an LP candidate the solver may pick when it
 # pays off (it is NOT forced).  Map is base item → wrap craft recipe key.
 # Fixed set — extend as needed.
+#
+# NOTE (2.1.8): the concrete → hazard-concrete wrap was dropped — hazard-concrete
+# recycling no longer returns concrete (it decomposes to stone-brick + iron-ore),
+# so the wrap no longer recovers concrete.
 FULGORA_WRAP_ROUTES: dict[str, str] = {
     "steel-plate": "steel-chest",       # 8 steel → chest → recycle (1.0 → 0.03125s, ~32x)
-    "concrete":    "hazard-concrete",   # concrete → hazard → recycle (0.625 → 0.0156s, ~40x)
 }
 
 # Planet-locked advanced machines. Each requires planet-specific tech to build,
@@ -2236,7 +2239,7 @@ def solve_fulgora(solver: "Solver", data: dict, targets: list) -> dict:
                         recycle_reachable.add(res["name"])
                         changed = True
         # Whitelist the fixed wrap-and-recycle tricks: once a base material is
-        # recycle-reachable, its cheap wrapper (steel-chest, hazard-concrete) is
+        # recycle-reachable, its cheap wrapper (e.g. steel-plate → steel-chest) is
         # too — making the much-faster <wrap>-recycling recipe an LP candidate
         # the solver can pick when it pays off (it is NOT forced).
         for base, wrap in FULGORA_WRAP_ROUTES.items():

@@ -505,11 +505,16 @@ SELF_RECYCLE_TARGETS = frozenset([
     "biolab",
     "captive-biter-spawner",
     # Slow-to-recycle items that climb quality cheaply via the wrap-and-recycle
-    # trick (steel-plate → steel-chest, concrete → hazard-concrete).  Not added
-    # to SELF_RECYCLING_BLOCKLIST, so they only take this path as a top-level
-    # target; as ordinary intermediates they are still crafted normally.
+    # trick (steel-plate → steel-chest).  Not added to SELF_RECYCLING_BLOCKLIST,
+    # so they only take this path as a top-level target; as ordinary
+    # intermediates they are still crafted normally.
+    #
+    # NOTE (2.1.8): concrete was removed here.  Its wrap (concrete →
+    # hazard-concrete → recycle) is dead — hazard-concrete-recycling no longer
+    # returns concrete, and the only loop-closing container left (heating-tower)
+    # drags in boiler + heat-pipe and recycles slowly, so it is not a viable
+    # quality wrap.  Concrete now plans as a normal craft.
     "steel-plate",
-    "concrete",
 ])
 
 # V3 item 4 (continuation): self-FEED targets — recipes whose ingredient list
