@@ -81,6 +81,9 @@ DATA_URLS = {
 # Miner / extractor base (normal-quality) speeds, keyed by drill key.  Populated
 # from mining_drills[].mining_speed[0] in configure_from_dataset().
 MINER_SPEED: dict[str, Fraction] = {}
+# Miner / extractor speeds for all qualities, keyed by drill key. Populated
+# from mining_drills[].mining_speed in configure_from_dataset().
+MINER_SPEEDS: dict[str, list[Fraction]] = {}
 # Offshore-pump throughput (items/min) = pumping_speed[0] (items/tick) × 3600.
 # Populated in configure_from_dataset(); the literal is a load-order fallback.
 OFFSHORE_PUMP_RATE: Fraction = Fraction(72000)
@@ -455,10 +458,16 @@ def configure_from_dataset(data: dict) -> None:
 
     # --- miner / drill base (normal-quality) speeds ---
     MINER_SPEED.clear()
+    MINER_SPEEDS.clear()
     for d in data.get("mining_drills", []):
         key = d.get("key")
         if key:
             MINER_SPEED[key] = _quality_value(d.get("mining_speed"), 0)
+            raw_speeds = d.get("mining_speed")
+            MINER_SPEEDS[key] = [
+                _quality_value(raw_speeds, q_idx)
+                for q_idx in range(len(QUALITY_TIERS))
+            ]
 
     # --- module effects (by tier) ---
     MODULE_PROD_BONUS.clear()
@@ -2436,6 +2445,7 @@ def compute_miners(
     default_beacon_config: dict | None = None,
     beacon_quality: str = "normal",
     mining_productivity_level: int = 0,
+    machine_quality: str = "normal",
 ) -> dict:
     if machine_power_w is None:
         machine_power_w = {}
@@ -2444,6 +2454,7 @@ def compute_miners(
     # with drill prod modules (Factorio semantics).  Does NOT apply to
     # offshore-pump (not a miner).
     mining_research_prod = RESEARCH_PROD_PER_LEVEL * mining_productivity_level
+    q_idx = QUALITY_INDEX.get(machine_quality, 0)
     result: dict[str, dict] = {}
 
     for item, rate in raw_resources.items():
@@ -2454,7 +2465,7 @@ def compute_miners(
         cat = info["category"]
         if cat == "offshore":
             machine   = "offshore-pump"
-            rate_each = OFFSHORE_PUMP_RATE
+            rate_each = Fraction(PUMP_THROUGHPUT.get(machine_quality, PUMP_THROUGHPUT["normal"]))
             count = rate / rate_each
             entry: dict = {
                 "machine":            machine,
@@ -2471,8 +2482,10 @@ def compute_miners(
             # machine count, since pumpjack throughput depends on field depletion.
             # rate_at_100pct = rate one pumpjack produces at 100% field yield.
             # Mining productivity research multiplies per-pumpjack throughput.
+            pumpjack_speeds = MINER_SPEEDS.get("pumpjack")
+            pumpjack_speed = pumpjack_speeds[q_idx] if pumpjack_speeds else MINER_SPEED["pumpjack"]
             rate_at_100pct = (
-                (MINER_SPEED["pumpjack"] / info["mining_time"])
+                (pumpjack_speed / info["mining_time"])
                 * info["yield"] * (Fraction(1) + mining_research_prod) * 60
             )
             required_pct   = rate / rate_at_100pct * 100
@@ -2523,7 +2536,9 @@ def compute_miners(
                             SPEED_MODULE_BONUS[mod["tier"]] * MODULE_QUALITY_MULT[mod["quality"]]
                         )
 
-            base_speed    = MINER_SPEED[drill_key] * (Fraction(1) + speed_bonus)
+            drill_speeds = MINER_SPEEDS.get(drill_key)
+            base_drill_speed = drill_speeds[q_idx] if drill_speeds else MINER_SPEED[drill_key]
+            base_speed    = base_drill_speed * (Fraction(1) + speed_bonus)
             eff_speed     = float(base_speed) * (1.0 + beacon_speed_bonus)
             # Mining productivity research stacks additively with drill prod modules.
             total_prod    = prod_bonus + mining_research_prod
@@ -2753,6 +2768,7 @@ def format_output(
         default_beacon_config=solver.default_beacon_config,
         beacon_quality=solver.beacon_quality,
         mining_productivity_level=solver.mining_productivity_level,
+        machine_quality=solver.machine_quality,
     )
 
     is_multi = len(args.items) > 1

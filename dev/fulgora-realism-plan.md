@@ -140,7 +140,7 @@ green, docs updated.
 
 ---
 
-## C2 — Drill machine-quality in cli.py (medium risk, shared file)
+## C2 — Drill machine-quality in cli.py (medium risk, shared file) — ✅ DONE (2026-07-01)
 
 **Goal:** apply `--machine-quality` to drill speed so a legendary big drill uses
 its `6.25` mining-speed (vs `2.5` normal), shrinking counts. The planner (C1)

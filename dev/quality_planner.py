@@ -5842,6 +5842,7 @@ def plan(
             miner_type,
             machine_power_w=machine_power_w,
             mining_productivity_level=research_levels.get("mining-productivity", 0),
+            machine_quality=machine_quality,
         )
         for it, entry in sorted(miners.items()):
             if "machine_count" not in entry:

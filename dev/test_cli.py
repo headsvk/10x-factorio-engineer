@@ -299,6 +299,76 @@ class TestBigMiningDrill(unittest.TestCase):
         self.assertEqual(miners["iron-ore"]["machine"], "electric-mining-drill")
 
 
+
+class TestMinerQuality(unittest.TestCase):
+
+    def test_drill_quality(self):
+        s = _solver("space-age")
+        s.solve("tungsten-carbide", Fraction(60))
+        s.resolve_oil(_DATA["space-age"]["data"])
+        
+        miners_normal = cli.compute_miners(
+            s.raw_resources, _DATA["space-age"]["resource_info"], "big",
+            machine_quality="normal"
+        )
+        miners_legendary = cli.compute_miners(
+            s.raw_resources, _DATA["space-age"]["resource_info"], "big",
+            machine_quality="legendary"
+        )
+        
+        self.assertIn("tungsten-ore", miners_normal)
+        self.assertIn("tungsten-ore", miners_legendary)
+        
+        count_normal = miners_normal["tungsten-ore"]["machine_count"]
+        count_legendary = miners_legendary["tungsten-ore"]["machine_count"]
+        
+        self.assertAlmostEqual(count_normal / count_legendary, 2.5, places=4)
+
+    def test_pumpjack_quality(self):
+        s = _solver("space-age")
+        s.solve("processing-unit", Fraction(10))
+        s.resolve_oil(_DATA["space-age"]["data"])
+        
+        miners_normal = cli.compute_miners(
+            s.raw_resources, _DATA["space-age"]["resource_info"], "electric",
+            machine_quality="normal"
+        )
+        miners_legendary = cli.compute_miners(
+            s.raw_resources, _DATA["space-age"]["resource_info"], "electric",
+            machine_quality="legendary"
+        )
+        
+        self.assertIn("crude-oil", miners_normal)
+        self.assertIn("crude-oil", miners_legendary)
+        
+        yield_normal = miners_normal["crude-oil"]["required_yield_pct"]
+        yield_legendary = miners_legendary["crude-oil"]["required_yield_pct"]
+        
+        # Compare with places=2 due to rounding of required_yield_pct to 2 decimal places
+        self.assertAlmostEqual(yield_normal / yield_legendary, 2.5, places=2)
+
+    def test_offshore_pump_quality(self):
+        s = _solver("space-age")
+        s.solve("water", Fraction(6000))
+        
+        miners_normal = cli.compute_miners(
+            s.raw_resources, _DATA["space-age"]["resource_info"], "electric",
+            machine_quality="normal"
+        )
+        miners_legendary = cli.compute_miners(
+            s.raw_resources, _DATA["space-age"]["resource_info"], "electric",
+            machine_quality="legendary"
+        )
+        
+        self.assertIn("water", miners_normal)
+        self.assertIn("water", miners_legendary)
+        
+        count_normal = miners_normal["water"]["machine_count"]
+        count_legendary = miners_legendary["water"]["machine_count"]
+        
+        self.assertAlmostEqual(count_normal / count_legendary, 2.5, places=2)
+
+
 # ---------------------------------------------------------------------------
 # Machine category routing (vanilla)
 # ---------------------------------------------------------------------------

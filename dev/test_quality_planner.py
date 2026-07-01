@@ -1533,6 +1533,13 @@ class TestPlannerMiners(unittest.TestCase):
         st = next(s for s in out["stages"] if s["role"] == "mining")
         self.assertEqual(st["machine"], "electric-mining-drill")
 
+    def test_machine_quality_reduces_drill_count(self):
+        base = self._fulgora_qm2(miner_type="big", machine_quality="normal")
+        rare = self._fulgora_qm2(miner_type="big", machine_quality="rare")
+        bc = next(s for s in base["stages"] if s["role"] == "mining")["machine_count"]
+        rc = next(s for s in rare["stages"] if s["role"] == "mining")["machine_count"]
+        self.assertAlmostEqual(rc, bc / 1.6, delta=1e-2)
+
 
 class TestNoAsteroids(unittest.TestCase):
     """V3 small: --no-asteroids flag forces all quality through planet
