@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-01. Tests: `python -m unittest dev.test_quality_planner -v` — **343 tests, all passing, ~2.0 s.**
+**Last updated:** 2026-07-01. Tests: `python -m unittest dev.test_quality_planner -v` — **345 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -536,7 +536,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **343 tests**, 46 classes.
+`dev/test_quality_planner.py` — **345 tests**, 46 classes.
 
 | Class | Coverage |
 |---|---|

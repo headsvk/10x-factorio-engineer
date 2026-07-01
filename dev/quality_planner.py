@@ -6830,7 +6830,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--machine-quality", default="normal",
-        choices=list(cli.MACHINE_QUALITY_SPEED.keys()),
+        choices=list(QUALITY_TIERS),
         help=(
             "Quality tier of every assembly / crusher / recycler machine "
             "(applies MACHINE_QUALITY_SPEED bonus: +30/+60/+90/+150%% for "

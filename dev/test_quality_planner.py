@@ -1353,9 +1353,9 @@ class TestMachineQuality(unittest.TestCase):
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # +150% speed → 1/2.5 = 40% machines; allow some slack for rounding.
-        # Compare PRODUCTION machines only: --machine-quality speeds up crafting
-        # machines, but miners (the `mining` role) don't get the quality speed
-        # bonus until C2, so including them would mask the crafting reduction.
+        # Compare PRODUCTION machines only: post-C2 miners (the `mining` role)
+        # also get the quality speed bonus, but this plan has no mined raws;
+        # excluding the role keeps the assertion focused on crafting machines.
         def _prod_machines(out):
             return sum(
                 s["machine_count"] for s in out["stages"] if s.get("role") != "mining"
@@ -1441,6 +1441,35 @@ class TestMachineQuality(unittest.TestCase):
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         self.assertGreater(out["total_machine_count"], 0)
+
+    def test_machine_quality_choices_accept_all_tiers(self):
+        # Regression: --machine-quality choices were built from
+        # cli.MACHINE_QUALITY_SPEED, which stays empty until a dataset is
+        # loaded — and parse_args() runs before that, so every value was
+        # rejected with "invalid choice (choose from )".  Choices must be the
+        # static tier list, which is load-order independent.
+        import sys
+        for q in ("normal", "uncommon", "rare", "epic", "legendary"):
+            argv = ["qp", "--item", "iron-plate", "--rate", "10",
+                    "--machine-quality", q]
+            old = sys.argv
+            try:
+                sys.argv = argv
+                args = qp.parse_args()
+            finally:
+                sys.argv = old
+            self.assertEqual(args.machine_quality, q)
+
+    def test_machine_quality_rejects_unknown(self):
+        import sys
+        old = sys.argv
+        try:
+            sys.argv = ["qp", "--item", "iron-plate", "--rate", "10",
+                        "--machine-quality", "mythical"]
+            with self.assertRaises(SystemExit):
+                qp.parse_args()
+        finally:
+            sys.argv = old
 
 
 class TestPlannerMiners(unittest.TestCase):
