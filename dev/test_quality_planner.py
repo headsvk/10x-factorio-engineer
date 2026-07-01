@@ -1598,6 +1598,8 @@ class TestScrapUpcycleLoops(unittest.TestCase):
         no_loops = self._fulgora_acc(scrap_upcycle_loops=False)
         with_loops = self._fulgora_acc(scrap_upcycle_loops=True)
         self.assertLess(with_loops["scrap_input"]["scrap"], no_loops["scrap_input"]["scrap"])
+        # Anchor the headline loop scrap rate:
+        self.assertAlmostEqual(with_loops["scrap_input"]["scrap"], 1857.4465, delta=1e-1)
 
     def test_loop_machines_present(self):
         out = self._fulgora_acc(scrap_upcycle_loops=True)

@@ -6914,6 +6914,14 @@ def parse_args() -> argparse.Namespace:
             "reduces the count."
         ),
     )
+    p.add_argument(
+        "--no-miner-quality-modules", action="store_false", dest="miner_quality_modules",
+        help="Disable quality module seeding in mining drills.",
+    )
+    p.add_argument(
+        "--no-scrap-upcycle-loops", action="store_false", dest="scrap_upcycle_loops",
+        help="Disable closed-loop plate upcycling on Fulgora.",
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
 
@@ -6980,6 +6988,8 @@ def main() -> None:
             tech_state=tech_state,
             target_tier=target_tier,
             miner_type=args.miner,
+            miner_quality_modules=args.miner_quality_modules,
+            scrap_upcycle_loops=args.scrap_upcycle_loops,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)

@@ -1007,6 +1007,8 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--enable-driver RECIPE_KEY ...]                       # harvest a recipe's co-product to cover a leaf raw
     [--enable-drivers all]                                 # try every co-product driver (cost-gated)
     [--no-asteroids]                                       # no space platform yet
+    [--no-miner-quality-modules]                           # disable quality module seeding in mining drills
+    [--no-scrap-upcycle-loops]                             # disable closed-loop plate upcycling on Fulgora
     [--miner electric|big]                                 # drill fleet for solid raws (default electric)
     [--format json|human]                                  # default: human
 ```
