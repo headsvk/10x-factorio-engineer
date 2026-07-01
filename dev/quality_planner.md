@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-06-30. Tests: `python -m unittest dev.test_quality_planner -v` — **340 tests, all passing, ~2.0 s.**
+**Last updated:** 2026-07-01. Tests: `python -m unittest dev.test_quality_planner -v` — **343 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -531,7 +531,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **340 tests**, 45 classes.
+`dev/test_quality_planner.py` — **343 tests**, 46 classes.
 
 | Class | Coverage |
 |---|---|
@@ -560,6 +560,7 @@ MACHINE_INHERENT_PROD = {
 | `TestNoAsteroids` | `--no-asteroids` routes via `MINED_RAW_NO_ASTEROID_FALLBACK`; fail-fast names the missing planet |
 | `TestLocationFulgora` | `--location fulgora` scrap-only sourcing: zero `asteroid_input`, metals from scrap, `forbid_ore_routes` picks plain `copper-cable`, auto-unlocks EM-plant + recycler, unsourceable solid fail-fast. **Fluid sub-chains:** qm2 plan emits a `fluid-chain` stage producing `sulfuric-acid` on `chemical-plant` (tagged `fluid_target`); `fluid_input` holds `heavy-oil` not `sulfuric-acid`; `fluid_chain_scrap_draw` (ice/iron-plate) is scrap-reachable and credited against overflow; fluid-chain machines fold into `total_machine_count` + `summary.by_role`; off-Fulgora `processing-unit` keeps `sulfuric-acid` as a raw with no fluid-chain stage. |
 | `TestQualityScrapSeeding` (C3) | Mined scrap inherits quality from quality modules in mining drills. Verifies scrap required and recycler machine count drops; larger quality module capacity (big drill vs electric) yields larger drop; disabling drill quality modules reproduces the C1 scrap baseline. |
+| `TestScrapUpcycleLoops` (C4) | Closed-loop plate upcycling on Fulgora. Verifies scrap requirements drop significantly; scrap-upcycle-loop stages are correctly sized/counted and displayed under the `[upcycle]` tag in `format_human`; disabling loops recovers baseline. |
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
 | `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, partial-lock baseline parity, `_parse_tech_state` validation (machine techs only), `tech_state` is a required kwarg |

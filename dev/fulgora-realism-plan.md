@@ -47,7 +47,7 @@ assumes a real quality grind.
 | 1 miner counting + mining-prod pass-through + `--miner` | **C1** |
 | drill `--machine-quality` speed (cli-side accuracy) | **C2** |
 | 2 quality scrap seeding | **C3** [COMPLETE] |
-| 3 recycler upcycle loop | **C4** |
+| 3 recycler upcycle loop | **C4** [COMPLETE] |
 | validation + doc consolidation | **C5** |
 | (optional) cli.py quality-ore output for recursive solver | **Appendix A** |
 
@@ -221,7 +221,7 @@ drill quality, suites green.
 
 ---
 
-## C4 — Recycler upcycle loop (planner scrap source, highest risk)
+## C4 — Recycler upcycle loop (planner scrap source, highest risk) — ✅ DONE (2026-07-01)
 
 **Goal:** replace the single-pass rare-tail skim with a closed quality loop —
 sub-target outputs are recycled and re-rolled (plate↔ore where legal) until they

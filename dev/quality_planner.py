@@ -1993,6 +1993,78 @@ def _compose_miner_and_recycler_rolls(q_miner: float, q_rec: float, d: int) -> l
     return dist
 
 
+def _is_upcyclable_scrap_leaf(item_key: str) -> bool:
+    return item_key in ("iron-plate", "copper-plate")
+
+
+def compute_loop_flows(
+    target_tier: int,
+    configs: dict,
+    quality_module_tier: int,
+    module_quality: str,
+    base_retention: float,
+    wrap_active: bool,
+    wrap_inherent_prod: float,
+    wrap_research_prod: float,
+    inherent_prod: float,
+    research_prod: float,
+    t_in: int,
+) -> list[float]:
+    """Solve for flow[s] (rate entering recycler at tier s) for a unit input at t_in."""
+    flow = [0.0] * 5
+    transition_rates = {}
+    stay_prob = [0.0] * 5
+    
+    for j in range(target_tier):
+        cfg = configs[j]
+        q_rec = _quality_chance(cfg["recycle_quality"], quality_module_tier, module_quality)
+        if wrap_active:
+            wp_val = cfg.get("wrap_prod", 0)
+            wrap_prod = wrap_inherent_prod + wrap_research_prod + _prod_bonus(wp_val, 3, module_quality)
+            if wrap_prod > 3.0:
+                wrap_prod = 3.0
+            retention = base_retention * (1.0 + wrap_prod)
+            q_wrap = _quality_chance(cfg.get("wrap_quality", 0), quality_module_tier, module_quality)
+        else:
+            cp_val = cfg.get("craft_prod", 0)
+            prod = inherent_prod + research_prod + _prod_bonus(cp_val, 3, module_quality)
+            if prod > 3.0:
+                prod = 3.0
+            retention = base_retention * (1.0 + prod)
+            q_wrap = 0.0
+            
+        wrap_probs = _tier_skip_probs(q_wrap, j)
+        composite_up = [0.0] * (5 - j)
+        for i, pwi in enumerate(wrap_probs):
+            if pwi == 0.0:
+                continue
+            rec_probs = _tier_skip_probs(q_rec, j + i)
+            for k, prj in enumerate(rec_probs):
+                if i + k < len(composite_up):
+                    composite_up[i + k] += pwi * prj
+                    
+        stay_prob[j] = retention * composite_up[0]
+        rates = {}
+        for k in range(1, len(composite_up)):
+            if j + k < 5:
+                rates[j + k] = retention * composite_up[k]
+        transition_rates[j] = rates
+
+    if stay_prob[t_in] < 1.0:
+        flow[t_in] = 1.0 / (1.0 - stay_prob[t_in])
+    else:
+        flow[t_in] = 0.0
+        
+    for s in range(t_in + 1, target_tier):
+        incoming = sum(flow[j] * transition_rates[j].get(s, 0.0) for j in range(t_in, s))
+        if stay_prob[s] < 1.0:
+            flow[s] = incoming / (1.0 - stay_prob[s])
+        else:
+            flow[s] = 0.0
+            
+    return flow
+
+
 def scrap_target_yield(
     item: str,
     cascade: dict,
@@ -2000,6 +2072,7 @@ def scrap_target_yield(
     quality_module_tier: int,
     module_quality: str,
     q_miner: float = 0.0,
+    V_loop: list[float] | None = None,
 ) -> float:
     """Target-tier ``item`` produced per 1 scrap recycled.
 
@@ -2012,7 +2085,10 @@ def scrap_target_yield(
         if d <= 0:
             continue
         dist = _compose_miner_and_recycler_rolls(q_miner, q, d)
-        total += amt * sum(dist[target_tier:])
+        if V_loop is not None:
+            total += amt * sum(dist[t] * V_loop[t] for t in range(5))
+        else:
+            total += amt * sum(dist[target_tier:])
     return total
 
 
@@ -2026,21 +2102,15 @@ def compute_scrap_source(
     machine_quality: str = "normal",
     miner_type: str = "electric",
     miner_quality_modules: bool = True,
+    scrap_upcycle_loops: bool = True,
+    assembler_level: int = 3,
+    tech_state: dict[str, int],
+    research_levels: dict[str, int] | None = None,
+    planets: frozenset[str] | None = None,
+    forbid_ore_routes: bool = False,
+    _cache: _DispatchCache | None = None,
 ) -> dict | None:
-    """Size a Fulgora scrap-recycling quality source for ``demanded_leaves``.
-
-    ``demanded_leaves`` maps scrap-reachable solid item -> target-tier rate/min.
-    One scrap stream feeds the whole basket, so the binding leaf sets the scrap
-    rate and the rest is overflow.  Returns ``None`` if no leaf is reachable.
-
-    Result dict:
-      ``scrap_per_min``    — normal scrap the recycler array consumes.
-      ``machine_count``    — recyclers (scrap-recycling + cascade steps).
-      ``covered``          — {item: rate} satisfied at the target tier.
-      ``overflow``         — {item: surplus rate at target tier} (unused).
-      ``binding_leaf``     — the leaf that set the scrap rate.
-      ``stage``            — a stage dict for the plan's stage list.
-    """
+    """Size a Fulgora scrap-recycling quality source for ``demanded_leaves``."""
     q_miner = 0.0
     if miner_quality_modules and module_quality:
         drill_key = "big-mining-drill" if miner_type == "big" else "electric-mining-drill"
@@ -2048,11 +2118,91 @@ def compute_scrap_source(
         miner_slots = slots_map.get(drill_key, 0)
         q_miner = _quality_chance(miner_slots, quality_module_tier, module_quality)
 
+    V_loops = {}
+    loop_configs = {}
+    loop_routes = {}
+    loop_machine_infos = {}
+
+    if scrap_upcycle_loops and module_quality:
+        recipe_idx = cli.build_recipe_index(data)
+        fluids = build_fluid_set(data)
+        planet_props = _combined_planet_props(data, planets or frozenset({"fulgora"}))
+        locked_machines = _tech_locked_machines(tech_state)
+        slots_map = cli.build_machine_module_slots(data)
+        
+        for leaf in demanded_leaves:
+            if _is_upcyclable_scrap_leaf(leaf):
+                craft_recipe = _pick_recipe_fluid_preferred(
+                    leaf, recipe_idx, fluids, planets or frozenset({"fulgora"}), planet_props,
+                    locked_machines=locked_machines, assembler_level=assembler_level,
+                    forbid_ore_routes=forbid_ore_routes,
+                )
+                if craft_recipe is None:
+                    continue
+                mr = _machine_for_recipe(craft_recipe, assembler_level, locked_machines)
+                if mr is None:
+                    continue
+                machine_key, machine_speed = mr
+                machine_slots = slots_map.get(machine_key, 0)
+                machine_allow_prod = True
+                inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+                research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels or {})
+                
+                wrap_route, wrap_machine_info = _choose_wrap_route(
+                    leaf, data,
+                    assembler_level=assembler_level,
+                    locked_machines=locked_machines,
+                    planet_props=planet_props,
+                    module_quality=module_quality,
+                    quality_module_tier=quality_module_tier,
+                    prod_module_tier=3,
+                    target_tier=target_tier,
+                    machine_key=machine_key,
+                    machine_slots=machine_slots,
+                    machine_allow_prod=machine_allow_prod,
+                    inherent_prod=inherent_prod,
+                    research_prod=research_prod,
+                    research_levels=research_levels or {},
+                    _cache=_cache,
+                )
+                
+                v_total, configs = solve_self_recycle_target_loop_memoized(
+                    leaf, data,
+                    machine_key=machine_key,
+                    machine_slots=machine_slots,
+                    machine_allow_prod=machine_allow_prod,
+                    inherent_prod=inherent_prod,
+                    research_prod=research_prod,
+                    module_quality=module_quality,
+                    prod_module_tier=3,
+                    quality_module_tier=quality_module_tier,
+                    target_tier=target_tier,
+                    _cache=_cache,
+                    wrap_route=wrap_route,
+                    wrap_machine_slots=wrap_machine_info["machine_slots"] if wrap_machine_info else 0,
+                    wrap_allow_prod=wrap_machine_info["allow_prod"] if wrap_machine_info else False,
+                    wrap_inherent_prod=wrap_machine_info["inherent_prod"] if wrap_machine_info else 0.0,
+                    wrap_research_prod=0.0,
+                )
+                
+                V_loop = [0.0] * 5
+                for t in range(5):
+                    if t >= target_tier:
+                        V_loop[t] = 1.0
+                    elif t in configs:
+                        V_loop[t] = configs[t].get("v_rec", 0.0)
+                        
+                V_loops[leaf] = V_loop
+                loop_configs[leaf] = configs
+                loop_routes[leaf] = wrap_route
+                loop_machine_infos[leaf] = (machine_key, machine_speed, machine_slots, machine_allow_prod, inherent_prod, research_prod, wrap_machine_info)
+
     cascade = build_scrap_cascade(data)
     yields = {
         leaf: scrap_target_yield(
             leaf, cascade, target_tier, quality_module_tier, module_quality,
             q_miner=q_miner,
+            V_loop=V_loops.get(leaf),
         )
         for leaf in demanded_leaves
     }
@@ -2109,6 +2259,113 @@ def compute_scrap_source(
             for t in range(target_tier)
         },
     }
+
+    upcycle_stages = []
+    for leaf in V_loops:
+        configs = loop_configs[leaf]
+        wrap_route = loop_routes[leaf]
+        (machine_key, machine_speed, machine_slots, machine_allow_prod, inherent_prod, research_prod, wrap_machine_info) = loop_machine_infos[leaf]
+        
+        wrap_active = wrap_route is not None
+        if wrap_active:
+            base_retention = float(wrap_route["retention"])
+            wrap_inherent_prod = wrap_machine_info["inherent_prod"]
+            wrap_research_prod = 0.0
+            loop_recycler_time = float(wrap_route["recycler_time"])
+            loop_craft_time = float(wrap_route["craft_time"])
+        else:
+            shortcut = build_recycle_shortcuts(data).get(leaf)
+            base_retention = float(shortcut["retention"]) if shortcut else RECYCLER_RETENTION
+            wrap_inherent_prod = 0.0
+            wrap_research_prod = 0.0
+            loop_recycler_time = float(shortcut["recycler_time"]) if shortcut else 0.2
+            loop_craft_time = float(shortcut["craft_time"]) if shortcut else 0.0
+            
+        total_flow = [0.0] * 5
+        for d, amt in cascade["depth_amounts"].get(leaf, {}).items():
+            if d <= 0:
+                continue
+            q_rec_cascade = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
+            dist_depth = _compose_miner_and_recycler_rolls(q_miner, q_rec_cascade, d)
+            
+            for t_in in range(target_tier):
+                rate_in_t = scrap_per_min * amt * dist_depth[t_in]
+                if rate_in_t <= 0.0:
+                    continue
+                flow = compute_loop_flows(
+                    target_tier, configs, quality_module_tier, module_quality,
+                    base_retention, wrap_active, wrap_inherent_prod, wrap_research_prod,
+                    inherent_prod, research_prod, t_in
+                )
+                for s in range(target_tier):
+                    total_flow[s] += rate_in_t * flow[s]
+                    
+        craft_machines = 0.0
+        recycler_machines = 0.0
+        
+        for s in range(target_tier):
+            if total_flow[s] <= 0.0:
+                continue
+            cfg = configs[s]
+            
+            q_rec_slots = cfg["recycle_quality"]
+            rec_speed_mult = _module_speed_mult(quality_slots=q_rec_slots)
+            rec_count_s = (total_flow[s] * loop_recycler_time) / (
+                RECYCLER_SPEED * qm_speed_mult * rec_speed_mult * 60.0
+            )
+            recycler_machines += rec_count_s
+            
+            if wrap_active:
+                cp_val = cfg.get("wrap_prod", 0)
+                cq_val = cfg.get("wrap_quality", 0)
+                craft_speed = _machine_speed(wrap_machine_info["machine_key"])
+            else:
+                cp_val = cfg.get("craft_prod", 0)
+                cq_val = cfg.get("craft_quality", 0)
+                craft_speed = machine_speed
+                
+            craft_speed_mult = _module_speed_mult(quality_slots=cq_val, prod_slots=cp_val)
+            craft_count_s = (total_flow[s] * loop_craft_time) / (
+                craft_speed * qm_speed_mult * craft_speed_mult * 60.0
+            )
+            craft_machines += craft_count_s
+            
+        if craft_machines > 0.0 or recycler_machines > 0.0:
+            up_stage = {
+                "role": "scrap-upcycle-loop",
+                "target": leaf,
+                "recipe": f"{leaf}-upcycle-loop",
+                "machine": wrap_machine_info["machine_key"] if wrap_active else machine_key,
+                "machine_count": craft_machines + recycler_machines,
+                "craft_machines": craft_machines,
+                "recycler_machines": recycler_machines,
+                "container": wrap_route["container"] if wrap_active else None,
+                "container_machines": craft_machines if wrap_active else 0.0,
+                "rate_per_min": scrap_per_min * yields[leaf],
+                "module_config_per_tier": {
+                    QUALITY_TIERS[t]: {
+                        "craft": (
+                            f"{configs[t].get('craft_prod',0)}p+"
+                            f"{configs[t].get('craft_quality',0)}q "
+                            f"(t{quality_module_tier} {module_quality})"
+                        ) if not wrap_active else "n/a",
+                        "recycle": (
+                            f"{configs[t].get('recycle_quality',0)}q "
+                            f"(t{quality_module_tier} {module_quality})"
+                        ),
+                        **({
+                            "wrap": (
+                                f"{configs[t].get('wrap_prod',0)}p+"
+                                f"{configs[t].get('wrap_quality',0)}q "
+                                f"(t{quality_module_tier} {module_quality})"
+                            )
+                        } if wrap_active else {})
+                    }
+                    for t in range(target_tier)
+                }
+            }
+            upcycle_stages.append(up_stage)
+
     return {
         "scrap_per_min": scrap_per_min,
         "machine_count": machine_count,
@@ -2116,6 +2373,7 @@ def compute_scrap_source(
         "overflow": overflow,
         "binding_leaf": binding_leaf,
         "stage": stage,
+        "upcycle_stages": upcycle_stages,
     }
 
 
@@ -2508,7 +2766,7 @@ def _stage_power_kw(stage: dict, power_w: dict[str, int]) -> float:
             _w(cast_machine) * cast_machines
             + _w("recycler") * float(stage.get("recycler_machines", 0))
         ) / 1000.0
-    if role == "self-recycle-target" or role == "self-feed-target":
+    if role in ("self-recycle-target", "self-feed-target", "scrap-upcycle-loop"):
         return (
             _w(stage.get("machine", "")) * float(stage.get("craft_machines", 0))
             + _w("recycler") * float(stage.get("recycler_machines", 0))
@@ -4976,6 +5234,7 @@ def plan(
     target_tier: int = 4,
     miner_type: str = "electric",
     miner_quality_modules: bool = True,
+    scrap_upcycle_loops: bool = True,
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -5622,9 +5881,18 @@ def plan(
                 machine_quality=machine_quality,
                 miner_type=miner_type,
                 miner_quality_modules=miner_quality_modules,
+                scrap_upcycle_loops=scrap_upcycle_loops,
+                assembler_level=assembler_level,
+                tech_state=tech_state,
+                research_levels=research_levels,
+                planets=planets_fs,
+                forbid_ore_routes=forbid_ore_routes,
+                _cache=_cache,
             )
             if src is not None:
                 scrap_stages.append(src["stage"])
+                if "upcycle_stages" in src:
+                    scrap_stages.extend(src["upcycle_stages"])
                 scrap_input["scrap"] = scrap_input.get("scrap", 0.0) + src["scrap_per_min"]
                 for it, surplus in src["overflow"].items():
                     scrap_overflow[it] = scrap_overflow.get(it, 0.0) + surplus
@@ -6088,6 +6356,7 @@ def plan(
             tech_state=tech_state,
             miner_type=miner_type,
             miner_quality_modules=miner_quality_modules,
+            scrap_upcycle_loops=scrap_upcycle_loops,
         )
         if baseline["total_machine_count"] < total_machines:
             baseline.setdefault("notes", []).append(
@@ -6119,6 +6388,7 @@ def plan(
             tech_state=tech_state,
             miner_type=miner_type,
             miner_quality_modules=miner_quality_modules,
+            scrap_upcycle_loops=scrap_upcycle_loops,
         )
         if baseline["total_machine_count"] < total_machines:
             baseline.setdefault("notes", []).append(
@@ -6282,6 +6552,19 @@ def format_human(out: dict) -> str:
                 f"({st['craft_machines']:.2f} × {_humanize(st['machine'])} + "
                 f"{st['recycler_machines']:.2f} recyclers{wrap}, "
                 f"yield {st['yield_pct']:.4f}% per craft)"
+            )
+        elif role == "scrap-upcycle-loop":
+            wrap = ""
+            if st.get("container") and st.get("container_machines"):
+                wrap = (
+                    f" + {st['container_machines']:.2f} × {_humanize(st['container'])} "
+                    f"wrap-craft"
+                )
+            L.append(
+                f"  [upcycle]      {_humanize(st['target'])}: "
+                f"{st['rate_per_min']:.2f}/min {tier} "
+                f"({st['craft_machines']:.2f} × {_humanize(st['machine'])}{wrap} + "
+                f"{st['recycler_machines']:.2f} recyclers)"
             )
         elif role == "self-feed-target":
             L.append(

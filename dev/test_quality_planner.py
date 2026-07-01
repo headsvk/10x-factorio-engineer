@@ -1582,6 +1582,51 @@ class TestQualityScrapSeeding(unittest.TestCase):
         self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 3775.72, delta=1e-1)
 
 
+class TestScrapUpcycleLoops(unittest.TestCase):
+    """C4: CLOSED-LOOP plate upcycling on Fulgora."""
+
+    def _fulgora_acc(self, **kw):
+        return qp.plan(
+            "accumulator", 10, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare", quality_module_tier=2,
+            location="fulgora", assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED, **kw,
+        )
+
+    def test_scrap_requirement_drops_with_loop(self):
+        # Sourcing with upcycle loops should drop the scrap requirements compared to single-pass.
+        no_loops = self._fulgora_acc(scrap_upcycle_loops=False)
+        with_loops = self._fulgora_acc(scrap_upcycle_loops=True)
+        self.assertLess(with_loops["scrap_input"]["scrap"], no_loops["scrap_input"]["scrap"])
+
+    def test_loop_machines_present(self):
+        out = self._fulgora_acc(scrap_upcycle_loops=True)
+        
+        # Verify scrap-upcycle-loop stages are present
+        stages = [s for s in out["stages"] if s.get("role") == "scrap-upcycle-loop"]
+        self.assertGreater(len(stages), 0)
+        
+        # Check that we have upcycle loops for iron-plate and copper-plate
+        targets = {s["target"] for s in stages}
+        self.assertIn("iron-plate", targets)
+        self.assertIn("copper-plate", targets)
+        
+        # Verify loop machine counts and roles appear in summary.by_role
+        self.assertIn("scrap-upcycle-loop", out["summary"]["by_role"])
+        loop_machines = out["summary"]["by_role"]["scrap-upcycle-loop"]["machines"]
+        self.assertGreater(loop_machines, 0.0)
+
+        # Verify format_human output formats it as [upcycle]
+        human = qp.format_human(out)
+        self.assertIn("[upcycle]      Iron Plate", human)
+        self.assertIn("[upcycle]      Copper Plate", human)
+
+    def test_faithfulness_check(self):
+        # Disabling scrap upcycle loops should match the exact old C3 baseline scrap requirement.
+        no_loops = self._fulgora_acc(scrap_upcycle_loops=False, miner_quality_modules=False)
+        self.assertAlmostEqual(no_loops["scrap_input"]["scrap"], 4277.3705, delta=1e-1)
+
+
 class TestNoAsteroids(unittest.TestCase):
     """V3 small: --no-asteroids flag forces all quality through planet
     self-recycle paths. iron-ore/copper-ore/ice/calcite are sourced from
