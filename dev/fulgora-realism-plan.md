@@ -46,7 +46,7 @@ assumes a real quality grind.
 |-----|-------|
 | 1 miner counting + mining-prod pass-through + `--miner` | **C1** |
 | drill `--machine-quality` speed (cli-side accuracy) | **C2** |
-| 2 quality scrap seeding | **C3** |
+| 2 quality scrap seeding | **C3** [COMPLETE] |
 | 3 recycler upcycle loop | **C4** |
 | validation + doc consolidation | **C5** |
 | (optional) cli.py quality-ore output for recursive solver | **Appendix A** |
@@ -178,7 +178,7 @@ suites green; defaults unchanged.
 
 ---
 
-## C3 — Quality scrap seeding (planner scrap source, high risk — moves headline)
+## C3 — Quality scrap seeding (planner scrap source, high risk — moves headline) [COMPLETE]
 
 **Goal:** let scrap miners carry quality modules so mined scrap has a quality
 tier distribution; quality scrap recycles into the basket at tier, slashing the

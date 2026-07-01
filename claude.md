@@ -124,7 +124,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/update_research.py` | Applies a research-level change to a factory state and re-runs only the affected lines (`python dev/update_research.py TECH=LEVEL ... [--state PATH] [--dry-run] [--list]`; default state = `dev/my-factory.json`). Use this instead of hand-editing `research_levels` + manually re-running lines — it reconstructs each line's CLI command from its `cli_args` + shared top-level config, re-solves the affected lines, and rewrites their `cli_result` (LF output). Mining-prod re-runs miner lines; recipe-prod re-runs lines whose steps touch a boosted recipe; lab-only techs (`research-productivity` / `lab-research-speed`) update the field but trigger no re-run. See the **research-level updates** workflow note below. |
 | `dev/test_cli.py` | `unittest` suite (278 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains. `--location fulgora` switches to scrap-only sourcing (no asteroid platform; metals terminate at scrap-reachable plates via `forbid_ore_routes`) |
-| `dev/test_quality_planner.py` | `unittest` suite (337 tests) for quality_planner |
+| `dev/test_quality_planner.py` | `unittest` suite (340 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
@@ -668,7 +668,7 @@ python -m unittest dev.test_cli -v
 | `TestQualityChanceHelpers` | Unit tests for `quality_chance_from_specs` (T2=2%/slot base, tier+quality scaling, prod modules ignored, **speed modules subtract — a tier-T speed module cancels a tier-T quality module at equal housing quality (incl. legendary); partial penalty nets correctly; clamps to 0 with no quality modules**, slot-scaling caps at machine slots, clamp to 1.0, zero when no slots) and `quality_tier_probs` (legendary-cap 90/9/0.9/0.1 split sums to 1; rare-cap folds +2/+3/+4 mass onto rare; normal-only cap folds everything back to normal) |
 | `TestQualityPickout` | End-to-end `--quality-pickout` via subprocess: recursive path scales the quality step up so normal output == demand and extracts uncommon/rare/epic (capped at `--max-quality`, no legendary key); aggregated `quality_yield` matches the per-step `quality_output` >normal split; pick-out raises machine count vs the reporting-only run; reporting-only (no flag) leaves machine count at nominal and emits no `quality_yield` (informational split sums to the flowing rate); pick-out flag with no quality modules extracts nothing; Fulgora LP pick-out (accumulator 5×quality-2 → normal 50/min + rare-capped extraction); `--max-quality rare` suppresses epic/legendary even with legendary T3 modules; human format renders the three quality sections; **speed modules in a beacon reduce the step's quality (`test_beacon_speed_modules_reduce_quality`: a speed beacon lowers `quality_yield`, enough beacons cancel it to `{}`)** |
 
-### `dev/test_quality_planner.py` (337 tests)
+### `dev/test_quality_planner.py` (340 tests)
 
 Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-partial LDS-shuffle wiring:
 

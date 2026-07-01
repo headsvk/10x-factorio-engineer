@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-06-30. Tests: `python -m unittest dev.test_quality_planner -v` — **337 tests, all passing, ~2.0 s.**
+**Last updated:** 2026-06-30. Tests: `python -m unittest dev.test_quality_planner -v` — **340 tests, all passing, ~2.0 s.**
 
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
@@ -531,7 +531,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **337 tests**, 45 classes.
+`dev/test_quality_planner.py` — **340 tests**, 45 classes.
 
 | Class | Coverage |
 |---|---|
@@ -555,10 +555,11 @@ MACHINE_INHERENT_PROD = {
 | `TestAssemblyModules` | `--assembly-modules` cuts machines >5×; `_assembly_prod_bonus` helper edge cases |
 | `TestGlebaPartial` | Gleba bio-targets (bioflux, plastic-bar→bioplastic, sulfur→biosulfur, lubricant→biolubricant). **Spoilage NOT modelled.** |
 | `TestStagePower` | Every stage has `power_kw`; compound stages split correctly; biochamber reports 0 (burner) |
-| `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` to assembly + crusher + recycler; legendary cuts machine count by 1/2.5 (production machines only — miners don't get the speed bonus until C2) |
+| `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` to assembly + crusher + recycler; legendary cuts machine count by 1/2.5 |
 | `TestPlannerMiners` (C1) | `--miner electric\|big` sizes a drill fleet for solid raws via `cli.compute_miners`: scrap emits a `mining` stage; big vs electric differ 1:5 by base speed; `--research mining-productivity=20` cuts the count to 1/3; miners fold into `total_machine_count`/`total_power_mw`/`summary.by_role` (Option A: `total == sum(stages)`); `format_human` renders `[mining]`; a mined raw on the main body (iron-ore via `--no-asteroids`) counts too; asteroid-only plans get no miners; default miner is electric |
 | `TestNoAsteroids` | `--no-asteroids` routes via `MINED_RAW_NO_ASTEROID_FALLBACK`; fail-fast names the missing planet |
 | `TestLocationFulgora` | `--location fulgora` scrap-only sourcing: zero `asteroid_input`, metals from scrap, `forbid_ore_routes` picks plain `copper-cable`, auto-unlocks EM-plant + recycler, unsourceable solid fail-fast. **Fluid sub-chains:** qm2 plan emits a `fluid-chain` stage producing `sulfuric-acid` on `chemical-plant` (tagged `fluid_target`); `fluid_input` holds `heavy-oil` not `sulfuric-acid`; `fluid_chain_scrap_draw` (ice/iron-plate) is scrap-reachable and credited against overflow; fluid-chain machines fold into `total_machine_count` + `summary.by_role`; off-Fulgora `processing-unit` keeps `sulfuric-acid` as a raw with no fluid-chain stage. |
+| `TestQualityScrapSeeding` (C3) | Mined scrap inherits quality from quality modules in mining drills. Verifies scrap required and recycler machine count drops; larger quality module capacity (big drill vs electric) yields larger drop; disabling drill quality modules reproduces the C1 scrap baseline. |
 | `TestStageSummary` | `summary.by_role` aggregates machines/power/stage_count per role; pcts sum to 100 |
 | `TestHotSpotAdvisor` | Helper unit tests + end-to-end notes; suppresses suggestions when nothing actionable |
 | `TestTechGating` | `--tech NAME=LEVEL` end-to-end: recycler-locked fail-fast, foundry/EM-plant fallback, cryogenic unreachable, partial-lock baseline parity, `_parse_tech_state` validation (machine techs only), `tech_state` is a required kwarg |

@@ -1453,6 +1453,7 @@ class TestPlannerMiners(unittest.TestCase):
     RARE = qp.QUALITY_INDEX["rare"]
 
     def _fulgora_qm2(self, **kw):
+        kw.setdefault("miner_quality_modules", False)
         return qp.plan(
             "quality-module-2", 1, _data(),
             target_tier=self.RARE, module_quality="rare", quality_module_tier=2,
@@ -1539,6 +1540,46 @@ class TestPlannerMiners(unittest.TestCase):
         bc = next(s for s in base["stages"] if s["role"] == "mining")["machine_count"]
         rc = next(s for s in rare["stages"] if s["role"] == "mining")["machine_count"]
         self.assertAlmostEqual(rc, bc / 1.6, delta=1e-2)
+
+
+class TestQualityScrapSeeding(unittest.TestCase):
+
+    def _fulgora_qm2(self, **kw):
+        return qp.plan(
+            "quality-module-2", 1, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare", quality_module_tier=2,
+            location="fulgora", assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED, **kw,
+        )
+
+    def test_scrap_requirement_drops(self):
+        # Without drill modules
+        no_mods = self._fulgora_qm2(miner_quality_modules=False)
+        # With drill modules (shared: rare tier 2 quality modules)
+        with_mods = self._fulgora_qm2(miner_quality_modules=True)
+        
+        scrap_no = no_mods["scrap_input"]["scrap"]
+        scrap_with = with_mods["scrap_input"]["scrap"]
+        
+        self.assertLess(scrap_with, scrap_no)
+
+    def test_higher_miner_quality_larger_drop(self):
+        # Electric drill: 3 quality module slots
+        electric_drill = self._fulgora_qm2(miner_type="electric", miner_quality_modules=True)
+        # Big drill: 4 quality module slots
+        big_drill = self._fulgora_qm2(miner_type="big", miner_quality_modules=True)
+        
+        scrap_ele = electric_drill["scrap_input"]["scrap"]
+        scrap_big = big_drill["scrap_input"]["scrap"]
+        
+        # Big drill has 4 slots, so higher quality chance, leading to less scrap needed
+        self.assertLess(scrap_big, scrap_ele)
+
+    def test_faithfulness_check(self):
+        # C1/baseline had no miner quality modules modeled (equivalent to miner_quality_modules=False).
+        # We assert that setting miner_quality_modules=False produces the exact old baseline rate.
+        no_mods = self._fulgora_qm2(miner_quality_modules=False)
+        self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 3775.72, delta=1e-1)
 
 
 class TestNoAsteroids(unittest.TestCase):

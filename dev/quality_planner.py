@@ -1968,12 +1968,38 @@ def _compose_quality_rolls(q_chance: float, d: int) -> list[float]:
     return dist
 
 
+def _compose_miner_and_recycler_rolls(q_miner: float, q_rec: float, d: int) -> list[float]:
+    """Tier distribution (len 5) after 1 miner roll (chance q_miner) and d recycler
+    rolls (chance q_rec) starting from normal (tier 0)."""
+    dist = [1.0, 0.0, 0.0, 0.0, 0.0]
+    if q_miner > 0.0:
+        nxt = [0.0] * 5
+        for t in range(5):
+            if dist[t] <= 0.0:
+                continue
+            probs = _tier_skip_probs(q_miner, t)
+            for k, p in enumerate(probs):
+                nxt[t + k] += dist[t] * p
+        dist = nxt
+    for _ in range(max(0, d)):
+        nxt = [0.0] * 5
+        for t in range(5):
+            if dist[t] <= 0.0:
+                continue
+            probs = _tier_skip_probs(q_rec, t)
+            for k, p in enumerate(probs):
+                nxt[t + k] += dist[t] * p
+        dist = nxt
+    return dist
+
+
 def scrap_target_yield(
     item: str,
     cascade: dict,
     target_tier: int,
     quality_module_tier: int,
     module_quality: str,
+    q_miner: float = 0.0,
 ) -> float:
     """Target-tier ``item`` produced per 1 scrap recycled.
 
@@ -1985,7 +2011,7 @@ def scrap_target_yield(
     for d, amt in cascade["depth_amounts"].get(item, {}).items():
         if d <= 0:
             continue
-        dist = _compose_quality_rolls(q, d)
+        dist = _compose_miner_and_recycler_rolls(q_miner, q, d)
         total += amt * sum(dist[target_tier:])
     return total
 
@@ -1998,6 +2024,8 @@ def compute_scrap_source(
     quality_module_tier: int,
     module_quality: str,
     machine_quality: str = "normal",
+    miner_type: str = "electric",
+    miner_quality_modules: bool = True,
 ) -> dict | None:
     """Size a Fulgora scrap-recycling quality source for ``demanded_leaves``.
 
@@ -2013,10 +2041,18 @@ def compute_scrap_source(
       ``binding_leaf``     — the leaf that set the scrap rate.
       ``stage``            — a stage dict for the plan's stage list.
     """
+    q_miner = 0.0
+    if miner_quality_modules and module_quality:
+        drill_key = "big-mining-drill" if miner_type == "big" else "electric-mining-drill"
+        slots_map = cli.build_machine_module_slots(data)
+        miner_slots = slots_map.get(drill_key, 0)
+        q_miner = _quality_chance(miner_slots, quality_module_tier, module_quality)
+
     cascade = build_scrap_cascade(data)
     yields = {
         leaf: scrap_target_yield(
             leaf, cascade, target_tier, quality_module_tier, module_quality,
+            q_miner=q_miner,
         )
         for leaf in demanded_leaves
     }
@@ -4939,6 +4975,7 @@ def plan(
     tech_state: dict[str, int],
     target_tier: int = 4,
     miner_type: str = "electric",
+    miner_quality_modules: bool = True,
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -5583,6 +5620,8 @@ def plan(
                 quality_module_tier=quality_module_tier,
                 module_quality=module_quality,
                 machine_quality=machine_quality,
+                miner_type=miner_type,
+                miner_quality_modules=miner_quality_modules,
             )
             if src is not None:
                 scrap_stages.append(src["stage"])
@@ -6048,6 +6087,7 @@ def plan(
             forbid_ore_routes=forbid_ore_routes,
             tech_state=tech_state,
             miner_type=miner_type,
+            miner_quality_modules=miner_quality_modules,
         )
         if baseline["total_machine_count"] < total_machines:
             baseline.setdefault("notes", []).append(
@@ -6078,6 +6118,7 @@ def plan(
             forbid_ore_routes=forbid_ore_routes,
             tech_state=tech_state,
             miner_type=miner_type,
+            miner_quality_modules=miner_quality_modules,
         )
         if baseline["total_machine_count"] < total_machines:
             baseline.setdefault("notes", []).append(
