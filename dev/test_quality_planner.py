@@ -4379,5 +4379,26 @@ class TestObjectiveFunction(unittest.TestCase):
         self.assertEqual(val, 15.0)
 
 
+class TestPresets(unittest.TestCase):
+    """Milestone Q9 unit tests: CLI presets."""
+
+    def test_apply_preset_end_game_fulgora(self):
+        import argparse
+        ns = argparse.Namespace(preset="end-game-fulgora", location=None, planets=None, tech=[], enable_shuffles=None, beacons=0)
+        out = qp.apply_preset(ns)
+        self.assertEqual(out.location, "fulgora")
+        self.assertEqual(out.planets, "fulgora")
+        self.assertEqual(out.tech, ["all"])
+        self.assertEqual(out.enable_shuffles, "all")
+        self.assertEqual(out.beacons, 8)
+
+    def test_apply_preset_nauvis_starter(self):
+        import argparse
+        ns = argparse.Namespace(preset="nauvis-starter", location=None, planets=None, no_asteroids=False)
+        out = qp.apply_preset(ns)
+        self.assertEqual(out.location, "nauvis")
+        self.assertTrue(out.no_asteroids)
+
+
 if __name__ == "__main__":
     unittest.main()

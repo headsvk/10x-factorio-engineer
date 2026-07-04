@@ -7171,8 +7171,46 @@ def parse_args() -> argparse.Namespace:
         "--objective", default="machines", choices=["machines", "power", "raw-input", "cost"],
         help="Objective function to minimize: machines, power, raw-input, or cost (roadmap Q8).",
     )
+    p.add_argument(
+        "--preset", default=None, choices=["end-game-fulgora", "end-game-nauvis", "nauvis-starter"],
+        help="CLI configuration preset (roadmap Q9).",
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
+
+
+PRESETS = {
+    "end-game-fulgora": {
+        "location": "fulgora",
+        "planets": "fulgora",
+        "tech": ["all"],
+        "enable_shuffles": "all",
+        "beacons": 8,
+    },
+    "end-game-nauvis": {
+        "location": "nauvis",
+        "planets": "nauvis",
+        "tech": ["all"],
+        "enable_shuffles": "all",
+        "beacons": 8,
+    },
+    "nauvis-starter": {
+        "location": "nauvis",
+        "planets": "nauvis",
+        "no_asteroids": True,
+    },
+}
+
+def apply_preset(args: argparse.Namespace) -> argparse.Namespace:
+    """Apply preset values to args if --preset is specified (roadmap Q9)."""
+    if not getattr(args, "preset", None):
+        return args
+    preset_dict = PRESETS.get(args.preset, {})
+    for k, v in preset_dict.items():
+        val = getattr(args, k, None)
+        if val is None or val == [] or val is False or val == "electric" or val == 0:
+            setattr(args, k, v)
+    return args
 
 
 def _evaluate_objective(plan_dict: dict, objective: str) -> float:
@@ -7225,6 +7263,7 @@ def main() -> None:
             pass
 
     args = parse_args()
+    args = apply_preset(args)
     data = cli.load_data("nauvis")
     research = _parse_research(args.research)
     tech_state = _parse_tech_state(args.tech)
