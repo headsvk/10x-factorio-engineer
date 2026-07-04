@@ -5393,6 +5393,7 @@ def plan(
     no_spoilage: bool = False,
     optimize_placement: bool = False,
     beacons: int = 0,
+    objective: str = "machines",
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -7166,8 +7167,28 @@ def parse_args() -> argparse.Namespace:
         "--beacons", type=int, default=0, metavar="COUNT",
         help="Number of speed-module beacons affecting each crafting machine (roadmap Q7).",
     )
+    p.add_argument(
+        "--objective", default="machines", choices=["machines", "power", "raw-input", "cost"],
+        help="Objective function to minimize: machines, power, raw-input, or cost (roadmap Q8).",
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
+
+
+def _evaluate_objective(plan_dict: dict, objective: str) -> float:
+    """Evaluate objective metric for a plan (roadmap Q8)."""
+    if objective == "power":
+        return float(plan_dict.get("total_power_mw", 0.0))
+    elif objective == "raw-input":
+        ast = sum(float(v) for v in plan_dict.get("asteroid_input", {}).values())
+        mined = sum(float(v) for v in plan_dict.get("mined_input", {}).values())
+        return ast + mined
+    elif objective == "cost":
+        m = float(plan_dict.get("total_machine_count", 0.0))
+        p = float(plan_dict.get("total_power_mw", 0.0))
+        return m + 0.1 * p
+    else:
+        return float(plan_dict.get("total_machine_count", 0.0))
 
 
 def parse_demand_spec(spec_str: str) -> list[tuple[str, str, float]]:

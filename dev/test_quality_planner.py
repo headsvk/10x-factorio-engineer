@@ -4360,5 +4360,24 @@ class TestBeaconIntegration(unittest.TestCase):
         self.assertLess(with_beacons, base)
 
 
+class TestObjectiveFunction(unittest.TestCase):
+    """Milestone Q8 unit tests: custom objective function."""
+
+    def test_evaluate_objective_machines(self):
+        sample = {"total_machine_count": 12.5, "total_power_mw": 45.0}
+        val = qp._evaluate_objective(sample, "machines")
+        self.assertEqual(val, 12.5)
+
+    def test_evaluate_objective_power(self):
+        sample = {"total_machine_count": 12.5, "total_power_mw": 45.0}
+        val = qp._evaluate_objective(sample, "power")
+        self.assertEqual(val, 45.0)
+
+    def test_evaluate_objective_cost(self):
+        sample = {"total_machine_count": 10.0, "total_power_mw": 50.0}
+        val = qp._evaluate_objective(sample, "cost")
+        self.assertEqual(val, 15.0)
+
+
 if __name__ == "__main__":
     unittest.main()
