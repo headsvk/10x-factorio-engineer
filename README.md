@@ -285,7 +285,8 @@ Reachable items today:
 Known gaps (imprecise): Gleba spoilage timing is not modelled, and the
 asteroid-reprocessing quality loop still models pre-2.1.8 rules (reprocessing
 recipes no longer accept quality modules in-game), so asteroid-sourced counts
-are optimistic.  See `dev/quality_planner.md` for the full roadmap.
+are optimistic.  See `dev/quality_planner.md` for the current spec and
+`dev/quality-roadmap.md` for the planned fixes and features (Q1–Q9).
 
 ---
 
