@@ -5392,6 +5392,7 @@ def plan(
     scrap_upcycle_loops: bool = True,
     no_spoilage: bool = False,
     optimize_placement: bool = False,
+    beacons: int = 0,
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -5557,7 +5558,8 @@ def plan(
 
     fluids = build_fluid_set(data)
     planet_props = _combined_planet_props(data, planets_fs)
-    qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    beacon_speed_bonus = beacons * 2.5
+    qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0)) + beacon_speed_bonus
     # Dispatch env: bundles the kwargs walk_recipe_tree's intermediate-dispatch
     # path needs to call choose_path_self_recycle.  Threaded into every walker
     # call below so any blocklist intermediate can dispatch consistently.
@@ -7159,6 +7161,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--keep-tiers", default=None, metavar="TIERS",
         help="Comma-separated list of quality tiers to extract as product (e.g. 'uncommon,rare,epic').",
+    )
+    p.add_argument(
+        "--beacons", type=int, default=0, metavar="COUNT",
+        help="Number of speed-module beacons affecting each crafting machine (roadmap Q7).",
     )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()

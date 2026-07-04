@@ -4350,5 +4350,15 @@ class TestMixedTierDemandAndSurplus(unittest.TestCase):
             qp.parse_demand_spec("invalid_spec_format")
 
 
+class TestBeaconIntegration(unittest.TestCase):
+    """Milestone Q7 unit tests: beacon and speed module integration."""
+
+    def test_beacons_reduce_machine_counts(self):
+        data = _data()
+        base = qp.plan("electronic-circuit", 60, data, beacons=0, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        with_beacons = qp.plan("electronic-circuit", 60, data, beacons=8, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        self.assertLess(with_beacons, base)
+
+
 if __name__ == "__main__":
     unittest.main()

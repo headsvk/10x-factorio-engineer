@@ -12,11 +12,12 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **353 tests, all passing, ~4.8 s.**
+**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **354 tests, all passing, ~4.8 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 Currently shipped:
+- **Beacon & Speed-Module Integration (2026-07-04, Q7)** — Added `--beacons COUNT` flag. Applies beacon speed multipliers to crafting machines, scaling machine counts and power consumption.
 - **Mixed-Tier Demand & Surplus Extraction (2026-07-04, Q6)** — Added `--demand ITEM@TIER:RATE,...` spec parser and `--keep-tiers TIERS` flag for multi-tier demand specification and surplus extraction.
 - **Quality-Module Placement Optimizer (2026-07-04, Q4)** — Added `--optimize-placement` mode. Evaluates candidate placements across all chain steps where `recipe_allows_quality`, ranks placements by machine cost efficiency, and attaches a `Quality Placement Comparison` summary block to plan notes.
 - **Gleba Spoilage Timing & Warnings (2026-07-04, Q3)** — Fixed spoil times (`SPOIL_TIMES_SECONDS` for yumako, jellynut, mash, nutrients, bioflux, pentapod-egg, biter-egg, ag-science). Estimated loop residence time $T \approx \text{passes} \times \text{cycle\_time}$. Emits WARNING notes when $T > 0.5 \times t_{\text{spoil}}$ and ERROR notes when $T > t_{\text{spoil}}$. Flag `--no-spoilage` restores unspoilable timing for A/B testing.
