@@ -4336,5 +4336,19 @@ class TestQualityModulePlacementOptimizer(unittest.TestCase):
         self.assertEqual(costs, sorted(costs))
 
 
+class TestMixedTierDemandAndSurplus(unittest.TestCase):
+    """Milestone Q6 unit tests: mixed-tier demand and surplus extraction."""
+
+    def test_parse_demand_spec(self):
+        parsed = qp.parse_demand_spec("iron-plate@legendary:60,iron-plate@epic:20")
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0], ("iron-plate", "legendary", 60.0))
+        self.assertEqual(parsed[1], ("iron-plate", "epic", 20.0))
+
+    def test_parse_demand_spec_invalid(self):
+        with self.assertRaises(ValueError):
+            qp.parse_demand_spec("invalid_spec_format")
+
+
 if __name__ == "__main__":
     unittest.main()

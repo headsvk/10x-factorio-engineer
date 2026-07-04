@@ -7152,8 +7152,36 @@ def parse_args() -> argparse.Namespace:
         "--optimize-placement", action="store_true",
         help="Search for the optimal quality-module placement across chain steps.",
     )
+    p.add_argument(
+        "--demand", default=None, metavar="SPEC",
+        help="Mixed-tier demand spec, e.g. 'iron-plate@legendary:60,iron-plate@epic:20'.",
+    )
+    p.add_argument(
+        "--keep-tiers", default=None, metavar="TIERS",
+        help="Comma-separated list of quality tiers to extract as product (e.g. 'uncommon,rare,epic').",
+    )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
+
+
+def parse_demand_spec(spec_str: str) -> list[tuple[str, str, float]]:
+    """Parse spec_str like 'iron-plate@legendary:60,iron-plate@epic:20' into
+    [(item_key, quality_tier, rate_per_min), ...] (roadmap Q6)."""
+    results = []
+    for part in spec_str.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "@" in part and ":" in part:
+            item_q, rate_s = part.split(":", 1)
+            item_key, tier = item_q.split("@", 1)
+            results.append((item_key.strip(), tier.strip().lower(), float(rate_s.strip())))
+        elif ":" in part:
+            item_key, rate_s = part.split(":", 1)
+            results.append((item_key.strip(), "legendary", float(rate_s.strip())))
+        else:
+            raise ValueError(f"ERROR: invalid --demand spec '{part}'; format: ITEM@TIER:RATE")
+    return results
 
 
 def main() -> None:
