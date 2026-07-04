@@ -1070,7 +1070,7 @@ def solve_asteroid_reprocessing_loop(
     if rep_key is None:
         return 0.0, {}
     rep = _recipe_by_key(data, rep_key)
-    if rep is None:
+    if rep is None or not cli.recipe_allows_quality(rep):
         return 0.0, {}
 
     # Effective retention: total output probability across all chunk types
@@ -1496,25 +1496,46 @@ def _baseline_cost_for_leaf(
         return 0.0
     qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
 
-    # Asteroid path: leaf → chunk → reprocessing crushers
-    if leaf in RAW_TO_CHUNK:
+    # Asteroid path: leaf → chunk crushing (quality roll) → ore upcycle recycler
+    if leaf in RAW_TO_CHUNK and leaf not in fluids:
         chunk = RAW_TO_CHUNK[leaf]
-        v, _ = solve_asteroid_reprocessing_loop(
-            chunk, data, module_quality, quality_module_tier, target_tier,
-        )
-        if v <= 0:
+        crush_recipe_key = ASTEROID_CRUSHING_RECIPES.get(chunk, "")
+        crush_recipe = _recipe_by_key(data, crush_recipe_key)
+        if crush_recipe is None:
             return float("inf")
-        normal_input = demand / v
-        # Per-cycle retention for asteroid reprocessing is ~0.8.
-        rep_recipe = _recipe_by_key(data, ASTEROID_REPROCESSING_RECIPES.get(chunk, ""))
-        retention = (
-            _recipe_result_amount(rep_recipe, chunk) if rep_recipe else 0.8
+        V_ore, ore_configs = solve_mined_raw_self_recycle_loop_full(
+            leaf, data, module_quality, quality_module_tier, target_tier,
         )
-        total_crafts = normal_input / max(1.0 - retention, 1e-6)
-        return total_crafts * 2.0 / (
+        q_crusher = _quality_chance(CRUSHER_SLOTS, quality_module_tier, module_quality)
+        crush_dist = _tier_skip_probs(q_crusher, 0)
+        ore_per_crush = _recipe_result_amount(crush_recipe, leaf)
+        yield_per_chunk = ore_per_crush * sum(crush_dist[t] * V_ore[t] for t in range(5))
+        if yield_per_chunk <= 0:
+            return float("inf")
+        normal_chunks = demand / yield_per_chunk
+        crushing_time = float(crush_recipe.get("energy_required", 2))
+        crush_machines = normal_chunks * crushing_time / (
             CRUSHER_SPEED * qm_speed_mult
             * _module_speed_mult(quality_slots=CRUSHER_SLOTS) * 60.0
         )
+        rec_recipe = _recipe_by_key(data, f"{leaf}-recycling")
+        rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
+        inflow = [normal_chunks * ore_per_crush * crush_dist[t] for t in range(5)]
+        total_recyclings = 0.0
+        for t_in in range(target_tier):
+            if inflow[t_in] > 0:
+                flow = compute_loop_flows(
+                    target_tier, ore_configs, quality_module_tier, module_quality,
+                    base_retention=0.25, wrap_active=False,
+                    wrap_inherent_prod=0.0, wrap_research_prod=0.0,
+                    inherent_prod=0.0, research_prod=0.0, t_in=t_in,
+                )
+                total_recyclings += sum(inflow[t_in] * flow[s] for s in range(target_tier))
+        upcycle_machines = total_recyclings * rec_time / (
+            RECYCLER_SPEED * qm_speed_mult
+            * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+        )
+        return crush_machines + upcycle_machines
 
     # Mined raw: recycler self-loop
     if leaf in MINED_RAW_PLANETS:
@@ -1795,6 +1816,55 @@ def compute_lds_shuffle_stage(
     }
 
 
+def solve_mined_raw_self_recycle_loop_full(
+    raw_key: str,
+    data: dict,
+    module_quality: str,
+    quality_module_tier: int = 3,
+    target_tier: int = 4,
+) -> tuple[list[float], dict]:
+    """DP for target-tier-raw yield vector per raw item at each tier t (0..4).
+
+    Returns (V, configs_per_tier) where V[t] is expected target-tier items
+    produced per 1 item entering the recycler self-loop at tier t.
+    """
+    rec_key = f"{raw_key}-recycling"
+    rec = _recipe_by_key(data, rec_key)
+    if rec is None:
+        return _seed_value_vector(target_tier), {}
+
+    retention = _recipe_result_amount(rec, raw_key)
+    V = _seed_value_vector(target_tier)
+    configs: dict[int, dict] = {}
+
+    for t in range(target_tier - 1, -1, -1):
+        best_v = -1.0
+        best_cfg = None
+        for q in range(RECYCLER_SLOTS + 1):
+            q_total = _quality_chance(q, quality_module_tier, module_quality)
+            probs = _tier_skip_probs(q_total, t)
+            probs = [p * retention for p in probs] if retention > 0 else probs
+            if retention > 0:
+                stay = probs[0]
+            else:
+                stay = 0.0
+            if stay >= 1.0 - 1e-15:
+                v = 0.0
+            else:
+                numer = sum(probs[k] * V[t + k] for k in range(1, len(probs)))
+                if retention > 0:
+                    v = numer / (1.0 - stay)
+                else:
+                    v = numer
+            if v > best_v:
+                best_v = v
+                best_cfg = {"craft_prod": 0, "craft_quality": 0, "recycle_quality": q}
+        V[t] = max(best_v, 0.0)
+        configs[t] = best_cfg or {"craft_prod": 0, "craft_quality": 0, "recycle_quality": 0}
+
+    return V, configs
+
+
 def solve_mined_raw_self_recycle_loop(
     raw_key: str,
     data: dict,
@@ -1814,52 +1884,11 @@ def solve_mined_raw_self_recycle_loop(
     Identical structure to :func:`solve_asteroid_reprocessing_loop` but with
     ``retention = 0.25`` (recycler standard) and ``slots = 4``.
 
-    Scrap is special: its recipe outputs a basket of other items (not scrap
-    itself), so the "loop" is actually a one-shot roll.  We still model it
-    with this DP using the full output bundle's probability mass; the caller
-    is responsible for tracking the byproduct items separately.
-
     Returns (V[0], configs_per_tier).
     """
-    rec_key = f"{raw_key}-recycling"
-    rec = _recipe_by_key(data, rec_key)
-    if rec is None:
-        return 0.0, {}
-
-    # Retention = probability the recycler returns the raw itself (single-chunk
-    # loop).  For scrap this is 0 (no scrap in outputs) — in that case the
-    # recycler outputs are terminal (one-shot) and we model with retention=0.
-    retention = _recipe_result_amount(rec, raw_key)
-
-    V = _seed_value_vector(target_tier)
-    configs: dict[int, dict] = {}
-
-    for t in range(target_tier - 1, -1, -1):
-        best_v = -1.0
-        best_cfg = None
-        for q in range(RECYCLER_SLOTS + 1):
-            q_total = _quality_chance(q, quality_module_tier, module_quality)
-            probs = _tier_skip_probs(q_total, t)
-            probs = [p * retention for p in probs] if retention > 0 else probs
-            if retention > 0:
-                stay = probs[0]
-            else:
-                # One-shot (scrap-like): no self-loop; V[t] = sum(probs[k]*V[...])
-                stay = 0.0
-            if stay >= 1.0 - 1e-15:
-                v = 0.0
-            else:
-                numer = sum(probs[k] * V[t + k] for k in range(1, len(probs)))
-                if retention > 0:
-                    v = numer / (1.0 - stay)
-                else:
-                    v = numer  # one-shot
-            if v > best_v:
-                best_v = v
-                best_cfg = {"craft_prod": 0, "craft_quality": 0, "recycle_quality": q}
-        V[t] = max(best_v, 0.0)
-        configs[t] = best_cfg or {"craft_prod": 0, "craft_quality": 0, "recycle_quality": 0}
-
+    V, configs = solve_mined_raw_self_recycle_loop_full(
+        raw_key, data, module_quality, quality_module_tier, target_tier
+    )
     return V[0], configs
 
 
@@ -2834,16 +2863,16 @@ def _hot_spot_suggestions(
         )
         if pct < threshold_pct:
             continue
-        if role == "asteroid-reprocessing":
+        if role in ("asteroid-ore-upcycle", "raw-crushing"):
             if has_plastic and not lds_active:
                 suggestions.append(
-                    f"hot spot: asteroid-reprocessing is {pct:.0f}% of machines — "
+                    f"hot spot: {role} is {pct:.0f}% of machines — "
                     f"try --enable-shuffle low-density-structure (offloads "
                     f"plastic-bar from carbonic chunks)"
                 )
             elif not at_max_quality:
                 suggestions.append(
-                    f"hot spot: asteroid-reprocessing is {pct:.0f}% of machines — "
+                    f"hot spot: asteroid-ore-upcycle is {pct:.0f}% of machines — "
                     f"upgrade --module-quality (legendary T3 quality modules) or "
                     f"--quality-module-tier to improve loop yield"
                 )
@@ -5914,173 +5943,192 @@ def plan(
                 for it in scrap_demanded:
                     raw_demand.pop(it, None)
 
-    # Group raw demand by chunk type.  Each chunk is produced by one crushing recipe
-    # (e.g. metallic-asteroid-crushing -> iron-ore+copper-ore).  We scale to satisfy
-    # the max-demanding raw among a chunk's outputs.
-    #
+    # Asteroid-routed solid raws: crushing (quality roll) → raw ore upcycle loop.
     # When ``no_asteroids`` is set, skip the asteroid path entirely; raws like
     # iron-ore / copper-ore / ice / calcite stay in ``raw_demand`` and route
     # through ``mined_recycle_stages`` below via MINED_RAW_NO_ASTEROID_FALLBACK.
-    chunk_demand: dict[str, float] = defaultdict(float)
-    # Direct chunk demand (e.g. calcite only comes from advanced-oxide-asteroid-crushing
-    # which takes oxide-asteroid-chunk — raw_demand already contains the chunk directly).
-    if not no_asteroids:
-        for chunk in ASTEROID_REPROCESSING_RECIPES:
-            if chunk in raw_demand and raw_demand[chunk] > 0:
-                chunk_demand[chunk] += raw_demand[chunk]
     crushing_stages: list[dict] = []
-    asteroid_crushing_iter = (
-        ASTEROID_CRUSHING_RECIPES.items() if not no_asteroids else ()
-    )
-    for chunk, crush_recipe_key in asteroid_crushing_iter:
-        crush = _recipe_by_key(data, crush_recipe_key)
-        if crush is None:
-            continue
-        # For each raw output of this crushing recipe that we demand, compute required
-        # crushes_per_min to meet that raw's demand.  Take the max.
-        research_prod = _research_prod_for_recipe(crush_recipe_key, research_levels)
-        eff_prod = 1.0 + research_prod
-        capped = False
-        if eff_prod > 4.0:
-            eff_prod = 4.0
-            capped = True
-        max_crushes_per_min = 0.0
-        outputs_to_raws: dict[str, float] = {}
-        for res in crush.get("results", []):
-            rn = res["name"]
-            if rn == chunk:
+    asteroid_upcycle_stages: list[dict] = []
+    asteroid_input: dict[str, float] = {}
+
+    if not no_asteroids:
+        needed_chunks: dict[str, float] = defaultdict(float)
+        crush_demands_per_chunk: dict[str, dict[str, float]] = defaultdict(dict)
+
+        q_crusher = _quality_chance(CRUSHER_SLOTS, quality_module_tier, module_quality)
+        crush_dist = _tier_skip_probs(q_crusher, 0)
+        crusher_speed_mult = _module_speed_mult(quality_slots=CRUSHER_SLOTS)
+
+        # Direct chunk demand (e.g. oxide-asteroid-chunk from recipe tree walk)
+        for chunk in list(ASTEROID_CRUSHING_RECIPES.keys()):
+            if chunk in raw_demand and raw_demand[chunk] > 0:
+                needed_chunks[chunk] += raw_demand.pop(chunk)
+
+        raw_keys_to_process = [
+            r for r in sorted(raw_demand.keys())
+            if r in RAW_TO_CHUNK and raw_demand[r] > 0 and r not in fluids
+        ]
+
+        for raw_key in raw_keys_to_process:
+            demand_rate = raw_demand.pop(raw_key)
+            chunk = RAW_TO_CHUNK[raw_key]
+            crush_recipe_key = ASTEROID_CRUSHING_RECIPES.get(chunk, "")
+            crush_recipe = _recipe_by_key(data, crush_recipe_key)
+            if crush_recipe is None:
+                raise ValueError(f"ERROR: no crushing recipe for chunk '{chunk}'")
+
+            V_ore, ore_configs = solve_mined_raw_self_recycle_loop_full(
+                raw_key, data, module_quality, quality_module_tier, target_tier,
+            )
+            research_prod = _research_prod_for_recipe(crush_recipe_key, research_levels)
+            eff_prod = min(4.0, 1.0 + research_prod)
+            ore_per_crush = _recipe_result_amount(crush_recipe, raw_key) * eff_prod
+            yield_per_chunk = ore_per_crush * sum(crush_dist[t] * V_ore[t] for t in range(5))
+            if yield_per_chunk <= 0:
+                raise ValueError(f"ERROR: asteroid yield for '{raw_key}' is 0")
+
+            needed_crushes = demand_rate / yield_per_chunk
+            needed_chunks[chunk] = max(needed_chunks[chunk], needed_crushes)
+            crush_demands_per_chunk[chunk][raw_key] = demand_rate
+
+        for chunk, chunk_crushes in sorted(needed_chunks.items()):
+            if chunk_crushes <= 0:
                 continue
-            amt = res.get("amount", 0)
-            if amt == 0:
-                continue
-            amt_per_craft = float(amt) * float(res.get("probability", 1.0)) * eff_prod
-            demand_rate = raw_demand.get(rn, 0.0)
-            if demand_rate > 0:
-                needed_crushes = demand_rate / amt_per_craft
-                if needed_crushes > max_crushes_per_min:
-                    max_crushes_per_min = needed_crushes
-                outputs_to_raws[rn] = demand_rate
-        # Handle ice-melting for water
-        if chunk == "oxide-asteroid-chunk" and "water" in raw_demand:
-            # Water comes from ice via ice-melting; ensure we have ice demand
-            # Approx: 10 water per 1 ice, so ice demand += water/10.  Here we just
-            # top up via demand route; the walker already treats water as a raw
-            # so water demand appears in raw_demand.  Convert via separate ice-melting
-            # stage (not tracked here for simplicity).
-            pass
-        if max_crushes_per_min > 0:
-            chunk_demand[chunk] = max_crushes_per_min
-            # machines: crusher speed 1.0, time=2s typically
-            crushing_time = float(crush.get("energy_required", 2))
-            machine_count = max_crushes_per_min * crushing_time / (CRUSHER_SPEED * qm_speed_mult * 60.0)
+            asteroid_input[chunk] = chunk_crushes
+            crush_recipe_key = ASTEROID_CRUSHING_RECIPES[chunk]
+            crush_recipe = _recipe_by_key(data, crush_recipe_key)
+            research_prod = _research_prod_for_recipe(crush_recipe_key, research_levels)
+            eff_prod = min(4.0, 1.0 + research_prod)
+            crushing_time = float(crush_recipe.get("energy_required", 2)) if crush_recipe else 2.0
+            machine_count = chunk_crushes * crushing_time / (
+                CRUSHER_SPEED * qm_speed_mult * crusher_speed_mult * 60.0
+            )
+
+            outputs_to_raws = crush_demands_per_chunk[chunk]
             crushing_stages.append({
                 "role": "raw-crushing",
                 "recipe": crush_recipe_key,
                 "chunk": chunk,
                 "machine": "crusher",
                 "machine_count": machine_count,
-                "crafts_per_min": max_crushes_per_min,
+                "crafts_per_min": chunk_crushes,
                 "outputs": outputs_to_raws,
                 "research_prod": research_prod,
-                "prod_capped": capped,
+                "prod_capped": eff_prod >= 4.0,
             })
 
-    # For each chunk demanded, run the reprocessing loop to compute
-    # normal-chunk-input needed per legendary-chunk-output.
+            for res in (crush_recipe.get("results", []) if crush_recipe else []):
+                rn = res.get("name")
+                if not rn or rn == chunk:
+                    continue
+                dem_r = outputs_to_raws.get(rn, 0.0)
+                if dem_r <= 0:
+                    continue
+                ore_per_crush = _recipe_result_amount(crush_recipe, rn) * eff_prod
+                inflow = [chunk_crushes * ore_per_crush * crush_dist[t] for t in range(5)]
+                V_ore, ore_configs = solve_mined_raw_self_recycle_loop_full(
+                    rn, data, module_quality, quality_module_tier, target_tier,
+                )
+                rec_recipe = _recipe_by_key(data, f"{rn}-recycling")
+                rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
+
+                total_recyclings = 0.0
+                for t_in in range(target_tier):
+                    if inflow[t_in] > 0:
+                        flow = compute_loop_flows(
+                            target_tier, ore_configs, quality_module_tier, module_quality,
+                            base_retention=0.25, wrap_active=False,
+                            wrap_inherent_prod=0.0, wrap_research_prod=0.0,
+                            inherent_prod=0.0, research_prod=0.0, t_in=t_in,
+                        )
+                        total_recyclings += sum(inflow[t_in] * flow[s] for s in range(target_tier))
+
+                machine_count_rec = total_recyclings * rec_time / (
+                    RECYCLER_SPEED * qm_speed_mult
+                    * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
+                )
+                asteroid_upcycle_stages.append({
+                    "role": "asteroid-ore-upcycle",
+                    "raw": rn,
+                    "recipe": f"{rn}-recycling",
+                    "machine": "recycler",
+                    "machine_count": machine_count_rec,
+                    "yield_pct": V_ore[0] * 100.0,
+                    "legendary_per_min": dem_r,
+                    "total_recyclings_per_min": total_recyclings,
+                    "module_config_per_tier": {
+                        QUALITY_TIERS[t]: {
+                            "craft": "n/a",
+                            "recycle": f"{ore_configs[t]['recycle_quality']}x quality-{quality_module_tier}-{module_quality}",
+                        }
+                        for t in range(target_tier)
+                    },
+                })
+
     reprocessing_stages: list[dict] = []
-    asteroid_input: dict[str, float] = {}
-    for chunk, demanded_legendary_per_min in chunk_demand.items():
-        v, configs = solve_asteroid_reprocessing_loop(
-            chunk, data, module_quality, quality_module_tier, target_tier,
-        )
-        if v <= 0:
-            raise ValueError(
-                f"ERROR: asteroid reprocessing for '{chunk}' yields 0 legendary — unreachable"
-            )
-        normal_input_per_min = demanded_legendary_per_min / v
-        asteroid_input[chunk] = normal_input_per_min
-        # Machine count estimate: reprocessing time=2s on crusher speed 1.0,
-        # aggregated over all tiers.  For MVP, approximate by summing per-tier machines
-        # using the final demanded rate × average cycles per chunk.
-        # Simplification: machines ≈ normal_input_per_min * avg_cycles * 2s / 60 / 1.0
-        # where avg_cycles ≈ 1/(1-retention) per tier.  Compute rough estimate:
-        rep_recipe = _recipe_by_key(data, ASTEROID_REPROCESSING_RECIPES[chunk])
-        retention = _recipe_result_amount(rep_recipe, chunk) if rep_recipe else 0.4
-        # Geometric avg across 4 tiers; in practice use V to back out cycles.
-        # Total processing load ≈ normal_input_per_min / (1 - retention) crafts/min.
-        total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
-        machine_count = total_crafts_per_min * 2.0 / (
-            CRUSHER_SPEED * qm_speed_mult
-            * _module_speed_mult(quality_slots=CRUSHER_SLOTS) * 60.0
-        )
-        reprocessing_stages.append({
-            "role": "asteroid-reprocessing",
-            "chunk": chunk,
-            "recipe": ASTEROID_REPROCESSING_RECIPES[chunk],
-            "machine": "crusher",
-            "machine_count": machine_count,
-            "yield_pct": v * 100.0,
-            "legendary_chunks_per_min": demanded_legendary_per_min,
-            "normal_chunks_input_per_min": normal_input_per_min,
-            "module_config_per_tier": {
-                QUALITY_TIERS[t]: {
-                    "craft": "n/a",
-                    "recycle": f"{configs[t]['recycle_quality']}x quality-{quality_module_tier}-{module_quality}",
-                }
-                for t in range(target_tier)
-            },
-        })
 
     # Planet-mined solid raws (coal, stone, tungsten-ore, scrap, holmium-ore,
-    # uranium-ore): legendary via recycler self-loop (25% retention, 4 quality
-    # slots).  We attach one stage per demanded mined raw.  Input is expressed
-    # in "normal raws mined per minute" — that's what the user's miner fleet
-    # must produce.
+    # uranium-ore, yumako, jellynut, pentapod-egg): legendary via drill quality + recycler self-loop.
     mined_recycle_stages: list[dict] = []
     mined_input: dict[str, float] = {}
     fluid_raws_demand: dict[str, float] = {}
-    # When asteroids are disabled, iron-ore / copper-ore / ice / calcite need
-    # a self-recycle quality path on an unlocked planet.  Merge their planet
-    # mappings into MINED_RAW_PLANETS for routing purposes (does not mutate
-    # the module-level constant).
+
     mined_raw_lookup: dict[str, tuple[str, ...]] = dict(MINED_RAW_PLANETS)
     if no_asteroids:
         for k, v in MINED_RAW_NO_ASTEROID_FALLBACK.items():
             mined_raw_lookup[k] = v
-    for raw_key, demand_rate in raw_demand.items():
+
+    q_miner = 0.0
+    miner_slots = 0
+    if miner_quality_modules and module_quality:
+        drill_key = "big-mining-drill" if miner_type == "big" else "electric-mining-drill"
+        slots_map = cli.build_machine_module_slots(data)
+        miner_slots = slots_map.get(drill_key, 0)
+        q_miner = _quality_chance(miner_slots, quality_module_tier, module_quality)
+    miner_dist = _tier_skip_probs(q_miner, 0)
+
+    for raw_key in sorted(raw_demand.keys()):
+        demand_rate = raw_demand[raw_key]
         if demand_rate <= 0:
             continue
-        # Skip asteroid-routed raws (already consumed by chunk_demand).  When
-        # ``no_asteroids`` is set, the fallback iron-ore/copper-ore/ice/calcite
-        # entries override this skip via mined_raw_lookup below.
         if raw_key in RAW_TO_CHUNK and not (no_asteroids and raw_key in MINED_RAW_NO_ASTEROID_FALLBACK):
             continue
-        # Fluids: quality-transparent, just record demand (no loop).
         if raw_key in fluids:
             fluid_raws_demand[raw_key] = demand_rate
             continue
         if raw_key in mined_raw_lookup:
-            # Check user has an appropriate planet unlocked.
             if not any(p in planets_fs for p in mined_raw_lookup[raw_key]):
                 needed = mined_raw_lookup[raw_key]
                 raise ValueError(
                     f"ERROR: item '{item_key}' requires mined raw '{raw_key}' on planet(s) "
                     f"{list(needed)} — add --planets {','.join(needed)}"
                 )
-            v, configs = solve_mined_raw_self_recycle_loop(
+            V_raw, configs = solve_mined_raw_self_recycle_loop_full(
                 raw_key, data, module_quality, quality_module_tier, target_tier,
             )
-            if v <= 0:
+            target_yield_per_mined_raw = sum(miner_dist[t] * V_raw[t] for t in range(5))
+            if target_yield_per_mined_raw <= 0:
                 raise ValueError(
                     f"ERROR: '{raw_key}' has no <raw>-recycling recipe — cannot produce legendary"
                 )
-            normal_input_per_min = demand_rate / v
+            normal_input_per_min = demand_rate / target_yield_per_mined_raw
             mined_input[raw_key] = normal_input_per_min
             rec_recipe = _recipe_by_key(data, f"{raw_key}-recycling")
-            retention = _recipe_result_amount(rec_recipe, raw_key) if rec_recipe else 0.25
-            total_crafts_per_min = normal_input_per_min / max(1.0 - retention, 1e-6)
             rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
-            machine_count = total_crafts_per_min * rec_time / (
+
+            total_recyclings_per_min = 0.0
+            for t_in in range(target_tier):
+                inflow_t = normal_input_per_min * miner_dist[t_in]
+                if inflow_t > 0:
+                    flow = compute_loop_flows(
+                        target_tier, configs, quality_module_tier, module_quality,
+                        base_retention=0.25, wrap_active=False,
+                        wrap_inherent_prod=0.0, wrap_research_prod=0.0,
+                        inherent_prod=0.0, research_prod=0.0, t_in=t_in,
+                    )
+                    total_recyclings_per_min += sum(inflow_t * flow[s] for s in range(target_tier))
+
+            machine_count = total_recyclings_per_min * rec_time / (
                 RECYCLER_SPEED * qm_speed_mult
                 * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
             )
@@ -6090,7 +6138,7 @@ def plan(
                 "recipe": f"{raw_key}-recycling",
                 "machine": "recycler",
                 "machine_count": machine_count,
-                "yield_pct": v * 100.0,
+                "yield_pct": target_yield_per_mined_raw * 100.0,
                 "legendary_per_min": demand_rate,
                 "normal_mined_per_min": normal_input_per_min,
                 "module_config_per_tier": {
@@ -6164,15 +6212,21 @@ def plan(
             mining_productivity_level=research_levels.get("mining-productivity", 0),
             machine_quality=machine_quality,
         )
+        drill_speed_mult = (
+            _module_speed_mult(quality_slots=miner_slots)
+            if (miner_quality_modules and module_quality)
+            else 1.0
+        )
         for it, entry in sorted(miners.items()):
             if "machine_count" not in entry:
                 continue  # fluids report required_yield_pct, not a drill count
+            drill_count = float(entry["machine_count"]) / drill_speed_mult
             miner_stages.append({
                 "role": "mining",
                 "item": it,
                 "recipe": f"mine-{it}",
                 "machine": entry["machine"],
-                "machine_count": float(entry["machine_count"]),
+                "machine_count": drill_count,
                 "rate_per_min": float(entry.get("rate_per_min", 0.0)),
             })
 
@@ -6180,7 +6234,7 @@ def plan(
     total_machines = (
         sum(s["machine_count"] for s in stages)
         + sum(s["machine_count"] for s in crushing_stages)
-        + sum(s["machine_count"] for s in reprocessing_stages)
+        + sum(s["machine_count"] for s in asteroid_upcycle_stages)
         + sum(s["machine_count"] for s in mined_recycle_stages)
         + sum(s["machine_count"] for s in shuffle_stages)
         + sum(s["machine_count"] for s in normal_chain_stages)
@@ -6192,7 +6246,7 @@ def plan(
 
     # Annotate per-stage power and total (V3 power accounting).
     all_stages_for_power = (
-        stages + crushing_stages + reprocessing_stages
+        stages + crushing_stages + asteroid_upcycle_stages
         + mined_recycle_stages + shuffle_stages + normal_chain_stages
         + driver_stages + scrap_stages + fluid_chain_stages + miner_stages
     )
@@ -6281,16 +6335,6 @@ def plan(
             f"incidental byproduct surplus: {surplus:.2f} legendary "
             f"{byprod}/min unused (no downstream demand)"
         )
-    # Known-limitation marker: the reprocessing quality climb predates the
-    # 2.1.8 rule change (reprocessing recipes no longer accept quality
-    # modules), so asteroid-sourced counts are optimistic.  See the module
-    # header / ASTEROID_REPROCESSING_RECIPES comment.
-    if reprocessing_stages:
-        notes.append(
-            "asteroid-reprocessing modelling predates the 2.1.8 rule change "
-            "(reprocessing recipes no longer accept quality modules in-game) — "
-            "asteroid-sourced counts are optimistic; known limitation"
-        )
     # Driver-activation notes (co-product was harvested; non-target outputs
     # become overflow).
     for ds in driver_stages:
@@ -6326,8 +6370,8 @@ def plan(
             miner_stages
             + scrap_stages
             + fluid_chain_stages
-            + reprocessing_stages
             + crushing_stages
+            + asteroid_upcycle_stages
             + mined_recycle_stages
             + driver_stages
             + shuffle_stages
@@ -6546,13 +6590,12 @@ def format_human(out: dict) -> str:
                 f"({st['machine_count']:.2f} recyclers, "
                 f"binding leaf {_humanize(st.get('binding_leaf', '?'))})"
             )
-        elif role == "asteroid-reprocessing":
+        elif role == "asteroid-ore-upcycle":
             L.append(
-                f"  [reprocessing] {_humanize(st['chunk'])}: "
-                f"{st['normal_chunks_input_per_min']:.2f} normal in -> "
-                f"{st['legendary_chunks_per_min']:.2f} {tier} out "
-                f"({st['machine_count']:.2f} crushers, "
-                f"yield {st['yield_pct']:.3f}%)"
+                f"  [upcycle-ore]  {_humanize(st['raw'])}: "
+                f"{st['legendary_per_min']:.2f}/min {tier} out "
+                f"({st['machine_count']:.2f} recyclers, "
+                f"yield {st['yield_pct']:.4f}%)"
             )
         elif role == "raw-crushing":
             outs = ", ".join(f"{_humanize(k)}@{tier}={v:.1f}/min" for k, v in st["outputs"].items())

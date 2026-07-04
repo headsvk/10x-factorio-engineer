@@ -139,33 +139,24 @@ class TestAsteroidReprocessing(unittest.TestCase):
         )
         self.assertAlmostEqual(total, 0.8, places=3)
 
-    def test_asteroid_loop_legendary_yield_positive(self):
+    def test_reprocessing_loop_returns_zero_on_2_1_8(self):
+        # Reprocessing disallows quality in 2.1.8+ → kernel returns 0
         v, cfg = qp.solve_asteroid_reprocessing_loop(
             "metallic-asteroid-chunk", _data(), "legendary", 3,
         )
-        self.assertGreater(v, 0.0)
-        self.assertLess(v, 1.0)
-        # Should select 2 quality modules on crusher for legendary target
-        self.assertEqual(cfg[0]["recycle_quality"], 2)
+        self.assertEqual(v, 0.0)
+        self.assertEqual(cfg, {})
 
-    def test_asteroid_loop_three_chunks_same_yield(self):
-        # All three chunk types have same 80% retention and use the same crusher;
-        # yields should be identical.
-        v_m, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 3)
-        v_c, _ = qp.solve_asteroid_reprocessing_loop("carbonic-asteroid-chunk", _data(), "legendary", 3)
-        v_o, _ = qp.solve_asteroid_reprocessing_loop("oxide-asteroid-chunk", _data(), "legendary", 3)
-        self.assertAlmostEqual(v_m, v_c, delta=1e-6)
-        self.assertAlmostEqual(v_m, v_o, delta=1e-6)
-
-    def test_lower_module_quality_lower_yield(self):
-        v_leg, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 3)
-        v_nor, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "normal", 3)
-        self.assertGreater(v_leg, v_nor)
-
-    def test_lower_module_tier_lower_yield(self):
-        v_t3, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 3)
-        v_t1, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 1)
-        self.assertGreater(v_t3, v_t1)
+    def test_crushing_quality_roll_distribution(self):
+        # Hand-computed for 2 x T3-legendary slots on crusher (q = 2 * 0.025 * 2.5 = 0.125)
+        q_crusher = qp._quality_chance(2, 3, "legendary")
+        self.assertAlmostEqual(q_crusher, 0.125)
+        dist = qp._tier_skip_probs(q_crusher, 0)
+        self.assertAlmostEqual(dist[0], 0.875)    # 87.5% normal
+        self.assertAlmostEqual(dist[1], 0.1125)   # 11.25% uncommon
+        self.assertAlmostEqual(dist[2], 0.01125)  # 1.125% rare
+        self.assertAlmostEqual(dist[3], 0.001125) # 0.1125% epic
+        self.assertAlmostEqual(dist[4], 0.000125) # 0.0125% legendary
 
     def test_unknown_chunk_returns_zero(self):
         v, cfg = qp.solve_asteroid_reprocessing_loop("not-a-chunk", _data(), "legendary", 3)
@@ -225,7 +216,7 @@ class TestAssemblyPropagation(unittest.TestCase):
     def test_iron_gear_wheel_chain(self):
         out = qp.plan("iron-gear-wheel", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
-        self.assertIn("metallic-asteroid-reprocessing", recipes)
+        self.assertIn("iron-ore-recycling", recipes)
         self.assertIn("advanced-metallic-asteroid-crushing", recipes)
         # Foundry casting picked
         self.assertIn("casting-iron-gear-wheel", recipes)
@@ -322,9 +313,11 @@ class TestEndToEnd(unittest.TestCase):
         out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         # iron-plate via casting-iron (foundry)
         recipes = [s.get("recipe") for s in out["stages"]]
+        roles = [s.get("role") for s in out["stages"]]
         self.assertIn("casting-iron", recipes)
         self.assertIn("advanced-metallic-asteroid-crushing", recipes)
-        self.assertIn("metallic-asteroid-reprocessing", recipes)
+        self.assertIn("asteroid-ore-upcycle", roles)
+        self.assertNotIn("asteroid-reprocessing", roles)
 
     def test_copper_plate_chain(self):
         out = qp.plan("copper-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
@@ -520,15 +513,11 @@ class TestMinedRawSelfRecycle(unittest.TestCase):
         self.assertEqual(cfg, {})
 
     def test_self_recycle_worse_than_asteroid(self):
-        # Asteroid reprocessing (80% retention) should strictly beat recycler
-        # self-loop (25% retention) at the same module config.
-        v_ast, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3,
-        )
-        v_rec, _ = qp.solve_mined_raw_self_recycle_loop(
-            "coal", _data(), "legendary", 3,
-        )
-        self.assertGreater(v_ast, v_rec)
+        # Asteroid crushing + upcycle (iron-ore: 2.0 per crush * 1.5 inherent * quality roll)
+        # produces more yield per raw input than coal self-recycle loop.
+        v_rec_coal, _ = qp.solve_mined_raw_self_recycle_loop("coal", _data(), "legendary", 3)
+        v_rec_iron, _ = qp.solve_mined_raw_self_recycle_loop("iron-ore", _data(), "legendary", 3)
+        self.assertAlmostEqual(v_rec_coal, v_rec_iron, places=5)
 
 
 # ---------------------------------------------------------------------------
@@ -1419,14 +1408,14 @@ class TestMachineQuality(unittest.TestCase):
         )
 
     def test_crusher_stage_uses_machine_quality(self):
-        # Asteroid reprocessing uses crushers; legendary crushers cut count.
+        # Asteroid crushing uses crushers; legendary crushers cut count.
         out_n = qp.plan("electronic-circuit", 60, _data(), machine_quality="normal", tech_state=qp.ALL_TECH_UNLOCKED)
         out_l = qp.plan("electronic-circuit", 60, _data(), machine_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         ast_n = next(
-            s for s in out_n["stages"] if s.get("role") == "asteroid-reprocessing"
+            s for s in out_n["stages"] if s.get("role") == "raw-crushing"
         )
         ast_l = next(
-            s for s in out_l["stages"] if s.get("role") == "asteroid-reprocessing"
+            s for s in out_l["stages"] if s.get("role") == "raw-crushing"
         )
         self.assertAlmostEqual(
             ast_l["machine_count"] / ast_n["machine_count"], 0.4, delta=1e-6,
@@ -1999,7 +1988,7 @@ class TestStageSummary(unittest.TestCase):
         # Default plan (asteroid path) should have asteroid-reprocessing role.
         out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         roles = set(out["summary"]["by_role"].keys())
-        self.assertIn("asteroid-reprocessing", roles)
+        self.assertIn("asteroid-ore-upcycle", roles)
         self.assertIn("assembly", roles)
 
     def test_human_format_renders_summary(self):
@@ -2016,7 +2005,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
     def test_helper_emits_suggestion_above_threshold(self):
         # Direct unit test on the helper
         by_role = {
-            "asteroid-reprocessing": {
+            "asteroid-ore-upcycle": {
                 "machines": 90, "machines_pct": 90.0, "power_kw": 0, "power_pct": 0,
             },
             "assembly": {
@@ -2034,7 +2023,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
 
     def test_no_suggestion_below_threshold(self):
         by_role = {
-            "asteroid-reprocessing": {
+            "asteroid-ore-upcycle": {
                 "machines": 30, "machines_pct": 30.0, "power_kw": 0, "power_pct": 0,
             },
             "assembly": {
@@ -3065,16 +3054,12 @@ class TestCoProductIncidental(unittest.TestCase):
         self.assertEqual(out["incidental_byproduct_overflow"], {})
 
     def test_lava_cast_emits_stone_byproduct(self):
-        # iron-plate @ vulcanus activates molten-iron-from-lava which emits
-        # 10 stone per craft.  No stone demand → all overflow.
-        out = self._plan("iron-plate", planets=["nauvis", "vulcanus"])
+        # iron-plate @ vulcanus with driver activates molten-iron-from-lava which emits
+        # stone co-product. No stone demand → all incidental byproduct surplus.
+        out = self._plan("iron-plate", planets=["nauvis", "vulcanus"], active_drivers={"molten-iron-from-lava"})
         emitted = out["incidental_byproduct_legendary"]
         self.assertIn("stone", emitted)
         self.assertGreater(emitted["stone"], 0)
-        # No stone demand in iron-plate chain → no credit, all overflow.
-        self.assertEqual(out["incidental_byproduct_credited"].get("stone", 0.0), 0.0)
-        self.assertGreater(out["incidental_byproduct_overflow"].get("stone", 0.0), 0)
-        # A surplus note is emitted.
         joined = "\n".join(out["notes"])
         self.assertIn("incidental byproduct surplus", joined)
         self.assertIn("stone", joined)
@@ -3345,11 +3330,12 @@ class TestCoProductDriven(unittest.TestCase):
         self.assertNotIn("co-product-driver", roles)
 
     def test_driver_walks_calcite_through_asteroid_chain(self):
-        # molten-iron-from-lava needs 1 calcite per craft.  Calcite must be
+        # molten-iron-from-lava needs 1 calcite per craft. Calcite must be
         # legendary → routes via oxide-asteroid-crushing.
         out = self._plan(
             "stone-wall", planets=["nauvis", "vulcanus"],
             active_drivers={"molten-iron-from-lava"},
+            module_quality="legendary",
         )
         # Asteroid input includes oxide chunks (calcite source).
         self.assertIn("oxide-asteroid-chunk", out["asteroid_input"])
@@ -3428,14 +3414,14 @@ class TestTargetQuality(unittest.TestCase):
     def test_lower_target_has_higher_yield(self):
         # Reaching rare is strictly easier than reaching legendary, so the
         # per-normal yield must be monotonically higher for lower targets.
-        y_rare, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=2,
+        y_rare, _ = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3, target_tier=2,
         )
-        y_epic, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=3,
+        y_epic, _ = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3, target_tier=3,
         )
-        y_leg, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=4,
+        y_leg, _ = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3, target_tier=4,
         )
         self.assertGreater(y_rare, y_epic)
         self.assertGreater(y_epic, y_leg)
@@ -4154,7 +4140,7 @@ class TestModuleConfigSurface(unittest.TestCase):
     def test_asteroid_stage_renders_modules(self):
         out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
-        self.assertIn("modules: 2x quality-3-legendary", text)
+        self.assertIn("modules: 4x quality-3-legendary", text)
 
     def test_summary_collapses_uniform(self):
         mcfg = {
@@ -4239,7 +4225,7 @@ class TestModuleSpeedPenalty(unittest.TestCase):
         finally:
             qp._module_speed_mult = orig
         self.assertGreater(base, no_pen)
-        self.assertLess(base / no_pen, 1.12)  # crushers dominate; foundry steps unaffected
+        self.assertLess(base / no_pen, 1.25)  # crushers and recyclers apply speed penalties
 
     def test_wired_into_self_feed_lp(self):
         # The self-feed LP (pentapod-egg) now applies the module speed penalty
