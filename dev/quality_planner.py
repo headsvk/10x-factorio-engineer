@@ -1151,6 +1151,21 @@ def solve_shuffle_loop(
     if primary_in_per_cast <= 0 or primary_back_per_output <= 0:
         return 0.0, {}
 
+    # Minimum-ingredient-quality rule (Q2): frame loop state as ingredient sets.
+    # Set retention is the minimum return ratio across all solid ingredients of
+    # the candidate recipe returned by the recycler.
+    set_members = [
+        ing for ing in candidate.solid_ingredients
+        if _recipe_result_amount(rec_recipe, ing) > 0 and _recipe_ing_amount(cast_recipe, ing) > 0
+    ]
+    if not set_members:
+        return 0.0, {}
+
+    set_retention = min(
+        _recipe_result_amount(rec_recipe, ing) / _recipe_ing_amount(cast_recipe, ing)
+        for ing in set_members
+    )
+
     # Determine inherent prod from the cast machine.
     if inherent_prod is None:
         machine_key, _ = cli.get_machine(
@@ -1189,14 +1204,7 @@ def solve_shuffle_loop(
                     )
                     if prod > 3.0:
                         prod = 3.0
-                    items_per_craft = output_per_cast * (1.0 + prod)
-                    # primary return per primary invested, per loop.
-                    # primary_back_per_output already encodes recycler
-                    # retention (recipe data stores post-retention amounts,
-                    # e.g. LDS-recycling has 1.25 plastic-bar = 5 × 0.25).
-                    per_input_yield = (
-                        items_per_craft / primary_in_per_cast
-                    ) * primary_back_per_output
+                    per_input_yield = (1.0 + prod) * set_retention
 
                     q_cast = _quality_chance(cq, quality_module_tier, module_quality)
                     q_rec = _quality_chance(rq, quality_module_tier, module_quality)
@@ -1421,12 +1429,21 @@ def compute_shuffle_stage(
         * 60.0
     )
 
-    # Byproducts: each non-primary solid recycle return scaled by the
-    # ratio of (byproduct output / primary output) per LDS recycle cycle.
+    normal_sets_per_min = (
+        normal_primary_in_per_min / primary_in_per_cast
+    )
+    normal_solid_inputs: dict[str, float] = {}
+    for ing in cast_recipe.get("ingredients", []):
+        iname = ing["name"]
+        if iname not in candidate.fluid_ingredients:
+            iamt = float(ing.get("amount", 0)) * normal_sets_per_min
+            normal_solid_inputs[iname] = iamt
+
+    # Byproducts: non-primary solid recycle returns NOT consumed as set members in loop.
     byproduct_legendary: dict[str, float] = {}
     for byprod in candidate.solid_recycle_returns:
-        if byprod == primary:
-            continue
+        if byprod == primary or byprod in candidate.solid_ingredients:
+            continue  # set member or primary: consumed in loop
         amt = _recipe_result_amount(rec_recipe, byprod)
         if amt <= 0:
             continue
@@ -1457,6 +1474,7 @@ def compute_shuffle_stage(
         "yield_per_normal_primary_pct": float(v) * 100.0,
         "legendary_primary_per_min": float(legendary_primary_per_min),
         "normal_primary_in_per_min": float(normal_primary_in_per_min),
+        "normal_solid_inputs": normal_solid_inputs,
         "total_casts_per_min": float(total_casts_per_min),
         "total_recycles_per_min": float(total_recycles_per_min),
         "byproduct_legendary": byproduct_legendary,
@@ -1581,34 +1599,33 @@ def select_shuffles_greedy(
     prod_module_tier: int = 3,
     research_levels: dict[str, int] | None = None,
     machine_quality: str = "normal",
+    planets: list[str] | frozenset[str] | None = None,
     target_tier: int = 4,
 ) -> list[dict]:
-    """Per-leaf greedy: activate shuffles that produce the chain's legendary leaves.
-
-    Algorithm:
-      1. For each enabled candidate, identify its valid primaries
-         (intersection of solid_ingredients and solid_recycle_returns; the
-         primary must be both fed in AND returned by the recycler).
-      2. Iterate legendary_leaves in descending demand order.  For each leaf:
-         - Find candidates that produce it (as primary or byproduct).
-         - Pick the (candidate, primary) with the lowest machine count for
-           the demanded throughput.
-         - If the leaf is the chosen candidate's primary, activate the
-           shuffle at the scale needed to cover demand.  If the leaf is a
-           byproduct of an already-activated shuffle, skip (already covered).
-      3. Track cumulative byproduct credits; subtract from remaining
-         leaf demand before scoring subsequent shuffles.
-
-    Returns a list of stage dicts (one per activated shuffle), each as
-    produced by :func:`compute_shuffle_stage`.
-
-    The greedy processes each leaf at most once; cycles are impossible by
-    construction (a chosen shuffle's byproducts can only remove leaves
-    from the queue, never re-add them).
-    """
+    """Per-leaf greedy: activate shuffles that produce the chain's legendary leaves."""
     if not legendary_leaves or not candidates:
         return []
     research_levels = research_levels or {}
+
+    planets_fs = frozenset(planets) if planets is not None else frozenset({"nauvis"})
+    planet_props = _combined_planet_props(data, planets_fs)
+
+    fluids = build_fluid_set(data)
+    _ing_reachable_cache: dict[str, bool] = {}
+    def _is_ing_reachable(ing_item: str) -> bool:
+        if ing_item in _ing_reachable_cache:
+            return _ing_reachable_cache[ing_item]
+        try:
+            walk_recipe_tree(
+                ing_item, 1.0, data, research_levels, 3,
+                fluids, planet_props, planets_fs,
+                tech_state=ALL_TECH_UNLOCKED,
+            )
+            _ing_reachable_cache[ing_item] = True
+            return True
+        except Exception:
+            _ing_reachable_cache[ing_item] = False
+            return False
 
     remaining = dict(legendary_leaves)
     # Track activated (recipe, primary) → accumulated legendary primary rate
@@ -1629,16 +1646,26 @@ def select_shuffles_greedy(
 
         best: tuple[float, ShuffleCandidate, str, dict] | None = None
         for cand in candidates:
+            # Check if cast recipe or any solid ingredient is unreachable on unlocked planets
+            cast_rec = _recipe_by_key(data, cand.recipe_key)
+            if cast_rec is None:
+                continue
+            if planet_props and not cli._recipe_valid_for_planet(cast_rec, planet_props):
+                continue
+            ing_unreachable = False
+            for ing in cand.solid_ingredients:
+                if not _is_ing_reachable(ing):
+                    ing_unreachable = True
+                    break
+            if ing_unreachable:
+                continue
+
             # Determine valid primaries for this candidate.  A primary must
             # be both fed in (solid_ingredients) AND returned (recycle).
             valid_primaries = (
                 set(cand.solid_ingredients) & set(cand.solid_recycle_returns)
             )
             if not valid_primaries:
-                # Shuffle can't self-feed any primary — skip.  (This is
-                # rare but possible: e.g. concrete-from-molten-iron has
-                # solid_ingredients=(stone-brick,) and solid_recycle_returns=
-                # (iron-ore, stone-brick); valid primary = stone-brick.)
                 continue
 
             # Case A: leaf is a valid primary of this candidate.
@@ -5546,6 +5573,7 @@ def plan(
             prod_module_tier=prod_module_tier,
             research_levels=research_levels,
             machine_quality=machine_quality,
+            planets=planets_fs,
             target_tier=target_tier,
         )
 
@@ -5624,15 +5652,22 @@ def plan(
                     f"{byprod}/min unused (no downstream demand)"
                 )
 
-            # Walk the normal-quality leg for each primary separately,
+            # Walk the normal-quality leg for each solid ingredient separately,
             # then route its raws into the normal_input bucket.
             for s in chosen_stages:
-                primary = s["primary"]
-                normal_in = float(s["normal_primary_in_per_min"])
-                if normal_in <= 0:
-                    continue
-                n_stages, n_raws = walk_recipe_tree(
-                    primary, normal_in, data, research_levels, assembler_level,
+                norm_inputs = s.get("normal_solid_inputs")
+                if norm_inputs:
+                    input_pairs = list(norm_inputs.items())
+                else:
+                    primary = s["primary"]
+                    normal_in = float(s["normal_primary_in_per_min"])
+                    input_pairs = [(primary, normal_in)]
+
+                for ing_item, normal_in in input_pairs:
+                    if normal_in <= 0:
+                        continue
+                    n_stages, n_raws = walk_recipe_tree(
+                        ing_item, normal_in, data, research_levels, assembler_level,
                     fluids, planet_props, planets_fs,
                     assembly_modules=assembly_modules,
                     assembly_module_quality=module_quality,

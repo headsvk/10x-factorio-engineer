@@ -2718,10 +2718,10 @@ class TestGlebaTargets(unittest.TestCase):
         self.assertGreater(out["total_machine_count"], 0)
         roles = [s.get("role") for s in out["stages"]]
         self.assertIn("cross-item-shuffle", roles)
-        # bioflux is in the shuffle's legendary byproducts, NOT external normal input.
+        # bioflux is a solid ingredient of capture-robot-rocket, so under Q2 set rules
+        # it is recycled as a set member in loop -> no excess byproduct.
         byprods = out.get("shuffle_byproduct_legendary", {})
-        self.assertIn("bioflux", byprods)
-        self.assertNotIn("bioflux", out.get("normal_solid_input", {}))
+        self.assertEqual(byprods, {})
 
     def test_tank_as_shuffle_target(self):
         out = qp.plan(
@@ -4244,6 +4244,55 @@ class TestModuleSpeedPenalty(unittest.TestCase):
         finally:
             qp._module_speed_mult = orig
         self.assertGreater(base, no_pen)
+
+
+class TestMinimumIngredientQualityRule(unittest.TestCase):
+    """Milestone Q2 unit tests: set-retention math & full ingredient set propagation."""
+
+    def test_shuffle_set_retention_matches_legacy_for_lds(self):
+        data = _data()
+        cand = qp._lds_candidate(data)
+        self.assertIsNotNone(cand)
+        v_gen, _ = qp.solve_shuffle_loop(cand, "plastic-bar", data, module_quality="legendary")
+        v_lds, _ = qp.solve_lds_shuffle_loop(data, module_quality="legendary")
+        self.assertAlmostEqual(v_gen, v_lds, places=6)
+
+    def test_advanced_circuit_shuffle_demands_all_solid_ingredients(self):
+        data = _data()
+        cand = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "advanced-circuit"
+        ][0]
+        st = qp.compute_shuffle_stage(
+            cand, "electronic-circuit", 60.0, data,
+            module_quality="legendary",
+        )
+        self.assertIsNotNone(st)
+        inputs = st.get("normal_solid_inputs", {})
+        self.assertIn("electronic-circuit", inputs)
+        self.assertIn("copper-cable", inputs)
+        self.assertIn("plastic-bar", inputs)
+        # All solid ingredients present at non-zero rates
+        self.assertGreater(inputs["electronic-circuit"], 0)
+        self.assertGreater(inputs["copper-cable"], 0)
+        self.assertGreater(inputs["plastic-bar"], 0)
+
+    def test_multi_solid_shuffle_byproducts_excludes_set_members(self):
+        data = _data()
+        cand = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "advanced-circuit"
+        ][0]
+        st = qp.compute_shuffle_stage(
+            cand, "electronic-circuit", 60.0, data,
+            module_quality="legendary",
+        )
+        self.assertIsNotNone(st)
+        byprods = st.get("byproduct_legendary", {})
+        # Solid ingredients are set members (consumed in loop), not byproducts
+        self.assertNotIn("electronic-circuit", byprods)
+        self.assertNotIn("copper-cable", byprods)
+        self.assertNotIn("plastic-bar", byprods)
 
 
 if __name__ == "__main__":
