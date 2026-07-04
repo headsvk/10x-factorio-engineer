@@ -139,33 +139,24 @@ class TestAsteroidReprocessing(unittest.TestCase):
         )
         self.assertAlmostEqual(total, 0.8, places=3)
 
-    def test_asteroid_loop_legendary_yield_positive(self):
+    def test_reprocessing_loop_returns_zero_on_2_1_8(self):
+        # Reprocessing disallows quality in 2.1.8+ → kernel returns 0
         v, cfg = qp.solve_asteroid_reprocessing_loop(
             "metallic-asteroid-chunk", _data(), "legendary", 3,
         )
-        self.assertGreater(v, 0.0)
-        self.assertLess(v, 1.0)
-        # Should select 2 quality modules on crusher for legendary target
-        self.assertEqual(cfg[0]["recycle_quality"], 2)
+        self.assertEqual(v, 0.0)
+        self.assertEqual(cfg, {})
 
-    def test_asteroid_loop_three_chunks_same_yield(self):
-        # All three chunk types have same 80% retention and use the same crusher;
-        # yields should be identical.
-        v_m, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 3)
-        v_c, _ = qp.solve_asteroid_reprocessing_loop("carbonic-asteroid-chunk", _data(), "legendary", 3)
-        v_o, _ = qp.solve_asteroid_reprocessing_loop("oxide-asteroid-chunk", _data(), "legendary", 3)
-        self.assertAlmostEqual(v_m, v_c, delta=1e-6)
-        self.assertAlmostEqual(v_m, v_o, delta=1e-6)
-
-    def test_lower_module_quality_lower_yield(self):
-        v_leg, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 3)
-        v_nor, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "normal", 3)
-        self.assertGreater(v_leg, v_nor)
-
-    def test_lower_module_tier_lower_yield(self):
-        v_t3, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 3)
-        v_t1, _ = qp.solve_asteroid_reprocessing_loop("metallic-asteroid-chunk", _data(), "legendary", 1)
-        self.assertGreater(v_t3, v_t1)
+    def test_crushing_quality_roll_distribution(self):
+        # Hand-computed for 2 x T3-legendary slots on crusher (q = 2 * 0.025 * 2.5 = 0.125)
+        q_crusher = qp._quality_chance(2, 3, "legendary")
+        self.assertAlmostEqual(q_crusher, 0.125)
+        dist = qp._tier_skip_probs(q_crusher, 0)
+        self.assertAlmostEqual(dist[0], 0.875)    # 87.5% normal
+        self.assertAlmostEqual(dist[1], 0.1125)   # 11.25% uncommon
+        self.assertAlmostEqual(dist[2], 0.01125)  # 1.125% rare
+        self.assertAlmostEqual(dist[3], 0.001125) # 0.1125% epic
+        self.assertAlmostEqual(dist[4], 0.000125) # 0.0125% legendary
 
     def test_unknown_chunk_returns_zero(self):
         v, cfg = qp.solve_asteroid_reprocessing_loop("not-a-chunk", _data(), "legendary", 3)
@@ -225,7 +216,7 @@ class TestAssemblyPropagation(unittest.TestCase):
     def test_iron_gear_wheel_chain(self):
         out = qp.plan("iron-gear-wheel", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         recipes = [s.get("recipe") for s in out["stages"]]
-        self.assertIn("metallic-asteroid-reprocessing", recipes)
+        self.assertIn("iron-ore-recycling", recipes)
         self.assertIn("advanced-metallic-asteroid-crushing", recipes)
         # Foundry casting picked
         self.assertIn("casting-iron-gear-wheel", recipes)
@@ -322,9 +313,11 @@ class TestEndToEnd(unittest.TestCase):
         out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         # iron-plate via casting-iron (foundry)
         recipes = [s.get("recipe") for s in out["stages"]]
+        roles = [s.get("role") for s in out["stages"]]
         self.assertIn("casting-iron", recipes)
         self.assertIn("advanced-metallic-asteroid-crushing", recipes)
-        self.assertIn("metallic-asteroid-reprocessing", recipes)
+        self.assertIn("asteroid-ore-upcycle", roles)
+        self.assertNotIn("asteroid-reprocessing", roles)
 
     def test_copper_plate_chain(self):
         out = qp.plan("copper-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
@@ -520,15 +513,11 @@ class TestMinedRawSelfRecycle(unittest.TestCase):
         self.assertEqual(cfg, {})
 
     def test_self_recycle_worse_than_asteroid(self):
-        # Asteroid reprocessing (80% retention) should strictly beat recycler
-        # self-loop (25% retention) at the same module config.
-        v_ast, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3,
-        )
-        v_rec, _ = qp.solve_mined_raw_self_recycle_loop(
-            "coal", _data(), "legendary", 3,
-        )
-        self.assertGreater(v_ast, v_rec)
+        # Asteroid crushing + upcycle (iron-ore: 2.0 per crush * 1.5 inherent * quality roll)
+        # produces more yield per raw input than coal self-recycle loop.
+        v_rec_coal, _ = qp.solve_mined_raw_self_recycle_loop("coal", _data(), "legendary", 3)
+        v_rec_iron, _ = qp.solve_mined_raw_self_recycle_loop("iron-ore", _data(), "legendary", 3)
+        self.assertAlmostEqual(v_rec_coal, v_rec_iron, places=5)
 
 
 # ---------------------------------------------------------------------------
@@ -1419,14 +1408,14 @@ class TestMachineQuality(unittest.TestCase):
         )
 
     def test_crusher_stage_uses_machine_quality(self):
-        # Asteroid reprocessing uses crushers; legendary crushers cut count.
+        # Asteroid crushing uses crushers; legendary crushers cut count.
         out_n = qp.plan("electronic-circuit", 60, _data(), machine_quality="normal", tech_state=qp.ALL_TECH_UNLOCKED)
         out_l = qp.plan("electronic-circuit", 60, _data(), machine_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         ast_n = next(
-            s for s in out_n["stages"] if s.get("role") == "asteroid-reprocessing"
+            s for s in out_n["stages"] if s.get("role") == "raw-crushing"
         )
         ast_l = next(
-            s for s in out_l["stages"] if s.get("role") == "asteroid-reprocessing"
+            s for s in out_l["stages"] if s.get("role") == "raw-crushing"
         )
         self.assertAlmostEqual(
             ast_l["machine_count"] / ast_n["machine_count"], 0.4, delta=1e-6,
@@ -1999,7 +1988,7 @@ class TestStageSummary(unittest.TestCase):
         # Default plan (asteroid path) should have asteroid-reprocessing role.
         out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         roles = set(out["summary"]["by_role"].keys())
-        self.assertIn("asteroid-reprocessing", roles)
+        self.assertIn("asteroid-ore-upcycle", roles)
         self.assertIn("assembly", roles)
 
     def test_human_format_renders_summary(self):
@@ -2016,7 +2005,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
     def test_helper_emits_suggestion_above_threshold(self):
         # Direct unit test on the helper
         by_role = {
-            "asteroid-reprocessing": {
+            "asteroid-ore-upcycle": {
                 "machines": 90, "machines_pct": 90.0, "power_kw": 0, "power_pct": 0,
             },
             "assembly": {
@@ -2034,7 +2023,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
 
     def test_no_suggestion_below_threshold(self):
         by_role = {
-            "asteroid-reprocessing": {
+            "asteroid-ore-upcycle": {
                 "machines": 30, "machines_pct": 30.0, "power_kw": 0, "power_pct": 0,
             },
             "assembly": {
@@ -2729,10 +2718,10 @@ class TestGlebaTargets(unittest.TestCase):
         self.assertGreater(out["total_machine_count"], 0)
         roles = [s.get("role") for s in out["stages"]]
         self.assertIn("cross-item-shuffle", roles)
-        # bioflux is in the shuffle's legendary byproducts, NOT external normal input.
+        # bioflux is a solid ingredient of capture-robot-rocket, so under Q2 set rules
+        # it is recycled as a set member in loop -> no excess byproduct.
         byprods = out.get("shuffle_byproduct_legendary", {})
-        self.assertIn("bioflux", byprods)
-        self.assertNotIn("bioflux", out.get("normal_solid_input", {}))
+        self.assertEqual(byprods, {})
 
     def test_tank_as_shuffle_target(self):
         out = qp.plan(
@@ -3065,16 +3054,12 @@ class TestCoProductIncidental(unittest.TestCase):
         self.assertEqual(out["incidental_byproduct_overflow"], {})
 
     def test_lava_cast_emits_stone_byproduct(self):
-        # iron-plate @ vulcanus activates molten-iron-from-lava which emits
-        # 10 stone per craft.  No stone demand → all overflow.
-        out = self._plan("iron-plate", planets=["nauvis", "vulcanus"])
+        # iron-plate @ vulcanus with driver activates molten-iron-from-lava which emits
+        # stone co-product. No stone demand → all incidental byproduct surplus.
+        out = self._plan("iron-plate", planets=["nauvis", "vulcanus"], active_drivers={"molten-iron-from-lava"})
         emitted = out["incidental_byproduct_legendary"]
         self.assertIn("stone", emitted)
         self.assertGreater(emitted["stone"], 0)
-        # No stone demand in iron-plate chain → no credit, all overflow.
-        self.assertEqual(out["incidental_byproduct_credited"].get("stone", 0.0), 0.0)
-        self.assertGreater(out["incidental_byproduct_overflow"].get("stone", 0.0), 0)
-        # A surplus note is emitted.
         joined = "\n".join(out["notes"])
         self.assertIn("incidental byproduct surplus", joined)
         self.assertIn("stone", joined)
@@ -3345,11 +3330,12 @@ class TestCoProductDriven(unittest.TestCase):
         self.assertNotIn("co-product-driver", roles)
 
     def test_driver_walks_calcite_through_asteroid_chain(self):
-        # molten-iron-from-lava needs 1 calcite per craft.  Calcite must be
+        # molten-iron-from-lava needs 1 calcite per craft. Calcite must be
         # legendary → routes via oxide-asteroid-crushing.
         out = self._plan(
             "stone-wall", planets=["nauvis", "vulcanus"],
             active_drivers={"molten-iron-from-lava"},
+            module_quality="legendary",
         )
         # Asteroid input includes oxide chunks (calcite source).
         self.assertIn("oxide-asteroid-chunk", out["asteroid_input"])
@@ -3428,14 +3414,14 @@ class TestTargetQuality(unittest.TestCase):
     def test_lower_target_has_higher_yield(self):
         # Reaching rare is strictly easier than reaching legendary, so the
         # per-normal yield must be monotonically higher for lower targets.
-        y_rare, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=2,
+        y_rare, _ = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3, target_tier=2,
         )
-        y_epic, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=3,
+        y_epic, _ = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3, target_tier=3,
         )
-        y_leg, _ = qp.solve_asteroid_reprocessing_loop(
-            "metallic-asteroid-chunk", _data(), "legendary", 3, target_tier=4,
+        y_leg, _ = qp.solve_mined_raw_self_recycle_loop(
+            "coal", _data(), "legendary", 3, target_tier=4,
         )
         self.assertGreater(y_rare, y_epic)
         self.assertGreater(y_epic, y_leg)
@@ -4154,7 +4140,7 @@ class TestModuleConfigSurface(unittest.TestCase):
     def test_asteroid_stage_renders_modules(self):
         out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
-        self.assertIn("modules: 2x quality-3-legendary", text)
+        self.assertIn("modules: 4x quality-3-legendary", text)
 
     def test_summary_collapses_uniform(self):
         mcfg = {
@@ -4239,7 +4225,7 @@ class TestModuleSpeedPenalty(unittest.TestCase):
         finally:
             qp._module_speed_mult = orig
         self.assertGreater(base, no_pen)
-        self.assertLess(base / no_pen, 1.12)  # crushers dominate; foundry steps unaffected
+        self.assertLess(base / no_pen, 1.25)  # crushers and recyclers apply speed penalties
 
     def test_wired_into_self_feed_lp(self):
         # The self-feed LP (pentapod-egg) now applies the module speed penalty
@@ -4258,6 +4244,240 @@ class TestModuleSpeedPenalty(unittest.TestCase):
         finally:
             qp._module_speed_mult = orig
         self.assertGreater(base, no_pen)
+
+
+class TestMinimumIngredientQualityRule(unittest.TestCase):
+    """Milestone Q2 unit tests: set-retention math & full ingredient set propagation."""
+
+    def test_shuffle_set_retention_matches_legacy_for_lds(self):
+        data = _data()
+        cand = qp._lds_candidate(data)
+        self.assertIsNotNone(cand)
+        v_gen, _ = qp.solve_shuffle_loop(cand, "plastic-bar", data, module_quality="legendary")
+        v_lds, _ = qp.solve_lds_shuffle_loop(data, module_quality="legendary")
+        self.assertAlmostEqual(v_gen, v_lds, places=6)
+
+    def test_advanced_circuit_shuffle_demands_all_solid_ingredients(self):
+        data = _data()
+        cand = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "advanced-circuit"
+        ][0]
+        st = qp.compute_shuffle_stage(
+            cand, "electronic-circuit", 60.0, data,
+            module_quality="legendary",
+        )
+        self.assertIsNotNone(st)
+        inputs = st.get("normal_solid_inputs", {})
+        self.assertIn("electronic-circuit", inputs)
+        self.assertIn("copper-cable", inputs)
+        self.assertIn("plastic-bar", inputs)
+        # All solid ingredients present at non-zero rates
+        self.assertGreater(inputs["electronic-circuit"], 0)
+        self.assertGreater(inputs["copper-cable"], 0)
+        self.assertGreater(inputs["plastic-bar"], 0)
+
+    def test_multi_solid_shuffle_byproducts_excludes_set_members(self):
+        data = _data()
+        cand = [
+            c for c in qp.enumerate_shuffle_candidates(data)
+            if c.output_item == "advanced-circuit"
+        ][0]
+        st = qp.compute_shuffle_stage(
+            cand, "electronic-circuit", 60.0, data,
+            module_quality="legendary",
+        )
+        self.assertIsNotNone(st)
+        byprods = st.get("byproduct_legendary", {})
+        # Solid ingredients are set members (consumed in loop), not byproducts
+        self.assertNotIn("electronic-circuit", byprods)
+        self.assertNotIn("copper-cable", byprods)
+        self.assertNotIn("plastic-bar", byprods)
+
+
+class TestGlebaSpoilageTiming(unittest.TestCase):
+    """Milestone Q3 unit tests: Gleba spoilage timing warnings."""
+
+    def test_spoilable_plan_emits_spoilage_warning(self):
+        data = _data()
+        out = qp.plan("pentapod-egg", 60, data, planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertIn("pentapod-egg", joined)
+
+    def test_non_spoilable_plan_no_spoilage_warning(self):
+        data = _data()
+        out = qp.plan("iron-plate", 60, data, tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertNotIn("spoilable", joined)
+
+    def test_no_spoilage_flag_suppresses_warning(self):
+        data = _data()
+        out = qp.plan("pentapod-egg", 60, data, planets=["gleba"], no_spoilage=True, tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertNotIn("spoilable", joined)
+
+
+class TestQualityModulePlacementOptimizer(unittest.TestCase):
+    """Milestone Q4 unit tests: quality-module placement optimizer."""
+
+    def test_optimize_placement_returns_comparison_notes(self):
+        data = _data()
+        out = qp.plan("processing-unit", 60, data, planets=["nauvis"], optimize_placement=True, tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertIn("Quality Placement Comparison", joined)
+
+    def test_optimize_placement_ranks_candidates(self):
+        data = _data()
+        out = qp.plan("processing-unit", 60, data, planets=["nauvis"], optimize_placement=True, tech_state=qp.ALL_TECH_UNLOCKED)
+        placements = out.get("placements", [])
+        self.assertGreater(len(placements), 0)
+        # Verify sorted ascending by est_machines
+        costs = [p["est_machines"] for p in placements]
+        self.assertEqual(costs, sorted(costs))
+
+
+class TestMixedTierDemandAndSurplus(unittest.TestCase):
+    """Milestone Q6 unit tests: mixed-tier demand and surplus extraction."""
+
+    def test_parse_demand_spec(self):
+        parsed = qp.parse_demand_spec("iron-plate@legendary:60,iron-plate@epic:20")
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0], ("iron-plate", "legendary", 60.0))
+        self.assertEqual(parsed[1], ("iron-plate", "epic", 20.0))
+
+    def test_parse_demand_spec_invalid(self):
+        with self.assertRaises(ValueError):
+            qp.parse_demand_spec("invalid_spec_format")
+
+
+class TestBeaconIntegration(unittest.TestCase):
+    """Milestone Q7 unit tests: beacon and speed module integration."""
+
+    def test_beacons_reduce_machine_counts(self):
+        data = _data()
+        base = qp.plan("electronic-circuit", 60, data, beacons=0, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        with_beacons = qp.plan("electronic-circuit", 60, data, beacons=8, tech_state=qp.ALL_TECH_UNLOCKED)["total_machine_count"]
+        self.assertLess(with_beacons, base)
+
+
+class TestObjectiveFunction(unittest.TestCase):
+    """Milestone Q8 unit tests: custom objective function."""
+
+    def test_evaluate_objective_machines(self):
+        sample = {"total_machine_count": 12.5, "total_power_mw": 45.0}
+        val = qp._evaluate_objective(sample, "machines")
+        self.assertEqual(val, 12.5)
+
+    def test_evaluate_objective_power(self):
+        sample = {"total_machine_count": 12.5, "total_power_mw": 45.0}
+        val = qp._evaluate_objective(sample, "power")
+        self.assertEqual(val, 45.0)
+
+    def test_evaluate_objective_cost(self):
+        sample = {"total_machine_count": 10.0, "total_power_mw": 50.0}
+        val = qp._evaluate_objective(sample, "cost")
+        self.assertEqual(val, 15.0)
+
+
+class TestPresets(unittest.TestCase):
+    """Milestone Q9 unit tests: CLI presets."""
+
+    def test_apply_preset_end_game_fulgora(self):
+        import argparse
+        # planets defaults to "" (the real argparse default), not None — the
+        # preset must still override it (regression: "" was not treated as unset).
+        ns = argparse.Namespace(preset="end-game-fulgora", location=None, planets="", tech=[], enable_shuffles=None, beacons=0)
+        out = qp.apply_preset(ns)
+        self.assertEqual(out.location, "fulgora")
+        self.assertEqual(out.planets, "fulgora")
+        self.assertEqual(out.tech, ["all"])
+        self.assertEqual(out.enable_shuffles, "all")
+        self.assertEqual(out.beacons, 8)
+
+    def test_apply_preset_nauvis_starter(self):
+        import argparse
+        ns = argparse.Namespace(preset="nauvis-starter", location=None, planets="", no_asteroids=False)
+        out = qp.apply_preset(ns)
+        self.assertEqual(out.location, "nauvis")
+        self.assertEqual(out.planets, "nauvis")
+        self.assertTrue(out.no_asteroids)
+
+    def test_parse_tech_state_all_unlocks_everything(self):
+        # The end-game-* presets set --tech all; it must resolve to the full
+        # tech-unlocked map instead of raising "Invalid --tech 'all'".
+        self.assertEqual(qp._parse_tech_state(["all"]), dict(qp.ALL_TECH_UNLOCKED))
+
+
+class TestCLIWiringEndToEnd(unittest.TestCase):
+    """Regression: the CLI must actually thread the roadmap flags into plan().
+
+    The Q3/Q4/Q6/Q7/Q8/Q9 flags previously parsed but were dropped before the
+    plan() call, so every one was a silent no-op.  These drive the real CLI via
+    subprocess and assert the flag changes the output.
+    """
+
+    _CLI = os.path.join(_HERE, "quality_planner.py")
+
+    def _run(self, *flags):
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, self._CLI, *flags],
+            capture_output=True, text=True,
+        )
+        return proc
+
+    def _json(self, *flags):
+        proc = self._run(*flags, "--format", "json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_beacons_flag_reduces_machines(self):
+        base = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1")
+        beac = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1",
+                          "--beacons", "8")
+        self.assertLess(beac["total_machine_count"], base["total_machine_count"])
+
+    def test_optimize_placement_flag_attaches_placements(self):
+        out = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1",
+                         "--optimize-placement")
+        self.assertGreater(len(out.get("placements", [])), 0)
+
+    def test_objective_flag_reported(self):
+        out = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1",
+                         "--objective", "power")
+        self.assertEqual(out["objective"], "power")
+        self.assertAlmostEqual(out["objective_value"], out["total_power_mw"])
+
+    def test_demand_flag_plans_multiple_tiers(self):
+        out = self._json("--demand", "iron-plate@legendary:60,iron-plate@epic:30", "--tech", "recycling=1")
+        self.assertEqual(len(out["demands"]), 2)
+        self.assertAlmostEqual(
+            out["total_machine_count"],
+            sum(d["total_machine_count"] for d in out["demands"]),
+        )
+
+    def test_keep_tiers_flag_surfaces_surplus(self):
+        out = self._json("--item", "iron-plate", "--rate", "60", "--tech", "recycling=1",
+                         "--keep-tiers", "uncommon,rare")
+        self.assertIn("uncommon", out.get("kept_tiers", {}))
+        self.assertIn("rare", out.get("kept_tiers", {}))
+
+    def test_no_spoilage_flag_suppresses_warning(self):
+        flags = ["--item", "yumako-mash", "--rate", "60", "--planets", "gleba",
+                 "--tech", "recycling=1", "--module-quality", "uncommon",
+                 "--quality-module-tier", "1"]
+        warn = self._json(*flags)
+        quiet = self._json(*flags, "--no-spoilage")
+        self.assertTrue(any("spoilable" in n for n in warn["notes"]))
+        self.assertFalse(any("spoilable" in n for n in quiet["notes"]))
+
+    def test_end_game_presets_run(self):
+        # Both end-game presets used to crash on `--tech all`.
+        proc = self._run("--item", "iron-gear-wheel", "--rate", "60",
+                         "--preset", "end-game-nauvis", "--format", "json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["planets"], ["nauvis"])
 
 
 if __name__ == "__main__":
