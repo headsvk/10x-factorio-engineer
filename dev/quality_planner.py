@@ -6494,6 +6494,16 @@ def plan(
             f"incidental byproduct surplus: {surplus:.2f} legendary "
             f"{byprod}/min unused (no downstream demand)"
         )
+    # Known-limitation marker: the reprocessing quality climb predates the
+    # 2.1.8 rule change (reprocessing recipes no longer accept quality
+    # modules), so asteroid-sourced counts are optimistic.  See the module
+    # header / ASTEROID_REPROCESSING_RECIPES comment.
+    if reprocessing_stages:
+        notes.append(
+            "asteroid-reprocessing modelling predates the 2.1.8 rule change "
+            "(reprocessing recipes no longer accept quality modules in-game) — "
+            "asteroid-sourced counts are optimistic; known limitation"
+        )
     # Driver-activation notes (co-product was harvested; non-target outputs
     # become overflow).
     for ds in driver_stages:
