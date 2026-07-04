@@ -4295,5 +4295,27 @@ class TestMinimumIngredientQualityRule(unittest.TestCase):
         self.assertNotIn("plastic-bar", byprods)
 
 
+class TestGlebaSpoilageTiming(unittest.TestCase):
+    """Milestone Q3 unit tests: Gleba spoilage timing warnings."""
+
+    def test_spoilable_plan_emits_spoilage_warning(self):
+        data = _data()
+        out = qp.plan("pentapod-egg", 60, data, planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertIn("pentapod-egg", joined)
+
+    def test_non_spoilable_plan_no_spoilage_warning(self):
+        data = _data()
+        out = qp.plan("iron-plate", 60, data, tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertNotIn("spoilable", joined)
+
+    def test_no_spoilage_flag_suppresses_warning(self):
+        data = _data()
+        out = qp.plan("pentapod-egg", 60, data, planets=["gleba"], no_spoilage=True, tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertNotIn("spoilable", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

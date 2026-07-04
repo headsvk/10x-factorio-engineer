@@ -12,11 +12,12 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **346 tests, all passing, ~4.8 s.**
+**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **349 tests, all passing, ~4.8 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 Currently shipped:
+- **Gleba Spoilage Timing & Warnings (2026-07-04, Q3)** — Fixed spoil times (`SPOIL_TIMES_SECONDS` for yumako, jellynut, mash, nutrients, bioflux, pentapod-egg, biter-egg, ag-science). Estimated loop residence time $T \approx \text{passes} \times \text{cycle\_time}$. Emits WARNING notes when $T > 0.5 \times t_{\text{spoil}}$ and ERROR notes when $T > t_{\text{spoil}}$. Flag `--no-spoilage` restores unspoilable timing for A/B testing.
 - **Minimum-Ingredient-Quality Rule & Tier-Matched Ingredient Sets (2026-07-04, Q2)** — Reframed shuffle DP loop states as full ingredient sets ($V[t]$ sets emerging per 1 normal set invested). Solid ingredients are demanded at recipe ratio per set at tier 0 (`normal_solid_inputs`). Recycler returns are split into set members (consumed in loop) vs excess returns (emitted as `byproduct_legendary`).
 - **Post-2.1.8 Asteroid Quality Redesign (2026-07-04, Q1)** — Factorio 2.1.8+ removed quality modules from asteroid reprocessing recipes. Chunks no longer climb quality tiers via reprocessing loops. Asteroid quality now rolls during the initial crushing step (2 slots on crushers with quality modules). Crushed raw ores (iron-ore, copper-ore, carbon, sulfur, ice, calcite) are upcycled to the target tier via recycler self-loops (4 slots, 25% retention), emitted as `raw-crushing` and `asteroid-ore-upcycle` stage roles.
 - **Generalized Quality Mining (2026-07-04, Q5)** — Mining drills convolve 1 miner quality roll with recycler loops for all planet-mined solid raws when quality modules are enabled (`--miner electric|big`). Applying quality modules to drills reduces drill craft speed by -5%/slot (-15% for 3 slots on electric drills, -20% for 4 slots on big mining drills).

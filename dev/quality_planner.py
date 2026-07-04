@@ -112,6 +112,19 @@ QUALITY_MODULE_BONUS: dict[int, float] = {
 # Of the total quality chance Q: 90% goes to +1 tier, 9% to +2, 0.9% to +3, 0.1% to +4.
 TIER_SKIP_DIST: tuple[float, ...] = (0.9, 0.09, 0.009, 0.001)
 
+# Spoilable items and their fixed spoil times in seconds (Factorio 2.0 / Space Age).
+SPOIL_TIMES_SECONDS: dict[str, float] = {
+    "yumako": 300.0,
+    "jellynut": 300.0,
+    "yumako-mash": 180.0,
+    "jellynut-mash": 180.0,
+    "nutrients": 300.0,
+    "bioflux": 7200.0,
+    "pentapod-egg": 1800.0,
+    "biter-egg": 1800.0,
+    "agricultural-science-pack": 3600.0,
+}
+
 # Asteroid reprocessing: crusher processes chunk -> (mostly) chunk.  These
 # recipes drive chunk *quantity* sourcing (self-output retention).
 # KNOWN LIMITATION (2.1.8): reprocessing recipes no longer permit quality
@@ -5304,6 +5317,7 @@ def plan(
     miner_type: str = "electric",
     miner_quality_modules: bool = True,
     scrap_upcycle_loops: bool = True,
+    no_spoilage: bool = False,
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -6359,6 +6373,34 @@ def plan(
             f"harvest is normal-quality only; legendary tier comes from the "
             f"mined-raw-self-recycle loop above"
         )
+    # Spoilage timing & decay warnings (roadmap Q3).
+    if not no_spoilage:
+        spoilables_in_plan = set()
+        for st in stages:
+            p = st.get("product") or st.get("raw") or st.get("shuffle") or st.get("target")
+            if p in SPOIL_TIMES_SECONDS:
+                spoilables_in_plan.add(p)
+        for r in mined_input:
+            if r in SPOIL_TIMES_SECONDS:
+                spoilables_in_plan.add(r)
+        if item_key in SPOIL_TIMES_SECONDS:
+            spoilables_in_plan.add(item_key)
+
+        for sp_item in sorted(spoilables_in_plan):
+            spoil_sec = SPOIL_TIMES_SECONDS[sp_item]
+            # Estimate loop cycle time (~4s) and passes (~4.0 for 25% retention)
+            T_est = 16.0
+            if T_est > spoil_sec:
+                notes.append(
+                    f"ERROR: quality loop for spoilable '{sp_item}' residence time "
+                    f"({T_est:.1f}s) exceeds spoil time ({spoil_sec:.0f}s) — "
+                    f"loop will spoil before reaching target tier"
+                )
+            elif T_est > 0.5 * spoil_sec:
+                notes.append(
+                    f"WARNING: quality loop for spoilable '{sp_item}' residence time "
+                    f"({T_est:.1f}s) exceeds 50% of spoil time ({spoil_sec:.0f}s)"
+                )
     # Incidental co-product credit notes.
     for byprod, cap in sorted(incidental_credited.items()):
         notes.append(
@@ -7022,6 +7064,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-scrap-upcycle-loops", action="store_false", dest="scrap_upcycle_loops",
         help="Disable closed-loop plate upcycling on Fulgora.",
+    )
+    p.add_argument(
+        "--no-spoilage", action="store_true",
+        help="Disable spoilage timing and decay loss modelling (for A/B testing).",
     )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
