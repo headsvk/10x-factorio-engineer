@@ -14,6 +14,8 @@ This document is the single source of truth — supersedes the original `quality
 
 **Last updated:** 2026-07-01. Tests: `python -m unittest dev.test_quality_planner -v` — **345 tests, all passing, ~2.0 s.**
 
+**Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
+
 Currently shipped:
 - DP kernels for four loop types (asteroid reprocessing, mined-raw self-recycle, cross-item shuffle, self-recycle target)
 - Multi-planet support (`--planets`)
