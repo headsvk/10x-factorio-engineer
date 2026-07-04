@@ -4317,5 +4317,24 @@ class TestGlebaSpoilageTiming(unittest.TestCase):
         self.assertNotIn("spoilable", joined)
 
 
+class TestQualityModulePlacementOptimizer(unittest.TestCase):
+    """Milestone Q4 unit tests: quality-module placement optimizer."""
+
+    def test_optimize_placement_returns_comparison_notes(self):
+        data = _data()
+        out = qp.plan("processing-unit", 60, data, planets=["nauvis"], optimize_placement=True, tech_state=qp.ALL_TECH_UNLOCKED)
+        joined = "\n".join(out["notes"])
+        self.assertIn("Quality Placement Comparison", joined)
+
+    def test_optimize_placement_ranks_candidates(self):
+        data = _data()
+        out = qp.plan("processing-unit", 60, data, planets=["nauvis"], optimize_placement=True, tech_state=qp.ALL_TECH_UNLOCKED)
+        placements = out.get("placements", [])
+        self.assertGreater(len(placements), 0)
+        # Verify sorted ascending by est_machines
+        costs = [p["est_machines"] for p in placements]
+        self.assertEqual(costs, sorted(costs))
+
+
 if __name__ == "__main__":
     unittest.main()

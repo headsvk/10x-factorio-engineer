@@ -5294,6 +5294,79 @@ def _plan_fluid_chain_via_cli(
     }
 
 
+def optimize_quality_placement(
+    item_key: str,
+    rate: float,
+    data: dict,
+    *,
+    module_quality: str = "legendary",
+    quality_module_tier: int = 3,
+    assembler_level: int = 3,
+    planets: list[str] | tuple[str, ...] | frozenset[str] | None = None,
+    tech_state: dict[str, int] | None = None,
+    target_tier: int = 4,
+) -> dict:
+    """Evaluate quality module placements across chain steps for item_key (roadmap Q4)."""
+    planets_fs = frozenset(planets) if planets else frozenset({"nauvis"})
+    tech_state = tech_state or ALL_TECH_UNLOCKED
+
+    baseline_stages, _ = walk_recipe_tree(
+        item_key, rate, data, {}, assembler_level,
+        build_fluid_set(data), _combined_planet_props(data, planets_fs), planets_fs,
+        tech_state=tech_state,
+    )
+
+    placements = []
+    slots_map = cli.build_machine_module_slots(data)
+    for st in baseline_stages:
+        rec_key = st.get("recipe")
+        if not rec_key:
+            continue
+        rec = _recipe_by_key(data, rec_key)
+        if rec is None or not cli.recipe_allows_quality(rec):
+            continue
+        m_key = st.get("machine", "assembling-machine-3")
+        slots = int(slots_map.get(m_key, 4))
+        for q_slots in range(1, slots + 1):
+            q_chance = _quality_chance(q_slots, quality_module_tier, module_quality)
+            q_probs = _tier_skip_probs(q_chance, 0)
+            target_frac = q_probs[target_tier] if target_tier < len(q_probs) else q_probs[-1]
+            craft_rate = rate / max(0.001, target_frac)
+            cost_est = len(baseline_stages) + craft_rate / 60.0
+            placements.append({
+                "stage": rec_key,
+                "product": st.get("product", item_key),
+                "quality_slots": q_slots,
+                "q_chance_pct": q_chance * 100.0,
+                "target_yield_pct": target_frac * 100.0,
+                "est_machines": cost_est,
+            })
+
+    placements.sort(key=lambda p: p["est_machines"])
+
+    best_plan = plan(
+        item_key, rate, data,
+        module_quality=module_quality,
+        quality_module_tier=quality_module_tier,
+        assembler_level=assembler_level,
+        planets=planets,
+        tech_state=tech_state,
+        target_tier=target_tier,
+    )
+
+    notes = list(best_plan.get("notes", []))
+    notes.append("=== Quality Placement Comparison (top candidates) ===")
+    for p in placements[:3]:
+        notes.append(
+            f"  step '{p['stage']}' ({p['quality_slots']}x quality-{quality_module_tier}-{module_quality}): "
+            f"roll chance {p['q_chance_pct']:.1f}%, target yield {p['target_yield_pct']:.2f}% "
+            f"-> ~{p['est_machines']:.1f} machines"
+        )
+    best_plan["notes"] = notes
+    best_plan["placements"] = placements
+    return best_plan
+
+
 def plan(
     item_key: str,
     rate: float,
@@ -5318,6 +5391,7 @@ def plan(
     miner_quality_modules: bool = True,
     scrap_upcycle_loops: bool = True,
     no_spoilage: bool = False,
+    optimize_placement: bool = False,
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -5326,11 +5400,6 @@ def plan(
 ) -> dict:
     """Top-level planning: walk tree, attach asteroid reprocessing loops for raws,
     scale stages, assemble full output.
-
-    ``planets`` is the set of planets the player has unlocked.  An empty or
-    ``None`` value reverts to V1 behaviour (asteroid-only, Nauvis baseline).
-
-    ``location`` is the single planet the factory is *built on* (mirrors
     ``cli.py --location``).  ``--location fulgora`` unlocks Fulgora and switches
     to scrap-only sourcing: there is no asteroid platform, so base materials come
     from the scrap-recycling quality source and metals terminate at their
@@ -5347,6 +5416,16 @@ def plan(
     so the auto-comparator (V3 item 4) can compute Path B (ingredient-upcycle)
     for items that would otherwise route through ``_plan_self_recycle_target``.
     """
+    if optimize_placement:
+        return optimize_quality_placement(
+            item_key, rate, data,
+            module_quality=module_quality or "legendary",
+            quality_module_tier=quality_module_tier,
+            assembler_level=assembler_level,
+            planets=planets,
+            tech_state=tech_state,
+            target_tier=target_tier,
+        )
     research_levels = research_levels or {}
     # Build location: Fulgora forces scrap-only sourcing (no asteroid platform).
     # ``forbid_ore_routes`` may also arrive directly from a recursive plan() /
@@ -7068,6 +7147,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-spoilage", action="store_true",
         help="Disable spoilage timing and decay loss modelling (for A/B testing).",
+    )
+    p.add_argument(
+        "--optimize-placement", action="store_true",
+        help="Search for the optimal quality-module placement across chain steps.",
     )
     p.add_argument("--format", default="human", choices=["human", "json"])
     return p.parse_args()
