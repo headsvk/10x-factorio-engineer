@@ -20,6 +20,7 @@ Usage:
                   [--recipe-modules RECIPE=COUNT:TYPE:TIER:QUALITY]  # repeatable
                   [--recipe-beacon RECIPE=COUNT:TIER:QUALITY]   # repeatable
                   [--bus-item ITEM-ID]                          # repeatable
+                  [--research NAME=LEVEL]                       # repeatable
                   [--use-ceil]
                   [--format json|human]
 
@@ -43,7 +44,8 @@ Solver notes
   net_heavy = gross heavy yield - self-consumed heavy oil (CL only).
   Negative-variable cases are handled by clamping to zero and re-solving
   the reduced system.
-* Productivity and speed module bonuses are applied uniformly per --prod / --speed.
+* Productivity and speed module bonuses are applied per machine/recipe via
+  --modules / --recipe-modules (and beacons via --beacon / --recipe-beacon).
 
 Dataset files (vanilla-2.1.9.json, space-age-2.1.9.json) are vendored in
 ./assets/  and automatically downloaded from KirkMcDonald's calculator GitHub repo
@@ -542,10 +544,12 @@ def quality_chance_from_specs(specs: list, slots: int) -> Fraction:
     for spec in specs:
         eff_count = Fraction(spec["count"]) * scale
         mult = MODULE_QUALITY_MULT[spec["quality"]]
+        # .get(): the vanilla dataset has no quality modules, so these tables
+        # are empty there — speed/quality specs then contribute 0 chance.
         if spec.get("type") == "quality":
-            q += eff_count * QUALITY_MODULE_BONUS[spec["tier"]] * mult
+            q += eff_count * QUALITY_MODULE_BONUS.get(spec["tier"], Fraction(0)) * mult
         elif spec.get("type") == "speed":
-            q -= eff_count * SPEED_MODULE_QUALITY_PENALTY[spec["tier"]] * mult
+            q -= eff_count * SPEED_MODULE_QUALITY_PENALTY.get(spec["tier"], Fraction(0)) * mult
     if q < 0:
         return Fraction(0)
     if q > 1:
@@ -1576,7 +1580,8 @@ class Solver:
                     elif spec["type"] == "quality":
                         # Quality modules slow the machine (-5 % each, flat); no
                         # effect on output count (quality rolls are not modelled here).
-                        speed_bonus += eff_count * QUALITY_MODULE_SPEED_PENALTY[spec["tier"]]
+                        # .get(): empty on vanilla (no quality modules) — penalty 0.
+                        speed_bonus += eff_count * QUALITY_MODULE_SPEED_PENALTY.get(spec["tier"], Fraction(0))
                     # efficiency: no effect on production count
 
         # Research productivity is a recipe-targeted *technology* effect (e.g.
@@ -1639,9 +1644,10 @@ class Solver:
         pen_sum = Fraction(0)
         for mod in beacon_spec["modules"]:
             if mod["type"] == "speed":
+                # .get(): empty on vanilla (no quality modules) — penalty is 0.
                 pen_sum += (
                     Fraction(mod["count"])
-                    * SPEED_MODULE_QUALITY_PENALTY[mod["tier"]]
+                    * SPEED_MODULE_QUALITY_PENALTY.get(mod["tier"], Fraction(0))
                     * MODULE_QUALITY_MULT[mod["quality"]]
                 )
         if pen_sum == 0:
@@ -2518,8 +2524,8 @@ def compute_miners(
                             energy_bonus += eff_count * MODULE_CONSUMPTION_PENALTY["speed"][spec["tier"]]
                         elif spec["type"] == "quality":
                             # Quality modules in drills slow them (-5 % each, flat);
-                            # no consumption effect.
-                            speed_bonus  += eff_count * QUALITY_MODULE_SPEED_PENALTY[spec["tier"]]
+                            # no consumption effect. .get(): empty on vanilla.
+                            speed_bonus  += eff_count * QUALITY_MODULE_SPEED_PENALTY.get(spec["tier"], Fraction(0))
                         elif spec["type"] == "efficiency":
                             energy_bonus -= eff_count * MODULE_EFFICIENCY_REDUCTION[spec["tier"]] * qual_mult
             energy_bonus = max(energy_bonus, Fraction(-4, 5))
@@ -3240,7 +3246,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "Factorio production calculator -- outputs JSON with machine counts, "
-            "raw resource rates, miner counts, and belt/pump counts."
+            "raw resource rates, miner counts, and power draw."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -3249,8 +3255,7 @@ Examples:
   python cli.py --item processing-unit --rate 10 --assembler 3 --furnace electric
   python cli.py --item rocket-fuel --rate 5 --assembler 3 --location nauvis
   python cli.py --item tungsten-carbide --rate 60 --location vulcanus --miner big
-  python cli.py --item electronic-circuit --rate 60 --belt blue
-  python cli.py --item lubricant --rate 60 --pump legendary
+  python cli.py --item steel-plate --rate 60 --research mining-productivity=5
   python cli.py --item electronic-circuit --rate 60 \\
       --modules "assembling-machine-3=4:prod:3:normal" \\
       --beacon "assembling-machine-3=4:2:speed:3:normal" \\

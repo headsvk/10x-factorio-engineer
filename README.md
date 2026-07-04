@@ -18,8 +18,8 @@ A Factorio factory co-pilot built on three components:
   assets/
     cli.py                  # Calculator — entire implementation
     dashboard.html          # Built artifact — paste into claude.ai as application/vnd.ant.html
-    vanilla-2.0.55.json     # KirkMcDonald dataset — base game
-    space-age-2.0.55.json   # KirkMcDonald dataset — Space Age DLC
+    vanilla-2.1.9.json     # KirkMcDonald dataset — base game
+    space-age-2.1.9.json   # KirkMcDonald dataset — Space Age DLC
   references/
     *.md                    # Split strategy reference files (11 topics: early-game, factory-layouts, trains, megabase, planets, space-platforms, power, combat-defense, logistics-circuits, quality, resources)
 dev/
@@ -29,7 +29,7 @@ dev/
   sample/
     state.json              # Sample factory state source JSON — edit directly, paste into Import dialog to test
   my-factory.json           # Dev factory state for local testing
-  test_cli.py               # unittest suite (278 tests, stdlib only)
+  test_cli.py               # unittest suite (281 tests, stdlib only)
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
   test_quality_planner.py   # unittest suite (345 tests) for quality_planner
   artifact-api/
@@ -55,7 +55,7 @@ python assets/cli.py --item electronic-circuit --rate 60 --item automation-scien
 # Productivity + beacon modules
 python assets/cli.py --item electronic-circuit --rate 60 \
     --modules "assembling-machine-3=4:prod:3:normal" \
-    --beacon "assembling-machine-3=8:3:legendary" \
+    --beacon "assembling-machine-3=8:2:speed:3:legendary" \
     --machine-quality legendary
 
 # Infinite research productivity (mining L5 + steel L3)
@@ -95,22 +95,26 @@ Location: vanilla  |  Assembler: 3  |  Furnace: electric  |  Miner: electric
 
 Production Steps
 ----------------
-copper-cable                    180.0/min    0.6 -> 1 assembling-machine-3
-  power: 225.0 kW  (375.0 kW ceil)
-  <- copper-plate                  90.0/min
-
-copper-plate                    90.0/min    2.4 -> 3 electric-furnace
-  power: 432.0 kW  (540.0 kW ceil)
-  <- copper-ore                    90.0/min
-
-iron-plate                      60.0/min    1.6 -> 2 electric-furnace
-  power: 288.0 kW  (360.0 kW ceil)
-  <- iron-ore                      60.0/min
-
-electronic-circuit              60.0/min    0.4 -> 1 assembling-machine-3
+electronic-circuit              0.4 -> 1 assembling-machine-3
   power: 150.0 kW  (375.0 kW ceil)
+  -> electronic-circuit            60.0/min
   <- copper-cable                  180.0/min
   <- iron-plate                    60.0/min
+
+copper-cable                    0.6 -> 1 assembling-machine-3
+  power: 225.0 kW  (375.0 kW ceil)
+  -> copper-cable                  180.0/min
+  <- copper-plate                  90.0/min
+
+copper-plate                    2.4 -> 3 electric-furnace
+  power: 432.0 kW  (540.0 kW ceil)
+  -> copper-plate                  90.0/min
+  <- copper-ore                    90.0/min
+
+iron-plate                      1.6 -> 2 electric-furnace
+  power: 288.0 kW  (360.0 kW ceil)
+  -> iron-plate                    60.0/min
+  <- iron-ore                      60.0/min
 
 Raw Resources
 -------------
@@ -133,13 +137,14 @@ With modules + beacons + machine quality the header shows configuration and each
 Location: vanilla  |  Assembler: 3  |  Furnace: electric  |  Miner: electric
 Machine quality: legendary  |  Beacon quality: normal
 Modules:  assembling-machine-3 = 4x prod-3-normal
-Beacons:  assembling-machine-3 = 8x tier-3-legendary
+Beacons:  assembling-machine-3 = 8x [2x speed-3-legendary]
 
 Production Steps
 ----------------
-electronic-circuit              60.0/min    0.0098 -> 1 legendary assembling-machine-3
-  modules: 4x prod-3-normal  |  beacons: 8x tier-3-legendary  |  speed bonus: +10.6066
-  power: 15.5084 kW  (1575.0 kW ceil)  +  960.0 kW beacons
+electronic-circuit              0.0246 -> 1 legendary assembling-machine-3
+  modules: 4x prod-3-normal  |  beacons: 8x [2x speed-3-legendary]  |  speed bonus: +10.6066
+  power: 38.771 kW  (1575.0 kW ceil)  +  960.0 kW beacons
+  -> electronic-circuit            60.0/min
   <- copper-cable                  128.5714/min
   <- iron-plate                    42.8571/min
 ...
@@ -153,14 +158,14 @@ $ python assets/cli.py --item accumulator --rate 50 --location fulgora \
 
 Quality pick-out: ON  |  Unlocked up to: rare
 ...
-accumulator                     4.004 -> 5 electromagnetic-plant
+accumulator                     4.1152 -> 5 electromagnetic-plant
   modules: 5x quality-2-normal
   -> accumulator                   50.0/min
-  ~ quality accumulator: 50.0 normal, 3.6486 uncommon, 0.4054 rare
+  ~ quality accumulator: 50.0 normal, 5.0 uncommon, 0.5556 rare
 ...
 Picked-Out Quality Items
 ------------------------
-  accumulator                   3.6486/min uncommon, 0.4054/min rare
+  accumulator                   5.0/min uncommon, 0.5556/min rare
 ```
 
 See [SKILL.md §2](10x-factorio-engineer/SKILL.md) for the complete flags reference and full JSON output shape.
@@ -172,7 +177,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-278 CLI tests + 345 quality-planner tests, stdlib only.
+281 CLI tests + 345 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner
 
@@ -181,62 +186,66 @@ It computes the cheapest input rate and the per-stage machine / module layout
 for a target legendary item + rate.
 
 ```bash
+# Every invocation must declare researched tech (--tech NAME=LEVEL, repeatable);
+# without it the planner fails-fast on the recycler check. Fully-researched baseline:
+TECH_ALL='--tech recycling=1 --tech tungsten-carbide=1 --tech electromagnetic-plant=1 --tech cryogenic-plant=1 --tech biochamber=1'
+
 # V1: asteroid-reprocessing chain (Nauvis-only items)
 python dev/quality_planner.py --item electronic-circuit --rate 60 \
     --module-quality legendary \
-    --research asteroid-productivity=5
+    --research asteroid-productivity=5 $TECH_ALL
 
 # V2: multi-planet (mined-raw self-recycle for coal, stone, tungsten-ore,
 # scrap, holmium-ore, uranium-ore; planet-exclusive fluids)
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis
+    --planets nauvis $TECH_ALL
 
 python dev/quality_planner.py --item artillery-shell --rate 60 \
-    --planets nauvis,vulcanus
+    --planets nauvis,vulcanus $TECH_ALL
 
 # V3 item 1: Generic cross-item shuffle enumeration.  --enable-shuffle NAME
 # (repeatable) activates a specific shuffle by output-item key; --enable-shuffles
-# all activates every applicable shuffle (greedy selection per leaf).  16
+# all activates every applicable shuffle (greedy selection per leaf).  ~197
 # candidates discovered in stock Space Age (LDS, advanced-circuit, engine-unit,
 # battery, processing-unit, ...).  Replaces the old --enable-lds-shuffle flag.
 python dev/quality_planner.py --item processing-unit --rate 60 \
     --planets nauvis --enable-shuffle low-density-structure \
     --research low-density-structure-productivity=10 \
-    --research plastic-bar-productivity=10
+    --research plastic-bar-productivity=10 $TECH_ALL
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis --assembly-modules --enable-shuffles all
+    --planets nauvis --assembly-modules --enable-shuffles all $TECH_ALL
 
 # V3 item 4 partial: Gleba bio-raws (yumako, jellynut, pentapod-egg)
 # via self-recycle. Spoilage timing is NOT modelled yet — long quality
 # loops on bioflux/nutrients give optimistic counts.
-python dev/quality_planner.py --item bioflux --rate 60 --planets gleba
-python dev/quality_planner.py --item plastic-bar --rate 60 --planets gleba
-python dev/quality_planner.py --item rocket-fuel --rate 60 --planets gleba
+python dev/quality_planner.py --item bioflux --rate 60 --planets gleba $TECH_ALL
+python dev/quality_planner.py --item plastic-bar --rate 60 --planets gleba $TECH_ALL
+python dev/quality_planner.py --item rocket-fuel --rate 60 --planets gleba $TECH_ALL
 
 # V3 item 5: prod modules in every assembly stage (drops machines ~20× on
 # fluid-cast chains because each foundry/EM-plant/cryogenic-plant gets
 # 4-8 prod-3-legendary modules + inherent +50%, capped at +300%).
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis --assembly-modules
+    --planets nauvis --assembly-modules $TECH_ALL
 
 # V3 small: legendary-quality machines (+150% speed → ~40% machine count).
 # Stacks with --assembly-modules; total power scales linearly.
 python dev/quality_planner.py --item processing-unit --rate 60 \
-    --planets nauvis --assembly-modules --machine-quality legendary
+    --planets nauvis --assembly-modules --machine-quality legendary $TECH_ALL
 
 # V3 item 3: self-recycling targets (recycle returns the item itself)
 python dev/quality_planner.py --item superconductor --rate 60 \
-    --planets nauvis,fulgora
+    --planets nauvis,fulgora $TECH_ALL
 python dev/quality_planner.py --item tungsten-carbide --rate 60 \
-    --planets nauvis,vulcanus
-python dev/quality_planner.py --item holmium-plate --rate 60 --planets fulgora
+    --planets nauvis,vulcanus $TECH_ALL
+python dev/quality_planner.py --item holmium-plate --rate 60 --planets fulgora $TECH_ALL
 
 # V3 small: --no-asteroids — no space platform yet, route quality through
 # planet self-recycle paths only. iron-ore/copper-ore self-recycle on Nauvis,
 # calcite on Vulcanus, ice on Aquilo. Errors out naming the missing planet
 # when a chunk would be needed (e.g. molten-iron needs calcite -> Vulcanus).
 python dev/quality_planner.py --item iron-plate --rate 60 \
-    --planets nauvis,vulcanus --no-asteroids
+    --planets nauvis,vulcanus --no-asteroids --tech recycling=1
 
 # Fulgora build location: scrap-only sourcing (no asteroid platform). Fluids
 # consumed by the chain (e.g. sulfuric-acid for processing-unit) are produced
@@ -267,12 +276,16 @@ Reachable items today:
   biochamber recipes.  **Spoilage timing is NOT modelled** — long quality
   loops on spoiling intermediates give optimistic counts.
 - **Self-recycle targets**: `tungsten-carbide`, `superconductor`, `holmium-plate`,
-  `fusion-power-cell`, `lithium`.
+  `fusion-power-cell`, `lithium`, `biolab`, `captive-biter-spawner`,
+  `steel-plate` (auto-compared against the ingredient-upcycle path).
+- **Self-feed targets**: `pentapod-egg`, `raw-fish` (LP-based steady-state solver).
+- **Self-recycling intermediates** (e.g. holmium-plate inside a science-pack
+  chain) dispatch through the same auto-comparator instead of failing fast.
 
-Items deferred (still fail fast or imprecise): Gleba pentapod-egg as a target
-(self-multiplying recipe needs a bespoke solver), Gleba spoilage timing,
-self-recycling items as **intermediate ingredients** of another chain.  See
-`dev/quality_planner.md` for the full roadmap.
+Known gaps (imprecise): Gleba spoilage timing is not modelled, and the
+asteroid-reprocessing quality loop still models pre-2.1.8 rules (reprocessing
+recipes no longer accept quality modules in-game), so asteroid-sourced counts
+are optimistic.  See `dev/quality_planner.md` for the full roadmap.
 
 ---
 

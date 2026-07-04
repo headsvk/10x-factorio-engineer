@@ -64,7 +64,7 @@ python assets/cli.py --item <item-id> (--rate <N_per_min> | --machines <N> | --s
 
 **Machine built-in productivity:** the foundry, electromagnetic-plant, and biochamber each have a **+50 % built-in productivity** that the CLI applies automatically to *every* recipe they craft — including recipes flagged `allow_productivity: false` (e.g. `accumulator`, `solar-panel`). That flag only blocks productivity *modules*/beacons, not the machine's intrinsic bonus. So expect those machines' counts (and their upstream raw demand) to be ~1/1.5 of a naive no-prod estimate even with no modules.
 
-**Module TYPE values (machine modules):** `prod` / `speed` / `efficiency` / `quality`. `quality` modules impose a flat −5 % speed penalty per module (so they raise machine_count) but their output-quality effect is **not** modelled — the CLI computes throughput only, so a step with quality modules reports the same item rates, just with more (slower) machines.
+**Module TYPE values (machine modules):** `prod` / `speed` / `efficiency` / `quality`. `quality` modules impose a flat −5 % speed penalty per module (so they raise machine_count) **and** their output-quality effect is modelled: any step carrying quality modules reports a per-step `quality_output` tier split (informational — nominal flow unchanged), and with `--quality-pickout` the higher-quality output is siphoned off into top-level `quality_yield` (see the `--quality-pickout` and `--max-quality` rows above).
 **Module TYPE values (beacon modules):** `speed` / `efficiency` only — `prod` not allowed in beacons. Efficiency modules in beacons transmit a reduced energy bonus to nearby machines, lowering their power draw.
 
 **Quality enum:** `normal` / `uncommon` / `rare` / `epic` / `legendary` (applies to `--machine-quality`, `--beacon-quality`, pump quality, and the QUALITY field in module specs)
@@ -146,7 +146,7 @@ The CLI emits JSON to stdout. Example:
       "machine": "assembling-machine-3",
       "machine_count": 7.5,
       "machine_count_ceil": 8,
-      "rate_per_min": 10.0,
+      "outputs": { "processing-unit": 10.0 },
       "inputs": { "electronic-circuit": 100.0, "advanced-circuit": 10.0, "sulfuric-acid": 100.0 },
       "machine_quality": "normal",
       "module_specs": [{"count": 2, "type": "prod", "tier": 3, "quality": "rare"}],
@@ -157,7 +157,7 @@ The CLI emits JSON to stdout. Example:
       "power_kw_ceil": 3000.0,
       "beacon_power_kw": 7680.0,
       "forced_min_machines": 8.0,
-      "excess_output_per_min": 0.5,
+      "excess_output_per_min": { "processing-unit": 0.5 },
       "quality_output": { "processing-unit": { "normal": 10.0, "uncommon": 0.4737, "rare": 0.0526 } }
     }
   ],
@@ -191,7 +191,7 @@ The CLI emits JSON to stdout. Example:
 | `item` + `rate_per_min` | Present in single-target output; the requested item and rate |
 | `targets` | Present in multi-target output (2+ `--item` flags); array of `{item, rate_per_min}` objects instead of top-level `item`/`rate_per_min` |
 | `location` | string or null | `"vulcanus"` / `null` (vanilla) | Location passed via `--location`; `null` means vanilla (no planet filtering) |
-| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `rate_per_min`, `inputs` (ingredient consumption rates in items/min), `machine_quality` (always), `module_specs` (if modules applied), `beacon_spec` + `beacon_quality` (if beacon applied), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw`, `prod_capped` (`true` when total machine prod for this step was clamped to +300 %; omitted otherwise), `quality_output` (present only when the step carries quality modules; `{item: {tier: rate}}` per-tier split of the primary output, capped at `--max-quality`) |
+| `production_steps` | Every recipe in the chain — machine type, exact count (`machine_count`), rounded-up count (`machine_count_ceil`), `outputs` (production rates in items/min, primary output first, co-products after), `inputs` (ingredient consumption rates in items/min), `machine_quality` (always), `module_specs` (if modules applied), `beacon_spec` + `beacon_quality` (if beacon applied), `beacon_speed_bonus`, `power_kw`, `power_kw_ceil`, `beacon_power_kw`, `prod_capped` (`true` when total machine prod for this step was clamped to +300 %; omitted otherwise), `quality_output` (present only when the step carries quality modules; `{item: {tier: rate}}` per-tier split of the primary output, capped at `--max-quality`) |
 | `raw_resources` | Ore / crude-oil / water rates needed from the ground |
 | `miners_needed` | Drill counts (or pumpjack `required_yield_pct` for oil fields); solid ore and offshore pump entries include `power_kw`; `module_specs` present when modules applied to the drill |
 | `total_power_mw` | Total factory electric draw in MW (all steps + miners, fractional machine counts) |
@@ -208,7 +208,7 @@ The CLI emits JSON to stdout. Example:
 | `step_machines` | Present when `--step-machines` was passed; `{recipe_key: N}` echoing the declared exact-count constraints. |
 | `chain_throttled` | `true` when the top-level rate was throttled down to honour an `N < natural` `--step-machines` constraint; omitted otherwise. The throttled rate is reflected in `rate_per_min` (or each entry in `targets`). |
 | Per-step `forced_min_machines` | Present on each step that had `--step-machines RECIPE=N` declared; echoes N. |
-| Per-step `excess_output_per_min` | Present on each forced step; positive when N > natural (the step over-produces and the surplus rolls up into top-level `co_products`); `0.0` when N ≤ natural (no buffer). |
+| Per-step `excess_output_per_min` | Present on each forced step; `{item: rate}` dict of the over-produced buffer per output when N > natural (the surplus rolls up into top-level `co_products`); `{}` when N ≤ natural (no buffer). |
 | `bus_inputs` | Present when `--bus-item` was passed; `{item: rate_per_min}` for items sourced from the bus (separate from `raw_resources`, which contains only true raws like ores) |
 | `quality_pickout` | `true` when `--quality-pickout` was passed; omitted otherwise. Signals that higher-quality output from quality-module steps was siphoned off and the affected steps were scaled up to keep normal-tier yield at target. |
 | `max_quality` | Present when `--quality-pickout` is on or any quality was extracted; echoes `--max-quality` (the highest unlocked tier; cascade mass folds onto it). |
@@ -237,8 +237,10 @@ machines subject to meeting demand. Output shape is unchanged; what differs:
   `scrap-recycling`, `iron-gear-wheel-recycling`, `advanced-circuit-recycling`.
 - The cascade's leftover outputs are surfaced in **`co_products`** (the same
   surplus field uranium-238 uses) for the player to use or dispose of.
-- Fixed **wrap-and-recycle** disposal tricks (steel-plate→steel-chest,
-  concrete→hazard-concrete) are LP candidates the solver picks only when needed.
+- Fixed **wrap-and-recycle** disposal tricks (currently steel-plate→steel-chest)
+  are LP candidates the solver picks only when needed. (The old
+  concrete→hazard-concrete wrap was dropped — as of 2.1.8, hazard-concrete
+  recycling no longer returns concrete.)
 - `--step-machines` is rejected with `--location fulgora` (the LP sizes all
   machines jointly). `--modules`, `--machine-quality`, `--research`, `--bus-item`,
   and multi-target all still apply. Module type tokens are `prod`/`speed`/
@@ -994,7 +996,7 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     --tech NAME=LEVEL                                      # REQUIRED. Repeat for each unlocked tech.
     [--target-quality uncommon|rare|epic|legendary]        # default: legendary (the goal tier — see note above)
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
-    [--location nauvis|vulcanus|fulgora|gleba|aquilo]      # build location; --location fulgora = scrap-only sourcing
+    [--location nauvis|vulcanus|fulgora|gleba|aquilo|space-platform]  # build location; --location fulgora = scrap-only sourcing
     [--module-quality normal|uncommon|rare|epic|legendary] # default: matches --target-quality; may not exceed it
     [--quality-module-tier 1|2|3]                          # default: 3
     [--assembler-level 2|3]                                # default: 3
@@ -1065,7 +1067,7 @@ alters sourcing today; other `--location` values just unlock that planet.
   replaces plastic-bar's asteroid leg with the LDS cross-item shuffle
   (foundry-cast LDS + recycle → legendary plastic + copper/steel
   byproducts).  For "let the planner pick", use `--enable-shuffles all` —
-  the planner discovers 16 cross-item shuffle candidates in the dataset
+  the planner discovers ~197 cross-item shuffle candidates in the dataset
   and activates the ones whose recycle outputs overlap with the chain's
   legendary leaves.  Common picks: `low-density-structure`,
   `advanced-circuit`, `electronic-circuit`, `engine-unit`, `battery`.

@@ -12,9 +12,13 @@ V1 scope (asteroid-only, Nauvis-subset):
     asteroid reprocessing (iron-ore, copper-ore, coal, stone, calcite, ice).
   * DP-based quality loop solver (backward induction over tiers).
   * Asteroid *crushing* as a legendary raw source (the chunk crushing step still
-    permits quality modules).  NOTE: as of 2.1.8 asteroid *reprocessing* no
-    longer permits quality modules, so the old reprocessing chunk-tier climb is
-    inert — chunks are sourced for quantity and quality is rolled at crushing.
+    permits quality modules).  KNOWN LIMITATION: as of 2.1.8 asteroid
+    *reprocessing* no longer permits quality modules (allowed_effects drops
+    "quality"), but the active kernel (`solve_asteroid_reprocessing_loop`) and
+    the plan() asteroid path still model the pre-2.1.8 reprocessing chunk-tier
+    climb, so asteroid-sourced counts are optimistic vs current game rules.
+    A game-accurate redesign (quality rolled at crushing + ore self-recycle)
+    is future work; plans with reprocessing stages carry an explanatory note.
   * Fluid quality transparency (foundry casting preferred when available).
   * Productivity research per recipe family, capped at +300 %.
 
@@ -47,8 +51,8 @@ Usage
     python dev/quality_planner.py --item <item-id> --rate <N>
         --tech NAME=LEVEL ...                              # REQUIRED (e.g. recycling=1)
         [--target-quality uncommon|rare|epic|legendary]    # default: legendary (goal tier)
-        [--planets nauvis,vulcanus,fulgora,gleba,aquilo]
-        [--location nauvis|vulcanus|fulgora|gleba|aquilo]   # build location; fulgora = scrap-only sourcing
+        [--planets nauvis,vulcanus,fulgora,gleba,aquilo,space-platform]
+        [--location nauvis|vulcanus|fulgora|gleba|aquilo|space-platform]  # build location; fulgora = scrap-only sourcing
         [--module-quality normal|uncommon|rare|epic|legendary]
         [--quality-module-tier 1|2|3]
         [--assembler-level 2|3]
@@ -58,6 +62,8 @@ Usage
         [--enable-shuffle NAME ...] [--enable-shuffles all]
         [--enable-driver RECIPE_KEY ...] [--enable-drivers all]
         [--no-asteroids]
+        [--no-miner-quality-modules]                       # disable quality-module seeding in mining drills
+        [--no-scrap-upcycle-loops]                         # disable closed-loop plate upcycling on Fulgora
         [--miner electric|big]                             # drill fleet for solid raws (default electric)
         [--format json|human]
 
@@ -108,12 +114,15 @@ TIER_SKIP_DIST: tuple[float, ...] = (0.9, 0.09, 0.009, 0.001)
 
 # Asteroid reprocessing: crusher processes chunk -> (mostly) chunk.  These
 # recipes drive chunk *quantity* sourcing (self-output retention).
-# NOTE (2.1.8): reprocessing recipes no longer permit quality modules
-# (allowed_effects drops "quality"), so the chunk-tier quality climb that once
-# made asteroid reprocessing the canonical legendary-raw source is now inert —
-# the quality-loop kernel gates it to zero quality.  Quality on asteroid-derived
-# items now comes only from the *crushing* step (which still allows quality) or
-# from downstream self-recycle / shuffle loops.
+# KNOWN LIMITATION (2.1.8): reprocessing recipes no longer permit quality
+# modules (allowed_effects drops "quality"), which makes the chunk-tier quality
+# climb impossible in the current game.  The active kernel
+# (`solve_asteroid_reprocessing_loop`) still models the pre-2.1.8 climb with
+# quality modules in the reprocessing crusher — only the unused reference
+# kernel (`_unused_solve_loop_reference`) gates on recipe_allows_quality.
+# Asteroid-sourced counts are therefore optimistic; a game-accurate redesign
+# (roll quality at the crushing step + upcycle ores via self-recycle) is
+# tracked as future work.
 ASTEROID_REPROCESSING_RECIPES: dict[str, str] = {
     "metallic-asteroid-chunk":  "metallic-asteroid-reprocessing",
     "carbonic-asteroid-chunk":  "carbonic-asteroid-reprocessing",
@@ -292,13 +301,17 @@ def enumerate_shuffle_candidates(data: dict) -> list[ShuffleCandidate]:
     """Return all multi-output shuffle candidates in the dataset.
 
     A candidate is keyed by an output item I such that:
-      * Some recipe R produces I with ``allow_productivity=True``
+      * Some recipe R produces I
       * ``<I>-recycling`` exists
       * The recycler returns 2 or more distinct solid items (multi-output
         filter — single-output recyclers are degenerate self-recycles
         already covered by ``solve_self_recycle_target_loop``)
-      * The recycler's solid outputs are a subset of R's solid ingredients
       * R is not a recycling / barrel-handling recipe
+
+    The recycler's solid outputs need NOT be a subset of R's solid
+    ingredients (the recycler returns the assembler-variant ingredients
+    regardless of which cast variant is chosen); the greedy selector later
+    derives valid primaries as ingredients ∩ returns.
 
     When multiple cast recipes exist for the same output (e.g. foundry
     `casting-low-density-structure` vs assembler `low-density-structure`),
@@ -359,13 +372,13 @@ def enumerate_shuffle_candidates(data: dict) -> list[ShuffleCandidate]:
             key=lambda v: (-len(v[2]), -len(v[1]), v[0]["key"]),
         )
         for r, solid_ings, fluid_ings in variants:
-            # Subset check on the chosen variant.  The recycler returns
-            # the assembler-variant ingredients regardless of which cast
-            # recipe was used, so this allows the foundry variant of LDS
-            # (1 solid in, 3 solids returned) — the recycle outputs come
-            # from the assembler-variant recipe definition.
-            if not set(solid_rec_outputs).issubset(set(solid_ings) | set(solid_rec_outputs)):
-                continue
+            # No subset check between recycler returns and cast ingredients:
+            # the recycler returns the assembler-variant ingredients regardless
+            # of which cast recipe is used, so the foundry variant of LDS
+            # (1 solid in, 3 solids returned) is a valid candidate.  Callers
+            # (select_shuffles_greedy) compute valid primaries as
+            # solid_ingredients ∩ solid_recycle_returns and treat the rest of
+            # the returns as byproducts, so an over-broad candidate is harmless.
             out.append(ShuffleCandidate(
                 recipe_key=r["key"],
                 output_item=output,
@@ -4468,7 +4481,7 @@ def _plan_self_recycle_target(
     #   legacy     → cli.get_machine on craft_category.
     container_machines = 0.0
     if wrap_active and craft_time_per_item > 0:
-        cm_speed = float(cli.MACHINE_SPEED.get(wrap_machine_key, 1.0)) if hasattr(cli, "MACHINE_SPEED") else 1.0
+        cm_speed = 1.0
         # Resolve via cli.get_machine for the wrap recipe's category to stay
         # consistent with the rest of the planner.
         assert wrap_route is not None
@@ -6268,6 +6281,16 @@ def plan(
             f"incidental byproduct surplus: {surplus:.2f} legendary "
             f"{byprod}/min unused (no downstream demand)"
         )
+    # Known-limitation marker: the reprocessing quality climb predates the
+    # 2.1.8 rule change (reprocessing recipes no longer accept quality
+    # modules), so asteroid-sourced counts are optimistic.  See the module
+    # header / ASTEROID_REPROCESSING_RECIPES comment.
+    if reprocessing_stages:
+        notes.append(
+            "asteroid-reprocessing modelling predates the 2.1.8 rule change "
+            "(reprocessing recipes no longer accept quality modules in-game) — "
+            "asteroid-sourced counts are optimistic; known limitation"
+        )
     # Driver-activation notes (co-product was harvested; non-target outputs
     # become overflow).
     for ds in driver_stages:
@@ -6846,7 +6869,7 @@ def parse_args() -> argparse.Namespace:
             "legendary plastic-bar chain with the LDS shuffle (foundry-cast "
             "LDS + recycle, with copper-plate/steel-plate byproducts).  Run "
             "with no targets first to see what's in the chain; the planner "
-            "discovers candidates dynamically from the dataset (16 in stock "
+            "discovers candidates dynamically from the dataset (~197 in stock "
             "Space Age).  Common picks: low-density-structure, "
             "advanced-circuit, electronic-circuit, engine-unit, battery."
         ),

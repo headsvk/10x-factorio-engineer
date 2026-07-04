@@ -4283,5 +4283,48 @@ class TestQualityPickout(unittest.TestCase):
         self.assertIn("Picked-Out Quality Items", proc.stdout)
 
 
+class TestVanillaEmptyQualityTables(unittest.TestCase):
+    """
+    Regression: the vanilla dataset has no quality modules, so the derived
+    tables (QUALITY_MODULE_BONUS / SPEED_MODULE_QUALITY_PENALTY /
+    QUALITY_MODULE_SPEED_PENALTY) are empty. Speed modules — in the machine or
+    in a beacon — must not KeyError on the empty penalty tables; they simply
+    contribute zero quality chance/penalty on vanilla.
+    """
+
+    def test_vanilla_speed_modules_no_crash(self):
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60",
+            "--modules", "assembling-machine-3=4:speed:3:normal",
+        )
+        step = next(s for s in out["production_steps"]
+                    if s["recipe"] == "electronic-circuit")
+        # 4× speed-3 = +200% speed → 1/3 of the unmodded 0.4 machines.
+        self.assertAlmostEqual(step["machine_count"], 0.4 / 3, places=3)
+        self.assertNotIn("quality_output", step)
+
+    def test_vanilla_speed_beacons_no_crash(self):
+        out = _run_cli(
+            "--item", "processing-unit", "--rate", "10",
+            "--modules", "assembling-machine-3=2:prod:3:rare",
+            "--beacon", "assembling-machine-3=8:2:speed:3:legendary",
+        )
+        step = next(s for s in out["production_steps"]
+                    if s["recipe"] == "processing-unit")
+        self.assertGreater(step["beacon_speed_bonus"], 0)
+        self.assertNotIn("quality_yield", out)
+
+    def test_vanilla_quality_modules_no_crash(self):
+        # Quality modules don't exist in vanilla, but a stray spec must not
+        # crash — it contributes zero speed penalty and zero quality chance.
+        out = _run_cli(
+            "--item", "electronic-circuit", "--rate", "60",
+            "--modules", "assembling-machine-3=4:quality:3:normal",
+        )
+        step = next(s for s in out["production_steps"]
+                    if s["recipe"] == "electronic-circuit")
+        self.assertAlmostEqual(step["machine_count"], 0.4, places=4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

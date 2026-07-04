@@ -111,8 +111,8 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | Path | Purpose |
 |------|---------|
 | `10x-factorio-engineer/assets/cli.py` | Calculator — entire implementation, stdlib only |
-| `10x-factorio-engineer/assets/vanilla-2.0.55.json` | KirkMcDonald dataset — base game |
-| `10x-factorio-engineer/assets/space-age-2.0.55.json` | KirkMcDonald dataset — Space Age DLC |
+| `10x-factorio-engineer/assets/vanilla-2.1.9.json` | KirkMcDonald dataset — base game |
+| `10x-factorio-engineer/assets/space-age-2.1.9.json` | KirkMcDonald dataset — Space Age DLC |
 | `10x-factorio-engineer/SKILL.md` | Skill definition — Claude gameplay assistant behaviour |
 | `10x-factorio-engineer/references/` | Split strategy reference files (11 topic files): early-game, factory-layouts, trains, megabase, planets, space-platforms, power, combat-defense, logistics-circuits, quality, resources |
 | `dev/dashboard.html` | Dashboard source — single vanilla HTML file, no build dependencies |
@@ -122,7 +122,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/sample/state.json` | Source JSON for the sample factory state — edit this directly; paste into the dashboard Import dialog to test |
 | `dev/my-factory.json` | The user's actual working factory state — primary fixture for previewing real-world layouts. **Gitignored** (personal data). Use `python dev/preview.py --state dev/my-factory.json` to render it. When the user says "my factory" they mean this file. |
 | `dev/update_research.py` | Applies a research-level change to a factory state and re-runs only the affected lines (`python dev/update_research.py TECH=LEVEL ... [--state PATH] [--dry-run] [--list]`; default state = `dev/my-factory.json`). Use this instead of hand-editing `research_levels` + manually re-running lines — it reconstructs each line's CLI command from its `cli_args` + shared top-level config, re-solves the affected lines, and rewrites their `cli_result` (LF output). Mining-prod re-runs miner lines; recipe-prod re-runs lines whose steps touch a boosted recipe; lab-only techs (`research-productivity` / `lab-research-speed`) update the field but trigger no re-run. See the **research-level updates** workflow note below. |
-| `dev/test_cli.py` | `unittest` suite (278 tests, stdlib only) — dev only |
+| `dev/test_cli.py` | `unittest` suite (281 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner V1 (MVP) — separate stdlib-only tool; DP quality loop solver for asteroid-reprocessing chains. `--location fulgora` switches to scrap-only sourcing (no asteroid platform; metals terminate at scrap-reachable plates via `forbid_ore_routes`) |
 | `dev/test_quality_planner.py` | `unittest` suite (345 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
@@ -178,7 +178,7 @@ CLI flags and JSON output shape: see `10x-factorio-engineer/SKILL.md` §2.
 | `Solver._beacon_quality_penalty(beacon_spec)` | Quality-chance penalty from SPEED modules in the beacon, scaled by the same transmission as `_compute_beacon_speed` (`effectivity × sqrt(count)`). Subtracted from `quality_chance_from_specs` at each step ("haste makes waste" applies through beacons too). Rounded `Fraction`; 0 when no speed modules |
 | `_compute_step_power(...)` | Returns `(power_kw, power_kw_ceil, beacon_power_kw)` for a production step using module/beacon config |
 | `compute_location_unlocks(location)` | Return the `frozenset` of planet-locked advanced machines unlocked at `location` (e.g. Vulcanus → `{foundry}`). `None` for `location=None` (legacy "all unlocked"). |
-| `get_machine(cat, assembler_level, furnace_type, location_unlocks=None)` | Maps recipe category → `(machine_key, speed)`. When `location_unlocks` is given, planet-locked machines that aren't in the set are routed to the basic alternative via `CATEGORY_LOCATION_FALLBACK`. |
+| `get_machine(categories, assembler_level, furnace_type, location_unlocks=None)` | Maps a recipe's `categories` array → `(machine_key, speed)` via the data-driven registry (`register_machines`). Dedicated/premium machines win over the generic assembler; when `location_unlocks` is given and the premium machine is planet-locked, it falls back to the assembler (if the recipe lists a generic crafting category) or another unlocked dedicated machine. |
 | `pick_recipe(item_key, recipe_idx, overrides, planet_props)` | Picks canonical recipe; filters by planet surface_conditions when planet_props given (see selection logic below) |
 | `_gauss2 / _gauss3` | Exact `Fraction` Gaussian elimination (2×2 and 3×3) |
 | `solve_oil_system(...)` | Joint linear solve for refinery recipe (AOP / CL / simple-CL) + cracking |
@@ -225,7 +225,16 @@ All numeric values use `fractions.Fraction` internally. Only converted to `float
 
 **Exception:** beacon speed bonus uses `math.sqrt(count)` which is irrational, so `machine_count` becomes `float` for any recipe whose machine has a beacon config. Runs with no beacons remain fully `Fraction`.
 
-### New constant tables
+### Quality / module / beacon tables (data-driven)
+
+Since the 2.1.8 dataset migration these tables are **populated from the
+dataset at load time** by `configure_from_dataset()` / `register_machines()`
+(module effects, beacon effectivity/power, per-quality multipliers, pump
+throughput, machine speeds) — not hardcoded. The values below are the current
+Space Age dataset values, shown for reference. On the vanilla dataset the
+quality-module tables (`QUALITY_MODULE_BONUS`, `QUALITY_MODULE_SPEED_PENALTY`,
+`SPEED_MODULE_QUALITY_PENALTY`) are **empty** (vanilla has no quality
+modules); lookups treat missing tiers as 0.
 
 ```python
 # Quality enum (valid values for all quality flags)
@@ -238,7 +247,7 @@ QUALITY_INDEX = {q: i for i, q in enumerate(QUALITY_TIERS)}
 # Base per-slot quality CHANCE at normal module quality (T1 +1%, T2 +2%,
 # T3 +2.5%); scaled by MODULE_QUALITY_MULT like every other positive stat.
 QUALITY_MODULE_BONUS: dict[int, Fraction] = {
-    1: Fraction(1, 100), 2: Fraction(3, 200), 3: Fraction(1, 40),
+    1: Fraction(1, 100), 2: Fraction(1, 50), 3: Fraction(1, 40),
 }
 
 # Quality PENALTY per speed-module slot (Space Age "haste makes waste"): same
@@ -246,7 +255,7 @@ QUALITY_MODULE_BONUS: dict[int, Fraction] = {
 # cancels a tier-T quality module at equal housing quality. Quality-scaled like
 # the bonus. Subtracted in quality_chance_from_specs.
 SPEED_MODULE_QUALITY_PENALTY: dict[int, Fraction] = {
-    1: Fraction(1, 100), 2: Fraction(3, 200), 3: Fraction(1, 40),
+    1: Fraction(1, 100), 2: Fraction(1, 50), 3: Fraction(1, 40),
 }
 
 # When a quality roll succeeds: +1..+4 tiers split 90/9/0.9/0.1. Mass above the
@@ -366,34 +375,23 @@ biochamber, electromagnetic-plant, cryogenic-plant) are available. Without
 | `aquilo` | all four (final-tier planet) |
 | `space-platform` | (none — conservative default; everything must be shipped) |
 
-### `CATEGORY_LOCATION_FALLBACK`
+### Fallback routing (data-driven — no fallback tables)
 
-When the primary machine for a recipe category is locked at the current
-location, `get_machine` routes to the basic alternative:
+The old `CATEGORY_LOCATION_FALLBACK` / `HARD_CATEGORY_REQUIRES` tables were
+removed in the 2.1.8 dataset migration. Routing is now derived from the
+recipe's `categories` array plus each machine's `crafting_categories`
+(the `register_machines` registry):
 
-| Category | Premium machine | Nauvis fallback |
-|----------|-----------------|-----------------|
-| `chemistry-or-cryogenics` | cryogenic-plant | chemical-plant |
-| `organic-or-chemistry` | biochamber | chemical-plant |
-| `organic-or-assembling`, `organic-or-hand-crafting` | biochamber | assembler-N |
-| `electronics`, `electronics-or-assembling`, `electronics-with-fluid` | EM-plant | assembler-N |
-| `metallurgy-or-assembling`, `crafting-with-fluid-or-metallurgy` | foundry | assembler-N |
-| `cryogenics-or-assembling` | cryogenic-plant | assembler-N |
-| `pressing` | foundry | assembler-N |
+- When a recipe's premium machine is planet-locked at the current location,
+  `get_machine` falls back to the **assembler** if the recipe also lists a
+  generic crafting category (`crafting`, `advanced-crafting`,
+  `crafting-with-fluid`), else to another **unlocked dedicated machine** in
+  one of its categories.
+- A recipe that can ONLY run on locked planet-locked machines (no generic
+  category, no unlocked alternative) is filtered out by `pick_recipe` via
+  `recipe_requires_locked_machine`.
 
-### `HARD_CATEGORY_REQUIRES`
-
-Categories with no fallback — recipes are filtered out by `pick_recipe` if the
-required machine isn't unlocked:
-
-| Category | Required machine |
-|----------|------------------|
-| `organic` | biochamber |
-| `metallurgy` | foundry |
-| `electromagnetics` | electromagnetic-plant |
-| `cryogenics` | cryogenic-plant |
-
-Explicit `--recipe` and `--recipe-machine` overrides bypass both filters (user opt-in).
+Explicit `--recipe` and `--recipe-machine` overrides bypass the filtering (user opt-in).
 
 ---
 
@@ -401,15 +399,14 @@ Explicit `--recipe` and `--recipe-machine` overrides bypass both filters (user o
 
 Priority (in `pick_recipe`):
 1. Explicit `--recipe ITEM=RECIPE` override passed in from CLI — bypasses planet filtering entirely.
-2. Planet filtering: when `planet_props` given, remove candidates whose `surface_conditions` are not satisfied. If all candidates are filtered out, return `None`.
-2.5. Machine-unlock filtering: when `location_unlocks` given, drop candidates whose hard category (`organic`, `metallurgy`, `electromagnetics`, `cryogenics`) requires a planet-locked machine not in the set. "X-or-Y" categories are not filtered here — `get_machine` routes them to the basic alternative.
-3. Recipe whose `key == item_key` (exact match).
-4. `advanced-oil-processing` (legacy fallback for oil products).
-4.5. Entry in `RECIPE_DEFAULTS_BY_LOCATION[location]` — location-specific preferred recipe (wins over exact-key-match heuristic and order-sort).
-5. Entry in `RECIPE_DEFAULTS` (hard-coded preferred recipes that override the order-sort default when the order-sort winner is un-automatable or causes circular dependencies in the solver).
-6. First candidate after sorting all candidates by the game's `order` field.
+2. Filtering (not selection): when `planet_props` given, remove candidates whose `surface_conditions` are not satisfied; when `location_unlocks` given, drop candidates that can ONLY run on a planet-locked machine not unlocked here (`recipe_requires_locked_machine`). If all candidates are filtered out, return `None`.
+3. Entry in `RECIPE_DEFAULTS_BY_LOCATION[location]` — location-specific preferred recipe. Checked BEFORE exact-key-match so location correctness wins over the implicit "recipe key == item key" heuristic.
+4. Recipe whose `key == item_key` (exact match).
+5. `advanced-oil-processing` (legacy fallback for oil products).
+6. Entry in `RECIPE_DEFAULTS` (hard-coded preferred recipes that override the order-sort default when the order-sort winner is un-automatable or causes circular dependencies in the solver).
+7. First candidate after sorting all candidates by the game's `order` field.
 
-Step 5's sort ensures the game-preferred variant is chosen when no exact match exists (e.g. `solid-fuel-from-petroleum-gas` over the less-efficient heavy-oil and petroleum-gas variants).
+The order-sort in step 7 ensures the game-preferred variant is chosen when no earlier rule matches (e.g. `solid-fuel-from-petroleum-gas` over the less-efficient heavy-oil and petroleum-gas variants).
 
 ### `RECIPE_DEFAULTS_BY_LOCATION`
 
@@ -626,7 +623,7 @@ Before invoking `cli.py` for any calculation, read `10x-factorio-engineer/SKILL.
 python -m unittest dev.test_cli -v
 ```
 
-`dev/test_cli.py` contains 278 tests covering:
+`dev/test_cli.py` contains 281 tests covering:
 
 | Class | What's tested |
 |-------|---------------|
@@ -646,7 +643,7 @@ python -m unittest dev.test_cli -v
 | `TestNutrientsRecipes` | Default picks `nutrients-from-yumako-mash` via `RECIPE_DEFAULTS` (not fish); no circular dependency; fish route still available via `--recipe` override; bioflux override full biochamber chain |
 | `TestBeaconConfig` | `--beacon MACHINE=BEACON_COUNT:MOD_COUNT:TYPE:TIER:QUALITY` computes speed via sqrt formula; `beacon_speed_bonus` in step output; `machine_count` becomes float; beacon quality effectivity (1.5/1.7/1.9/2.1/2.5); per-recipe override via `--recipe-beacon` |
 | `TestMachineQuality` | `--machine-quality` applies `MACHINE_QUALITY_SPEED` bonus; legendary assembler-3 faster than normal; reduces machine count |
-| `TestMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
+| `TestRecipeMachineOverride` | `--recipe-machine RECIPE=MACHINE` per-recipe redirect; unknown machine falls through; surfaces in JSON output; independence from category override |
 | `TestBusItem` | `--bus-item` stops recursion at item; demand goes to `bus_inputs` (not `raw_resources`); rates correct; `bus_inputs` dict in JSON output; absent when unused; `miners_needed` empty for bus-only lines |
 | `TestMachinesFlag` | `rate_for_machines` round-trips integer/fractional machine counts; Fraction return type without beacons; prod-module and beacon round-trips; raises on raw resource; assembler level respected |
 | `TestStepMachines` | Pre-2026-05-10 scale-derivation tests (still relevant for the constraints-only path): uranium-processing=8 yields 8 centrifuges; multiple constraints use min-scale binding when no `--rate`; top-level recipe constraint equivalent to `--machines`; recipe-not-in-chain detection; beacon float path. |
@@ -667,6 +664,8 @@ python -m unittest dev.test_cli -v
 | `TestFulgoraRecyclingLP` | End-to-end `--location fulgora` LP via subprocess: `scrap` is the only solid raw and no asteroid-crushing steps; binding-constraint throughput (battery 60/min → 1500 scrap on `recycler`); `scrap-recycling-productivity` reduces scrap demand in the LP (+10 %/level → 1500/1.1 at L1, 1500/1.2 at L2); by-products surface in `co_products`; holmium-ore/stone resolve with no `--bus-item` (EM-science 90/min → 9800 scrap); cascade uses `iron-gear-wheel-recycling` not asteroids; speed modules flow into LP coefficients and reduce machine counts; `--step-machines` rejected on fulgora; `FULGORA_WRAP_ROUTES` entries are valid single-ingredient wrap recipes with existing `<wrap>-recycling`; production_steps are emitted as a strict sources-last bill of materials (target first, `scrap-recycling` last; every step below ALL its consumers) — `format_output` uses a longest-path level sort for `--location fulgora` (recursive/tree locations keep the DFS pre-order) |
 | `TestQualityChanceHelpers` | Unit tests for `quality_chance_from_specs` (T2=2%/slot base, tier+quality scaling, prod modules ignored, **speed modules subtract — a tier-T speed module cancels a tier-T quality module at equal housing quality (incl. legendary); partial penalty nets correctly; clamps to 0 with no quality modules**, slot-scaling caps at machine slots, clamp to 1.0, zero when no slots) and `quality_tier_probs` (legendary-cap 90/9/0.9/0.1 split sums to 1; rare-cap folds +2/+3/+4 mass onto rare; normal-only cap folds everything back to normal) |
 | `TestQualityPickout` | End-to-end `--quality-pickout` via subprocess: recursive path scales the quality step up so normal output == demand and extracts uncommon/rare/epic (capped at `--max-quality`, no legendary key); aggregated `quality_yield` matches the per-step `quality_output` >normal split; pick-out raises machine count vs the reporting-only run; reporting-only (no flag) leaves machine count at nominal and emits no `quality_yield` (informational split sums to the flowing rate); pick-out flag with no quality modules extracts nothing; Fulgora LP pick-out (accumulator 5×quality-2 → normal 50/min + rare-capped extraction); `--max-quality rare` suppresses epic/legendary even with legendary T3 modules; human format renders the three quality sections; **speed modules in a beacon reduce the step's quality (`test_beacon_speed_modules_reduce_quality`: a speed beacon lowers `quality_yield`, enough beacons cancel it to `{}`)** |
+
+| `TestVanillaEmptyQualityTables` | Regression: the vanilla dataset has no quality modules, so the derived quality tables are empty — speed modules (machine or beacon) and stray quality specs must not KeyError; they contribute zero quality chance/penalty on vanilla |
 
 ### `dev/test_quality_planner.py` (345 tests)
 
