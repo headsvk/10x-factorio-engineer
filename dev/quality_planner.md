@@ -4,7 +4,7 @@ A separate stdlib-only Python tool that answers:
 
 > *"Given my research and module tier, what's the cheapest way to make N legendary `<item>` per minute?"*
 
-Lives at `dev/quality_planner.py` (~2600 LoC) alongside `10x-factorio-engineer/assets/cli.py`. Imports `cli.py` as a library; does not modify it.
+Lives at `dev/quality_planner.py` (~7000 LoC) alongside `10x-factorio-engineer/assets/cli.py`. Imports `cli.py` as a library; does not modify it.
 
 This document is the single source of truth — supersedes the original `quality_planner_v1.md` and `quality_planner_v2.md` specs (deleted). The history of how features evolved is in git; this doc only covers what exists today.
 
@@ -120,7 +120,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--rate N` | required | Target items per minute (at `--target-quality`) |
 | `--target-quality Q` | `legendary` | Goal quality tier. The quality loops stop here instead of pushing to legendary (e.g. `rare` treats rare-or-better as success — much cheaper than full legendary). Choices: `uncommon,rare,epic,legendary` |
 | `--planets P1,P2,…` | empty | Unlocked planets. Empty = asteroid-only. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
-| `--location P` | none | Single planet the factory is **built on** (mirrors `cli.py --location`). Unlocks that planet's raws. **`--location fulgora` additionally switches to scrap-only sourcing**: no asteroid platform, so base materials come from the scrap-recycling quality source and metals terminate at their scrap-reachable plate form (no casting/molten-ore routes). Only `fulgora` alters sourcing today; other values just unlock that planet. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo` |
+| `--location P` | none | Single planet the factory is **built on** (mirrors `cli.py --location`). Unlocks that planet's raws. **`--location fulgora` additionally switches to scrap-only sourcing**: no asteroid platform, so base materials come from the scrap-recycling quality source and metals terminate at their scrap-reachable plate form (no casting/molten-ore routes). Only `fulgora` alters sourcing today; other values just unlock that planet. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
 | `--module-quality Q` | `--target-quality` | Quality of quality-modules in loops. Defaults to (and may not exceed) `--target-quality` — you can't have modules of a quality you haven't researched. Choices: `normal,uncommon,rare,epic,legendary` |
 | `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules. Self-declaring — not gated by `--tech` (you'd only request a tier you've researched). |
 | `--assembler-level {2,3}` | `3` | Assembler tier for non-categorised recipes |
@@ -128,7 +128,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--assembly-modules` | off | Fill assembly slots with prod modules at `--module-quality` and `--prod-module-tier`. Inherent +50 % prod (foundry/EM-plant/biochamber) is always applied |
 | `--prod-module-tier {1,2,3}` | `3` | Tier of prod modules used by `--assembly-modules` |
 | `--research NAME=LEVEL` | empty | Repeatable. Productivity research per recipe family (e.g. `--research asteroid-productivity=5`) |
-| `--enable-shuffle NAME` | none | Repeatable. Activate cross-item shuffle by output-item key (e.g. `low-density-structure`). 16 candidates discovered from dataset; see [Shuffle enumeration](#shuffle-enumeration--selection) for the full list. |
+| `--enable-shuffle NAME` | none | Repeatable. Activate cross-item shuffle by output-item key (e.g. `low-density-structure`). ~197 candidates discovered from dataset; see [Shuffle enumeration](#shuffle-enumeration--selection). |
 | `--enable-shuffles all` | off | Activate every applicable shuffle; greedy selector picks the best primary per legendary leaf. Mutually exclusive with `--enable-shuffle`. |
 | `--enable-driver RECIPE` | none | Repeatable. Activate a co-product driver by recipe key (e.g. `molten-iron-from-lava` to harvest stone for `stone-wall @ vulcanus`). Driver primary becomes overflow. See `enumerate_co_product_drivers` for the candidate list. |
 | `--enable-drivers all` | off | Try every driver candidate, picking the highest-yield driver per mined-recycle leaf. Cost-gated against the no-driver baseline. Mutually exclusive with `--enable-driver`. |
@@ -268,7 +268,7 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_tier_skip_probs` | 90/9/0.9/0.1 tier-jump distribution |
 | `_prod_bonus` | Module-prod fraction at given tier+quality |
 | `solve_recycle_loop` | Shuffle-style DP (recycler returns ingredient → re-craft). Library only |
-| `solve_asteroid_reprocessing_loop` | 80 % retention, 2 slots, prod allowed |
+| `solve_asteroid_reprocessing_loop` | 80 % retention, 2 slots, quality-only. **Known limitation:** still models quality modules in the reprocessing crusher, but 2.1.8 removed `quality` from reprocessing `allowed_effects` — asteroid-sourced counts are optimistic vs current game rules; plans with reprocessing stages carry an explanatory note |
 | `solve_lds_shuffle_loop` | LDS foundry-cast + recycle joint DP, returns per-plastic legendary yield |
 | `compute_lds_shuffle_stage` | Sizes a LDS shuffle stage from `legendary_plastic_per_min`; returns `foundry_machines`, `recycler_machines`, `byproduct_legendary`, `fluid_demand` |
 | `solve_mined_raw_self_recycle_loop` | 25 % retention, 4 slots, quality-only (no prod) |
@@ -308,7 +308,7 @@ The four kernels differ only in retention, slot count, and whether prod modules 
 
 | Kernel | Retention | Slots | Prod allowed | Inherent prod |
 |---|---|---|---|---|
-| `solve_asteroid_reprocessing_loop` | 0.80 | 2 (crusher) | yes | 0 |
+| `solve_asteroid_reprocessing_loop` | 0.80 | 2 (crusher) | no (quality-only) | 0 |
 | `solve_mined_raw_self_recycle_loop` | 0.25 | 4 (recycler) | no | 0 |
 | `solve_self_recycle_target_loop` (recycle leg) | 0.25 | 4 (recycler) | no | 0 |
 | `solve_self_recycle_target_loop` (craft leg) | n/a | varies | varies | foundry/EM/biochamber +50 % |
@@ -345,13 +345,14 @@ Routing per leaf raw:
 
 The planner discovers cross-item shuffle candidates by introspecting the dataset (no hardcoded recipe list).  A candidate is a recipe that:
 
-1. Produces an item I (with `allow_productivity=True`)
+1. Produces an item I (`allow_productivity` is NOT filtered — buildings/modules/military qualify; the flag is forwarded into `solve_shuffle_loop` so prod-bearing slot splits are disabled where disallowed)
 2. Has a corresponding `<I>-recycling` recipe that returns 2+ distinct **solid** items (multi-output filter — single-output recyclers are degenerate self-recycles already covered by `solve_self_recycle_target_loop`)
-3. The recycler's solid outputs are a subset of the recipe's solid ingredients
+
+The recycler's solid outputs need **not** be a subset of the recipe's solid ingredients (the recycler returns the assembler-variant ingredients regardless of which cast variant is chosen — e.g. foundry LDS has 1 solid in, 3 solids returned).  The greedy selector derives valid primaries as `solid_ingredients ∩ solid_recycle_returns` and treats the remaining returns as byproducts.
 
 When multiple cast-recipe variants exist for the same output (e.g. `casting-low-density-structure` foundry vs `low-density-structure` assembler), `enumerate_shuffle_candidates` picks the **fluid-preferred variant** — most fluid ingredients = most quality-transparent inputs = best legendary efficiency.  For LDS this picks the foundry variant (1 solid input + 2 fluids).
 
-Stock Space Age yields **16 candidates**:
+Stock Space Age yields **~197 candidates** (buildings, modules, military, and end-game gear included since the `allow_productivity` filter was dropped).  The core multi-ingredient picks:
 
 | Output item | Cast recipe | Solid ingredients | Solid recycle returns |
 |---|---|---|---|
@@ -523,7 +524,12 @@ SELF_RECYCLING_BLOCKLIST = frozenset(["tungsten-carbide", "superconductor", "hol
 SELF_RECYCLE_TARGETS = frozenset([
     "tungsten-carbide", "superconductor", "holmium-plate",
     "fusion-power-cell", "lithium",
+    "biolab", "captive-biter-spawner",   # V3 item 4 (Gleba/cryo buildings)
+    "steel-plate",                       # wrap-and-recycle (steel-chest) target
 ])
+
+# Self-FEED targets (ingredient = output; LP-based solver, no auto-compare)
+SELF_FEED_TARGETS = frozenset(["pentapod-egg", "raw-fish"])
 
 # Inherent prod by machine
 MACHINE_INHERENT_PROD = {
@@ -552,7 +558,7 @@ MACHINE_INHERENT_PROD = {
 | `TestLDSShuffle` | Library-level LDS DP; research / cap / module-quality scaling |
 | `TestOtherPlanetUnlocks` | Fulgora unlocks scrap/holmium-ore (electrolyte chain) |
 | `TestLDSShuffleWiring` | `--enable-shuffle low-density-structure` end-to-end (formerly `--enable-lds-shuffle`); byproduct credit propagation; overflow notes |
-| `TestShuffleEnumeration` | `enumerate_shuffle_candidates` returns 16 candidates with multi-output recyclers; LDS picked with foundry variant; iron-stick / copper-cable excluded; cached per dataset |
+| `TestShuffleEnumeration` | `enumerate_shuffle_candidates` returns multi-output-recycler candidates (~197 in stock Space Age); LDS picked with foundry variant; iron-stick / copper-cable excluded; cached per dataset |
 | `TestShuffleSolver` | Generic `solve_shuffle_loop` matches legacy LDS solver byte-for-byte; positive yields for advanced-circuit / engine-unit; `compute_shuffle_stage` produces machine counts + byproducts; inherent prod auto-resolved per machine |
 | `TestShuffleSelection` | Greedy picks LDS for plastic; no shuffle when no overlap; byproducts cover other leaves (single activation); empty/disjoint inputs handled |
 | `TestEnableShufflesAll` | `--enable-shuffles all` sentinel activates every applicable shuffle; target item excluded from primaries (no quantum-processor shuffle for processing-unit target); unknown shuffle name errors; combines with `--assembly-modules` |
@@ -599,7 +605,7 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 - **`--tech` default is locked.** A bare CLI invocation now produces an empty `tech_state={}` and fails-fast on the recycler check. Library callers (incl. tests) MUST pass `tech_state` — there is no default. Use `qp.ALL_TECH_UNLOCKED` for the legacy "fully researched" baseline. This was a deliberate breaking change to make the user's research state explicit (V3 item 2).
 - **Shuffle DP solvers ignore tech_state.** `solve_shuffle_loop` / `compute_shuffle_stage` use `cli.get_machine` directly and do not consult `tech_state`. If the user enables a shuffle whose cast machine is locked (e.g. `--enable-shuffle low-density-structure --tech tungsten-carbide=0`), the shuffle still runs as if the foundry exists. The main-chain walker and `_pick_recipe_fluid_preferred` correctly gate locked machines, so this only matters when the user explicitly opts-in to a shuffle that requires a locked machine.
 - **Auto-comparator changes path-A behaviour for existing self-recycle targets** (V3 item 4). Adding `biolab`/`captive-biter-spawner` was easy; the substantial change was always-on auto-compare for ALL items in `SELF_RECYCLE_TARGETS`. Some pre-V3-item-4 plans now route via Path B (ingredient-upcycle) when it's cheaper — `tungsten-carbide` (480 vs 1106) and `holmium-plate` are the visible cases. Existing tests that assumed `self-recycle-target` stage presence had to be updated to use a Path-A-winning target like `superconductor`. Path A still wins when Path B's chain hits a self-recycling intermediate.
-- **`enumerate_shuffle_candidates` returns 195 items, not 16.** Dropping the `allow_productivity=True` filter (V3 item 4) broadened it dramatically. Greedy shuffle selection still scales fine because most candidates don't overlap with any given chain's leaves.
+- **`enumerate_shuffle_candidates` returns ~197 items, not 16.** Dropping the `allow_productivity=True` filter (V3 item 4) broadened it dramatically. Greedy shuffle selection still scales fine because most candidates don't overlap with any given chain's leaves.
 - **`_DispatchCache` is per-`plan()` invocation** (not module-level). Different calls have different planet sets / tech / module quality / etc., all of which change costs. Recursive Path B re-entries SHARE the cache (memoization across the chain) — but the cache is fresh on every top-level `plan()` call.
 - **Pass 1 defers dispatch to end-of-BFS.** When the walker hits a blocklist intermediate it adds it to `pending_dispatch` and resumes BFS rather than dispatching immediately. Dispatch resolution runs once at the end with fully-accumulated demand. This avoids stale-rate sub-plans when an intermediate is consumed by multiple parents discovered at different BFS depths.
 - **Path A is the cycle-fallback.** When `choose_path_self_recycle` is entered with `item in _in_flight`, it forces Path A and tags the result with `forced self-recycle (cycle detected through ...)`. Path A is the only branch that doesn't recurse through the dispatcher, so it always terminates.
