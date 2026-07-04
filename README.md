@@ -1,5 +1,7 @@
 # 10x Factorio Engineer
 
+[![tests](https://github.com/headsvk/10x-factorio-engineer/actions/workflows/tests.yml/badge.svg)](https://github.com/headsvk/10x-factorio-engineer/actions/workflows/tests.yml)
+
 A Factorio factory co-pilot built on three components:
 
 | Component | What it does |
