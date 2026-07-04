@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-04  
 **Scope:** Factorio 2.1 Quality Planner Roadmap (Milestones Q1 through Q9)  
-**Target File:** [`dev/quality_planner.py`](file:///c:/Users/marek/Documents/GitHub/10x-factorio-engineer/dev/quality_planner.py)  
-**Test Suite:** [`dev/test_quality_planner.py`](file:///c:/Users/marek/Documents/GitHub/10x-factorio-engineer/dev/test_quality_planner.py) (359 tests, 100% passing)
+**Target File:** [`dev/quality_planner.py`](../dev/quality_planner.py)  
+**Test Suite:** [`dev/test_quality_planner.py`](../dev/test_quality_planner.py) (367 tests, 100% passing)
 
 ---
 
@@ -36,7 +36,7 @@ This document records the architectural decisions, mechanics adaptations, and de
 - **Background & Adaptation:** Spoilable items on Gleba (yumako, jellynut, mash, nutrients, bioflux, pentapod-egg, biter-egg, agricultural science) undergo linear freshness decay. Recycler loops that take longer than the item's spoil time decay into `spoilage` or hatch into biters.
 - **Implementation:**
   - Added fixed spoil times (`SPOIL_TIMES_SECONDS` table).
-  - Estimated loop residence time $T = \text{passes} \times \text{cycle\_time}$, where $\text{passes} \approx \frac{1}{1 - \text{retention}}$.
+  - Estimated loop residence time $T = \text{passes} \times \text{cycle\_time}$, where $\text{passes} \approx \frac{\text{target\_tier}}{q_{\text{pass}}}$ (roughly one successful upgrade roll per tier climbed, at the recycler's per-pass quality chance $q_{\text{pass}}$) and $\text{cycle\_time} = 1 / \text{RECYCLER\_SPEED}$. Weak/cheap modules or high target tiers push residence up — exactly when Gleba loops risk spoiling.
   - Emits `WARNING` notes when $T > 0.5 \times t_{\text{spoil}}$ and `ERROR` notes when $T > t_{\text{spoil}}$.
   - Added `--no-spoilage` CLI flag to disable spoilage notes for A/B testing.
 
@@ -52,13 +52,15 @@ This document records the architectural decisions, mechanics adaptations, and de
 - **Drill Speed Penalty:** Applied miner speed penalties (-5%/slot) to drill machine count calculations when quality modules are installed in drills (`--miner electric|big`).
 
 ### 6. Mixed-Tier Demand & Surplus Extraction (Q6)
-- **Implementation:** Added `--demand SPEC` parser (e.g. `iron-plate@legendary:60,iron-plate@epic:20`) and `--keep-tiers TIERS` flag. Allows multi-tier demand specification and surplus extraction from loop mid-tiers.
+- **Implementation:** Added `--demand SPEC` (e.g. `iron-plate@legendary:60,iron-plate@epic:20`) and `--keep-tiers TIERS`.
+  - `--demand` replaces `--item`/`--rate`: each `item@tier:rate` leg is planned independently (`_combine_demand_plans`) and rendered as separate reports plus combined machine/power/raw-input totals (`format_demand_human`).
+  - `--keep-tiers` records, per quality-climb loop, the raw amounts rolled directly to each requested mid-tier (`kept_tiers` in the output) — i.e. the surplus siphonable at that tier (diverting it raises normal input demand; a note explains the trade-off).
 
 ### 7. Beacon & Speed-Module Integration (Q7)
-- **Implementation:** Added `--beacons COUNT` flag. Incorporates speed-module beacon multipliers into machine crafting speed calculations, scaling machine fleet sizes and power draw (`total_power_mw`).
+- **Implementation:** Added `--beacons COUNT` flag. Each beacon adds `+2.5` to the machine speed multiplier (`beacon_speed_bonus`), folded into `qm_speed_mult`, scaling machine fleet sizes across every crafting/crushing/recycling stage.
 
 ### 8. Custom Objective Function (Q8)
-- **Implementation:** Added `--objective machines|power|raw-input|cost` flag and `_evaluate_objective` evaluation function. Allows minimizing power, raw material input, or weighted cost instead of machine counts.
+- **Implementation:** Added `--objective machines|power|raw-input|cost` and `_evaluate_objective`. Every plan carries `objective`/`objective_value`; the `--enable-shuffles all` and `--enable-drivers all` cost gates minimise the chosen objective (not just machine count), so `--objective` genuinely steers auto-selection. `machines` reproduces the legacy behaviour exactly (`objective_value == total_machine_count`).
 
 ### 9. Ergonomics & CLI Presets (Q9)
 - **Implementation:** Added `--preset PRESET` shortcuts:
@@ -81,6 +83,6 @@ This document records the architectural decisions, mechanics adaptations, and de
 
 ## Verification & Test Results
 
-- **Quality Planner Suite (`dev/test_quality_planner.py`):** **359 tests, 0 failures, 0 errors** (~4.8s execution time).
+- **Quality Planner Suite (`dev/test_quality_planner.py`):** **367 tests, 0 failures, 0 errors** (~6.9s execution time).
 - **CLI Core Suite (`dev/test_cli.py`):** **281 tests, 0 failures, 0 errors** (~4.5s execution time).
-- **Total Workspace Coverage:** **640 unit tests, 100% passing**.
+- **Total Workspace Coverage:** **648 unit tests, 100% passing**.

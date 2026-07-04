@@ -935,8 +935,10 @@ topics (e.g. "how do I defend my Gleba factory" → `combat-defense.md` + `plane
 
 For **legendary-tier production planning**, prefer `dev/quality_planner.py`
 over `assets/cli.py`.  The planner implements a backward-induction DP quality
-loop solver across asteroid reprocessing, mined-raw self-recycle (coal,
-stone, tungsten-ore, scrap, holmium-ore, uranium-ore, gleba bio-raws),
+loop solver across asteroid sourcing (post-2.1.8: crushing quality roll + ore
+recycler upcycle — reprocessing no longer accepts quality modules), mined-raw
+self-recycle (coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore,
+gleba bio-raws),
 cross-item shuffle (~195 candidate recipes including modules, military, and
 end-game gear), and self-recycle-target items (superconductor, holmium-plate,
 tungsten-carbide, fusion-power-cell, lithium, biolab, captive-biter-spawner).
@@ -1038,7 +1040,7 @@ common "fully researched" case use:
 - `nauvis` unlocks oil-chain items (plastic-bar, sulfur, lubricant, processing-unit)
 - `vulcanus` unlocks tungsten-plate, calcite-as-raw, lava-fluid casting
 - `fulgora` unlocks scrap, holmium-ore, electrolyte
-- `gleba` unlocks yumako/jellynut/pentapod-egg + bio recipes (no spoilage modelling)
+- `gleba` unlocks yumako/jellynut/pentapod-egg + bio recipes (spoilage timing is modelled — Q3 warns when a loop would spoil before reaching target tier; `--no-spoilage` disables)
 - `aquilo` unlocks ammonia, fluorine, lithium-brine, ice-as-raw
 
 Without `--planets`, only asteroid-reachable items work (iron, copper, stone, ice, calcite, carbon, sulfur via crushing).
@@ -1071,6 +1073,14 @@ alters sourcing today; other `--location` values just unlock that planet.
   and activates the ones whose recycle outputs overlap with the chain's
   legendary leaves.  Common picks: `low-density-structure`,
   `advanced-circuit`, `electronic-circuit`, `engine-unit`, `battery`.
+- **Roadmap Q1–Q9 flags:** `--preset {nauvis-starter,end-game-nauvis,end-game-fulgora}`
+  (Q9 shortcuts; explicit flags still win); `--beacons N` (Q7, +2.5 speed each,
+  shrinks the fleet); `--objective {machines,power,raw-input,cost}` (Q8, the
+  metric the `all` auto-selectors minimise, also reported); `--demand
+  "item@tier:rate,..."` (Q6, plan several tiers at once — replaces `--item`/`--rate`);
+  `--keep-tiers uncommon,rare` (Q6, report siphonable mid-tier raws);
+  `--optimize-placement` (Q4, rank quality-module placements); `--no-spoilage`
+  (Q3, silence Gleba spoilage warnings).
 
 ### Fail-fast errors
 
@@ -1095,9 +1105,8 @@ Surface the error verbatim — most are actionable:
   the self-recycler directly or supply the item externally
 - `chain needs '<chunk>'... but --no-asteroids is set`: tell the player which
   planet would supply the raw natively
-- `asteroid reprocessing for '<chunk>' yields 0 legendary`: indicates a
-  config issue (zero quality modules / wrong tier) — check `--module-quality`
-  and `--quality-module-tier`
+- `asteroid yield for '<raw>' is 0`: indicates a config issue (zero quality
+  modules / wrong tier) — check `--module-quality` and `--quality-module-tier`
 
 ### Output summary
 
@@ -1107,7 +1116,7 @@ The planner emits:
 - `mined_input` — normal mined raws/min (coal, stone, tungsten-ore, etc.)
 - `fluid_input` — fluid raws (quality-transparent)
 - `normal_solid_input` / `normal_fluid_input` — non-quality inputs (LDS shuffle plastic-leg, self-recycle target ingredients)
-- `stages[]` — assembly + asteroid-reprocessing + raw-crushing + mined-raw-self-recycle + cross-item-shuffle + self-recycle-target stages with machine counts, power, module configs per tier
+- `stages[]` — assembly + raw-crushing + asteroid-ore-upcycle + mined-raw-self-recycle + cross-item-shuffle + self-recycle-target stages with machine counts, power, module configs per tier
 - `total_machine_count`, `total_power_mw`
 - `shuffle_byproduct_legendary/credited/overflow` (when LDS shuffle active)
 - `notes[]` — surplus byproducts, fluid-transparency markers

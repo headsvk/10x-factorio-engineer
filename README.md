@@ -31,7 +31,7 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (281 tests, stdlib only)
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
-  test_quality_planner.py   # unittest suite (359 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (367 tests) for quality_planner
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -177,7 +177,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-281 CLI tests + 359 quality-planner tests, stdlib only.
+281 CLI tests + 367 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner
 
@@ -216,8 +216,10 @@ python dev/quality_planner.py --item processing-unit --rate 60 \
     --planets nauvis --assembly-modules --enable-shuffles all $TECH_ALL
 
 # V3 item 4 partial: Gleba bio-raws (yumako, jellynut, pentapod-egg)
-# via self-recycle. Spoilage timing is NOT modelled yet — long quality
-# loops on bioflux/nutrients give optimistic counts.
+# via self-recycle. Spoilage timing IS modelled (roadmap Q3): the planner
+# estimates loop residence time and emits WARNING/ERROR notes when a spoilable
+# would decay before reaching the target tier (weak modules / high target tier).
+# Disable with --no-spoilage.
 python dev/quality_planner.py --item bioflux --rate 60 --planets gleba $TECH_ALL
 python dev/quality_planner.py --item plastic-bar --rate 60 --planets gleba $TECH_ALL
 python dev/quality_planner.py --item rocket-fuel --rate 60 --planets gleba $TECH_ALL
@@ -262,6 +264,28 @@ python dev/quality_planner.py --item quality-module-2 --rate 1 \
     --target-quality rare --module-quality rare --quality-module-tier 2 \
     --location fulgora --assembly-modules --miner big \
     --research mining-productivity=20
+
+# Quality Planner Roadmap (Q1–Q9) flags:
+#   --no-spoilage           Q3: disable Gleba spoilage timing warnings.
+#   --optimize-placement    Q4: rank quality-module placements across chain
+#                               steps and attach a comparison to the plan notes.
+#   --demand SPEC           Q6: plan several item@tier:rate legs at once, e.g.
+#                               --demand "iron-plate@legendary:60,iron-plate@epic:20"
+#                               (replaces --item/--rate; totals are combined).
+#   --keep-tiers TIERS      Q6: report mid-tier raws (e.g. uncommon,rare) that
+#                               the quality-climb loops roll and could be siphoned.
+#   --beacons COUNT         Q7: speed-module beacons per machine (+2.5 speed each)
+#                               — shrinks the machine fleet.
+#   --objective METRIC      Q8: machines|power|raw-input|cost — the metric the
+#                               auto-selectors (--enable-shuffles/-drivers all)
+#                               minimise; also reported in the output.
+#   --preset NAME           Q9: nauvis-starter | end-game-nauvis | end-game-fulgora
+#                               shortcuts (explicit flags always win).
+python dev/quality_planner.py --preset end-game-nauvis --item processing-unit --rate 60
+python dev/quality_planner.py --item iron-plate --rate 60 --tech recycling=1 \
+    --objective power --beacons 8 --keep-tiers uncommon,rare
+python dev/quality_planner.py --tech recycling=1 \
+    --demand "iron-plate@legendary:60,iron-plate@epic:20"
 ```
 
 Reachable items today:
@@ -273,8 +297,9 @@ Reachable items today:
   scrap, holmium-ore, ammoniacal-solution).
 - **+ Gleba** (partial): yumako / jellynut / pentapod-egg via self-recycle;
   bioflux, nutrients, biosulfur, biolubricant, bioplastic, rocket-fuel via
-  biochamber recipes.  **Spoilage timing is NOT modelled** — long quality
-  loops on spoiling intermediates give optimistic counts.
+  biochamber recipes.  **Spoilage timing is modelled** (roadmap Q3): loops that
+  would spoil before reaching the target tier raise WARNING/ERROR notes
+  (suppress with `--no-spoilage`).
 - **Self-recycle targets**: `tungsten-carbide`, `superconductor`, `holmium-plate`,
   `fusion-power-cell`, `lithium`, `biolab`, `captive-biter-spawner`,
   `steel-plate` (auto-compared against the ingredient-upcycle path).

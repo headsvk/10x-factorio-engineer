@@ -4384,7 +4384,9 @@ class TestPresets(unittest.TestCase):
 
     def test_apply_preset_end_game_fulgora(self):
         import argparse
-        ns = argparse.Namespace(preset="end-game-fulgora", location=None, planets=None, tech=[], enable_shuffles=None, beacons=0)
+        # planets defaults to "" (the real argparse default), not None — the
+        # preset must still override it (regression: "" was not treated as unset).
+        ns = argparse.Namespace(preset="end-game-fulgora", location=None, planets="", tech=[], enable_shuffles=None, beacons=0)
         out = qp.apply_preset(ns)
         self.assertEqual(out.location, "fulgora")
         self.assertEqual(out.planets, "fulgora")
@@ -4394,10 +4396,88 @@ class TestPresets(unittest.TestCase):
 
     def test_apply_preset_nauvis_starter(self):
         import argparse
-        ns = argparse.Namespace(preset="nauvis-starter", location=None, planets=None, no_asteroids=False)
+        ns = argparse.Namespace(preset="nauvis-starter", location=None, planets="", no_asteroids=False)
         out = qp.apply_preset(ns)
         self.assertEqual(out.location, "nauvis")
+        self.assertEqual(out.planets, "nauvis")
         self.assertTrue(out.no_asteroids)
+
+    def test_parse_tech_state_all_unlocks_everything(self):
+        # The end-game-* presets set --tech all; it must resolve to the full
+        # tech-unlocked map instead of raising "Invalid --tech 'all'".
+        self.assertEqual(qp._parse_tech_state(["all"]), dict(qp.ALL_TECH_UNLOCKED))
+
+
+class TestCLIWiringEndToEnd(unittest.TestCase):
+    """Regression: the CLI must actually thread the roadmap flags into plan().
+
+    The Q3/Q4/Q6/Q7/Q8/Q9 flags previously parsed but were dropped before the
+    plan() call, so every one was a silent no-op.  These drive the real CLI via
+    subprocess and assert the flag changes the output.
+    """
+
+    _CLI = os.path.join(_HERE, "quality_planner.py")
+
+    def _run(self, *flags):
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, self._CLI, *flags],
+            capture_output=True, text=True,
+        )
+        return proc
+
+    def _json(self, *flags):
+        proc = self._run(*flags, "--format", "json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_beacons_flag_reduces_machines(self):
+        base = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1")
+        beac = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1",
+                          "--beacons", "8")
+        self.assertLess(beac["total_machine_count"], base["total_machine_count"])
+
+    def test_optimize_placement_flag_attaches_placements(self):
+        out = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1",
+                         "--optimize-placement")
+        self.assertGreater(len(out.get("placements", [])), 0)
+
+    def test_objective_flag_reported(self):
+        out = self._json("--item", "electronic-circuit", "--rate", "60", "--tech", "recycling=1",
+                         "--objective", "power")
+        self.assertEqual(out["objective"], "power")
+        self.assertAlmostEqual(out["objective_value"], out["total_power_mw"])
+
+    def test_demand_flag_plans_multiple_tiers(self):
+        out = self._json("--demand", "iron-plate@legendary:60,iron-plate@epic:30", "--tech", "recycling=1")
+        self.assertEqual(len(out["demands"]), 2)
+        self.assertAlmostEqual(
+            out["total_machine_count"],
+            sum(d["total_machine_count"] for d in out["demands"]),
+        )
+
+    def test_keep_tiers_flag_surfaces_surplus(self):
+        out = self._json("--item", "iron-plate", "--rate", "60", "--tech", "recycling=1",
+                         "--keep-tiers", "uncommon,rare")
+        self.assertIn("uncommon", out.get("kept_tiers", {}))
+        self.assertIn("rare", out.get("kept_tiers", {}))
+
+    def test_no_spoilage_flag_suppresses_warning(self):
+        flags = ["--item", "yumako-mash", "--rate", "60", "--planets", "gleba",
+                 "--tech", "recycling=1", "--module-quality", "uncommon",
+                 "--quality-module-tier", "1"]
+        warn = self._json(*flags)
+        quiet = self._json(*flags, "--no-spoilage")
+        self.assertTrue(any("spoilable" in n for n in warn["notes"]))
+        self.assertFalse(any("spoilable" in n for n in quiet["notes"]))
+
+    def test_end_game_presets_run(self):
+        # Both end-game presets used to crash on `--tech all`.
+        proc = self._run("--item", "iron-gear-wheel", "--rate", "60",
+                         "--preset", "end-game-nauvis", "--format", "json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["planets"], ["nauvis"])
 
 
 if __name__ == "__main__":

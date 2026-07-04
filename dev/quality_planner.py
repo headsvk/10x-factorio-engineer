@@ -5394,6 +5394,7 @@ def plan(
     optimize_placement: bool = False,
     beacons: int = 0,
     objective: str = "machines",
+    keep_tiers: list[str] | None = None,
     _force_tree_walk: bool = False,
     _scrap_disabled: bool = False,
     _cache: _DispatchCache | None = None,
@@ -6082,6 +6083,16 @@ def plan(
     asteroid_upcycle_stages: list[dict] = []
     asteroid_input: dict[str, float] = {}
 
+    # Mixed-tier surplus extraction (roadmap Q6, --keep-tiers): record the raw
+    # amounts rolled directly to each requested mid-tier by the quality-climb
+    # loops.  These are siphonable at the cost of proportionally more normal
+    # input (they would otherwise continue climbing toward the target tier).
+    keep_tier_idx = {
+        QUALITY_INDEX[t] for t in (keep_tiers or [])
+        if t in QUALITY_INDEX and 0 < QUALITY_INDEX[t] < target_tier
+    }
+    kept_tier_output: dict[str, dict[str, float]] = {}
+
     if not no_asteroids:
         needed_chunks: dict[str, float] = defaultdict(float)
         crush_demands_per_chunk: dict[str, dict[str, float]] = defaultdict(dict)
@@ -6157,6 +6168,12 @@ def plan(
                     continue
                 ore_per_crush = _recipe_result_amount(crush_recipe, rn) * eff_prod
                 inflow = [chunk_crushes * ore_per_crush * crush_dist[t] for t in range(5)]
+                for t in keep_tier_idx:
+                    if inflow[t] > 0:
+                        kept_tier_output.setdefault(QUALITY_TIERS[t], {})[rn] = (
+                            kept_tier_output.setdefault(QUALITY_TIERS[t], {}).get(rn, 0.0)
+                            + inflow[t]
+                        )
                 V_ore, ore_configs = solve_mined_raw_self_recycle_loop_full(
                     rn, data, module_quality, quality_module_tier, target_tier,
                 )
@@ -6244,6 +6261,13 @@ def plan(
                 )
             normal_input_per_min = demand_rate / target_yield_per_mined_raw
             mined_input[raw_key] = normal_input_per_min
+            for t in keep_tier_idx:
+                amt = normal_input_per_min * miner_dist[t]
+                if amt > 0:
+                    kept_tier_output.setdefault(QUALITY_TIERS[t], {})[raw_key] = (
+                        kept_tier_output.setdefault(QUALITY_TIERS[t], {}).get(raw_key, 0.0)
+                        + amt
+                    )
             rec_recipe = _recipe_by_key(data, f"{raw_key}-recycling")
             rec_time = float(rec_recipe.get("energy_required", 0.2)) if rec_recipe else 0.2
 
@@ -6468,10 +6492,20 @@ def plan(
         if item_key in SPOIL_TIMES_SECONDS:
             spoilables_in_plan.add(item_key)
 
+        # Estimate loop residence time T = passes x cycle_time (roadmap Q3).
+        # Climbing a spoilable to the target tier needs roughly one successful
+        # quality upgrade per tier; with a per-recycle upgrade chance ``q_pass``
+        # that is ~``target_tier / q_pass`` recycler passes.  Weak/cheap modules
+        # (small q_pass) or high target tiers push residence up — exactly when
+        # Gleba loops risk spoiling.  cycle_time is the nominal recycler pass.
+        q_pass = max(
+            _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality),
+            1e-6,
+        )
+        cycle_time = 1.0 / max(RECYCLER_SPEED, 1e-6)
+        T_est = (target_tier / q_pass) * cycle_time
         for sp_item in sorted(spoilables_in_plan):
             spoil_sec = SPOIL_TIMES_SECONDS[sp_item]
-            # Estimate loop cycle time (~4s) and passes (~4.0 for 25% retention)
-            T_est = 16.0
             if T_est > spoil_sec:
                 notes.append(
                     f"ERROR: quality loop for spoilable '{sp_item}' residence time "
@@ -6554,8 +6588,21 @@ def plan(
         "assembler_level": assembler_level,
         "research_levels": dict(research_levels),
         "planets": sorted(planets_fs),
+        "objective": objective,
+        "kept_tiers": kept_tier_output,
         "notes": notes,
     }
+    # Objective metric for this plan (roadmap Q8); also used by the shuffle /
+    # driver cost gates below so --objective steers auto-selection.
+    out["objective_value"] = _evaluate_objective(out, objective)
+    if keep_tier_idx and kept_tier_output:
+        for tier_name in sorted(kept_tier_output):
+            total = sum(kept_tier_output[tier_name].values())
+            notes.append(
+                f"keep-tiers: ~{total:.2f}/min of {tier_name} raws are rolled "
+                f"directly at that tier in the quality-climb loops and can be "
+                f"siphoned as surplus (diverting them raises normal input demand)"
+            )
 
     # Note (not a cost gate): scrap recycling is auto-preferred on Fulgora per
     # design — it is surface-based and scrap is effectively free, whereas the
@@ -6593,12 +6640,17 @@ def plan(
             miner_type=miner_type,
             miner_quality_modules=miner_quality_modules,
             scrap_upcycle_loops=scrap_upcycle_loops,
+            no_spoilage=no_spoilage,
+            beacons=beacons,
+            objective=objective,
+            keep_tiers=keep_tiers,
         )
-        if baseline["total_machine_count"] < total_machines:
+        if baseline["objective_value"] < out["objective_value"]:
             baseline.setdefault("notes", []).append(
                 f"--enable-shuffles all: greedy proposed shuffles totalling "
-                f"{total_machines:.1f} machines, but no-shuffle baseline is "
-                f"{baseline['total_machine_count']:.1f} machines — kept baseline. "
+                f"{total_machines:.1f} machines ({objective}={out['objective_value']:.2f}), "
+                f"but no-shuffle baseline is {objective}="
+                f"{baseline['objective_value']:.2f} — kept baseline. "
                 f"Use --enable-shuffle NAME to override."
             )
             return baseline
@@ -6625,12 +6677,17 @@ def plan(
             miner_type=miner_type,
             miner_quality_modules=miner_quality_modules,
             scrap_upcycle_loops=scrap_upcycle_loops,
+            no_spoilage=no_spoilage,
+            beacons=beacons,
+            objective=objective,
+            keep_tiers=keep_tiers,
         )
-        if baseline["total_machine_count"] < total_machines:
+        if baseline["objective_value"] < out["objective_value"]:
             baseline.setdefault("notes", []).append(
                 f"--enable-drivers all: drivers totalling "
-                f"{total_machines:.1f} machines, but no-driver baseline is "
-                f"{baseline['total_machine_count']:.1f} machines — kept baseline. "
+                f"{total_machines:.1f} machines ({objective}={out['objective_value']:.2f}), "
+                f"but no-driver baseline is {objective}="
+                f"{baseline['objective_value']:.2f} — kept baseline. "
                 f"Use --enable-driver RECIPE to override."
             )
             return baseline
@@ -6921,6 +6978,8 @@ def format_human(out: dict) -> str:
             L.append(f"Total power:    {pwr_mw / 1000.0:.2f} GW (electric machines only)")
         else:
             L.append(f"Total power:    {pwr_mw:.2f} MW (electric machines only)")
+    if out.get("objective") and out["objective"] != "machines":
+        L.append(f"Objective ({out['objective']}): {float(out.get('objective_value', 0.0)):.2f}")
     by_role = (out.get("summary") or {}).get("by_role")
     if by_role:
         L.append("")
@@ -6990,9 +7049,13 @@ def _parse_tech_state(raw_list: list[str]) -> dict[str, int]:
     """
     out: dict[str, int] = {}
     valid = sorted(TECH_GATES.keys())
+    # Sentinel: --tech all (also used by the end-game-* presets) unlocks
+    # everything, matching ALL_TECH_UNLOCKED.
+    if any(raw.strip().lower() == "all" for raw in raw_list):
+        return dict(ALL_TECH_UNLOCKED)
     for raw in raw_list:
         if "=" not in raw:
-            sys.exit(f"Invalid --tech '{raw}'; expected NAME=LEVEL")
+            sys.exit(f"Invalid --tech '{raw}'; expected NAME=LEVEL (or 'all')")
         name, lvl = raw.split("=", 1)
         name = name.strip()
         if name not in TECH_GATES:
@@ -7006,8 +7069,8 @@ def _parse_tech_state(raw_list: list[str]) -> dict[str, int]:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Legendary production planner (V2)")
-    p.add_argument("--item", required=True)
-    p.add_argument("--rate", required=True, type=float, help="target items per minute (at --target-quality)")
+    p.add_argument("--item", default=None, help="target item key (required unless --demand is used)")
+    p.add_argument("--rate", default=None, type=float, help="target items per minute (at --target-quality); required unless --demand is used")
     p.add_argument(
         "--target-quality", default="legendary",
         choices=["uncommon", "rare", "epic", "legendary"],
@@ -7131,7 +7194,8 @@ def parse_args() -> argparse.Namespace:
         "--tech", action="append", default=[], metavar="NAME=LEVEL",
         help=(
             "Tech research state, repeatable (e.g. --tech recycling=1 "
-            "--tech tungsten-carbide=1).  Without any --tech flag NOTHING is "
+            "--tech tungsten-carbide=1).  Use --tech all to unlock everything.  "
+            "Without any --tech flag NOTHING is "
             "researched and most plans fail-fast (no recycler).  Valid names: "
             + ", ".join(sorted(TECH_GATES.keys()))
             + ".  To replicate today's fully-researched default, list every "
@@ -7216,9 +7280,13 @@ def apply_preset(args: argparse.Namespace) -> argparse.Namespace:
     if not getattr(args, "preset", None):
         return args
     preset_dict = PRESETS.get(args.preset, {})
+    # A preset only fills in args the user left at their unset/default value, so
+    # explicit flags always win.  "" is the --planets default; "electric" the
+    # --miner default; 0/False/None/[] the remaining defaults.
+    unset_sentinels = (None, "", [], False, 0, "electric")
     for k, v in preset_dict.items():
         val = getattr(args, k, None)
-        if val is None or val == [] or val is False or val == "electric" or val == 0:
+        if any(val is s or val == s for s in unset_sentinels):
             setattr(args, k, v)
     return args
 
@@ -7257,6 +7325,68 @@ def parse_demand_spec(spec_str: str) -> list[tuple[str, str, float]]:
         else:
             raise ValueError(f"ERROR: invalid --demand spec '{part}'; format: ITEM@TIER:RATE")
     return results
+
+
+def _combine_demand_plans(sub_plans: list[dict], objective: str) -> dict:
+    """Combine per-leg plans from a --demand spec into one aggregate report (Q6).
+
+    Each sub-plan is planned independently; totals sum across legs.  The
+    combined ``objective_value`` is evaluated on the aggregate so --objective
+    stays meaningful for multi-tier demand.
+    """
+    total_machines = sum(float(sp["plan"].get("total_machine_count", 0.0)) for sp in sub_plans)
+    total_power = sum(float(sp["plan"].get("total_power_mw", 0.0)) for sp in sub_plans)
+    combined_raw: dict[str, float] = defaultdict(float)
+    for sp in sub_plans:
+        for src in ("asteroid_input", "mined_input"):
+            for k, v in sp["plan"].get(src, {}).items():
+                combined_raw[k] += float(v)
+    out = {
+        "demands": [
+            {
+                "item": sp["item"],
+                "tier": sp["tier"],
+                "rate_per_min": sp["rate_per_min"],
+                "total_machine_count": float(sp["plan"].get("total_machine_count", 0.0)),
+                "total_power_mw": float(sp["plan"].get("total_power_mw", 0.0)),
+                "plan": sp["plan"],
+            }
+            for sp in sub_plans
+        ],
+        "total_machine_count": total_machines,
+        "total_power_mw": total_power,
+        "combined_normal_raw_input": dict(combined_raw),
+        "objective": objective,
+    }
+    out["objective_value"] = _evaluate_objective(
+        {"total_machine_count": total_machines, "total_power_mw": total_power,
+         "mined_input": dict(combined_raw)},
+        objective,
+    )
+    return out
+
+
+def format_demand_human(out: dict) -> str:
+    """Render a combined --demand plan: each leg, then aggregate totals (Q6)."""
+    L: list[str] = []
+    for d in out["demands"]:
+        L.append("=" * 70)
+        L.append(f"DEMAND: {d['rate_per_min']:.1f}/min of {_humanize(d['item'])} @ {d['tier']}")
+        L.append("=" * 70)
+        L.append(format_human(d["plan"]))
+        L.append("")
+    L.append("#" * 70)
+    L.append(f"COMBINED total machines: {out['total_machine_count']:.2f}")
+    L.append(f"COMBINED total power: {out['total_power_mw']:.2f} MW")
+    if out.get("combined_normal_raw_input"):
+        raws = ", ".join(
+            f"{_humanize(k)}={v:.1f}/min"
+            for k, v in sorted(out["combined_normal_raw_input"].items())
+        )
+        L.append(f"COMBINED normal raw input: {raws}")
+    L.append(f"Objective ({out['objective']}): {out['objective_value']:.2f}")
+    L.append("#" * 70)
+    return "\n".join(L)
 
 
 def main() -> None:
@@ -7304,9 +7434,16 @@ def main() -> None:
     elif args.enable_driver:
         active_drivers = set(args.enable_driver)
 
-    try:
-        out = plan(
-            args.item, args.rate, data,
+    keep_tiers = None
+    if args.keep_tiers:
+        keep_tiers = [t.strip().lower() for t in args.keep_tiers.split(",") if t.strip()]
+        bad = [t for t in keep_tiers if t not in QUALITY_INDEX]
+        if bad:
+            sys.exit(f"Invalid --keep-tiers value(s) {bad}; valid: {list(QUALITY_TIERS)}")
+
+    def _run_plan(item_key: str, rate: float, ttier: int) -> dict:
+        return plan(
+            item_key, rate, data,
             module_quality=args.module_quality,
             research_levels=research,
             assembler_level=args.assembler_level,
@@ -7320,16 +7457,42 @@ def main() -> None:
             no_asteroids=args.no_asteroids,
             location=args.location,
             tech_state=tech_state,
-            target_tier=target_tier,
+            target_tier=ttier,
             miner_type=args.miner,
             miner_quality_modules=args.miner_quality_modules,
             scrap_upcycle_loops=args.scrap_upcycle_loops,
+            no_spoilage=args.no_spoilage,
+            optimize_placement=args.optimize_placement,
+            beacons=args.beacons,
+            objective=args.objective,
+            keep_tiers=keep_tiers,
         )
+
+    try:
+        if args.demand:
+            # Mixed-tier demand (roadmap Q6): plan each (item@tier:rate) leg and
+            # combine into one report.
+            specs = parse_demand_spec(args.demand)
+            sub_plans = []
+            for it, tier, r in specs:
+                if tier not in QUALITY_INDEX:
+                    sys.exit(f"Invalid tier '{tier}' in --demand; valid: {list(QUALITY_TIERS)}")
+                sub_plans.append({
+                    "item": it, "tier": tier, "rate_per_min": r,
+                    "plan": _run_plan(it, r, QUALITY_INDEX[tier]),
+                })
+            out = _combine_demand_plans(sub_plans, args.objective)
+        else:
+            if not args.item or args.rate is None:
+                sys.exit("ERROR: --item and --rate are required (unless --demand is used).")
+            out = _run_plan(args.item, args.rate, target_tier)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
     if args.format == "json":
         print(json.dumps(out, indent=2, default=str))
+    elif "demands" in out:
+        print(format_demand_human(out))
     else:
         print(format_human(out))
 

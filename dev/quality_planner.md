@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **359 tests, all passing, ~4.8 s.**
+**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **367 tests, all passing, ~6.9 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
@@ -553,7 +553,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **345 tests**, 46 classes.
+`dev/test_quality_planner.py` — **367 tests**, 55 classes.
 
 | Class | Coverage |
 |---|---|
