@@ -12,13 +12,14 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **367 tests, all passing, ~6.9 s.**
+**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **372 tests, all passing, ~11 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 Currently shipped:
+- **cli.py-style full-step human output (2026-07-07)** — `format_human` now renders a per-stage detail block under each stage headline: buildable (ceil) machine count + exact, per-stage `power`, arrowed outputs (`->`) and inputs (`<-`), and — for Fulgora scrap-seeding drills — the drill quality-module config with its speed penalty (`modules: 3x quality-3-rare (speed −15%)`). The `mining` stage now carries `quality_slots`/`quality_module_tier`/`quality_module_quality`/`speed_penalty_pct` for this. Display-only; no solver-math change.
 - **Ergonomics & CLI Presets (2026-07-04, Q9)** — Added `--preset end-game-nauvis|late-game-vulcanus|nauvis-starter` shortcuts for rapid multi-flag configuration.
 - **Custom Objective Function (2026-07-04, Q8)** — Added `--objective machines|power|raw-input|cost` flag and `_evaluate_objective` evaluation function to customize optimization metrics.
 - **Beacon & Speed-Module Integration (2026-07-04, Q7)** — Added `--beacons COUNT` flag. Applies beacon speed multipliers to crafting machines, scaling machine counts and power consumption.
@@ -220,7 +221,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
 | `co-product-driver` | plan() | per recipe | Driven activation: recipe runs purely for its non-primary solid output (e.g. `molten-iron-from-lava` for stone). Has `target`, `co_product_per_min`, `crafts_per_min`, `inputs`, `overflow_outputs` |
 | `fluid-chain` | plan() (Fulgora) | chemical-plant | One `cli.py` production step of a delegated Fulgora fluid sub-chain (e.g. sulfuric-acid for processing-unit). Has `recipe`, `rate_per_min`, `fluid_target` |
-| `mining` | plan() | electric/big-mining-drill | Drill fleet for one solid raw (scrap or a planet-mined ore), sized by `cli.compute_miners`. Has `item`, `recipe` (`mine-<item>`), `rate_per_min`. `--miner` picks the drill; mining-prod research reduces the count. Main `plan()` body only (not the self-recycle/self-feed early-return paths) |
+| `mining` | plan() | electric/big-mining-drill | Drill fleet for one solid raw (scrap or a planet-mined ore), sized by `cli.compute_miners`. Has `item`, `recipe` (`mine-<item>`), `rate_per_min`. When drills carry quality modules (Fulgora scrap seeding), also has `quality_slots`, `quality_module_tier`, `quality_module_quality`, `speed_penalty_pct` so `format_human` can render them. `--miner` picks the drill; mining-prod research reduces the count. Main `plan()` body only (not the self-recycle/self-feed early-return paths) |
 
 ---
 
@@ -553,7 +554,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **367 tests**, 55 classes.
+`dev/test_quality_planner.py` — **372 tests**, 56 classes.
 
 | Class | Coverage |
 |---|---|

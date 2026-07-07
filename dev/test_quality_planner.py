@@ -4480,5 +4480,46 @@ class TestCLIWiringEndToEnd(unittest.TestCase):
         self.assertEqual(out["planets"], ["nauvis"])
 
 
+class TestFullStepsHumanFormat(unittest.TestCase):
+    """cli.py-style per-stage detail block in format_human: buildable (ceil)
+    machine count, per-stage power, drill quality modules, and arrowed
+    inputs/outputs."""
+
+    def _plan(self, **kw):
+        return qp.plan(
+            "quality-module-2", 1, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+            quality_module_tier=3, location="fulgora", assembler_level=3,
+            tech_state={"recycling": 1, "electromagnetic-plant": 1}, **kw,
+        )
+
+    def test_mining_stage_carries_drill_quality_modules(self):
+        out = self._plan(miner_type="electric", miner_quality_modules=True)
+        mining = next(s for s in out["stages"] if s["role"] == "mining")
+        self.assertEqual(mining["quality_slots"], 3)  # electric drill = 3 slots
+        self.assertGreater(mining["speed_penalty_pct"], 0.0)
+
+    def test_mining_modules_absent_when_disabled(self):
+        out = self._plan(miner_quality_modules=False)
+        mining = next(s for s in out["stages"] if s["role"] == "mining")
+        self.assertNotIn("quality_slots", mining)
+
+    def test_human_renders_drill_modules_with_penalty(self):
+        text = qp.format_human(
+            self._plan(miner_type="electric", miner_quality_modules=True))
+        self.assertIn("modules: 3x quality-3-rare", text)
+        self.assertIn("speed", text)  # -15% penalty annotation
+
+    def test_human_renders_arrowed_io_on_assembly(self):
+        text = qp.format_human(self._plan(miner_quality_modules=True))
+        self.assertIn("-> Quality Module 2", text)     # stage output
+        self.assertIn("<- Processing Unit", text)      # stage input
+
+    def test_human_renders_build_ceil_and_power_per_stage(self):
+        text = qp.format_human(self._plan(miner_quality_modules=True))
+        self.assertIn("build:", text)   # ceil buildable count
+        self.assertIn("power:", text)   # per-stage power
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6380,14 +6380,23 @@ def plan(
             if "machine_count" not in entry:
                 continue  # fluids report required_yield_pct, not a drill count
             drill_count = float(entry["machine_count"]) / drill_speed_mult
-            miner_stages.append({
+            stage = {
                 "role": "mining",
                 "item": it,
                 "recipe": f"mine-{it}",
                 "machine": entry["machine"],
                 "machine_count": drill_count,
                 "rate_per_min": float(entry.get("rate_per_min", 0.0)),
-            })
+            }
+            # Surface the drill quality-module config so format_human can render
+            # it (the drills seed quality onto the mined raw; the -5%/slot speed
+            # penalty is already baked into drill_count above).
+            if miner_quality_modules and module_quality:
+                stage["quality_slots"] = miner_slots
+                stage["quality_module_tier"] = quality_module_tier
+                stage["quality_module_quality"] = module_quality
+                stage["speed_penalty_pct"] = (1.0 - drill_speed_mult) * 100.0
+            miner_stages.append(stage)
 
     # Total machine count
     total_machines = (
@@ -6728,6 +6737,53 @@ def _module_config_summary(mcfg: dict) -> str:
     return "; ".join(f"{t}: {lbl}" for t, lbl in per_tier.items())
 
 
+def _fmt_power(kw: float) -> str:
+    kw = float(kw)
+    return f"{kw / 1000.0:.2f} MW" if kw >= 1000.0 else f"{kw:.0f} kW"
+
+
+def _stage_detail_lines(st: dict, tier: str) -> list[str]:
+    """cli.py-style per-stage detail block: buildable machine count, modules,
+    power, and arrowed inputs/outputs.  Additive under each stage headline so
+    the planner's human output reads like ``cli.py --format human``."""
+    ind = " " * 17
+    lines: list[str] = []
+    mc = st.get("machine_count")
+    machine = st.get("machine")
+    if mc is not None and machine:
+        lines.append(
+            f"{ind}build: {math.ceil(float(mc) - 1e-9)} × {_humanize(machine)}  "
+            f"(exact {float(mc):.2f})"
+        )
+    # Drill quality modules (mining stage) — otherwise invisible in the headline.
+    if st.get("quality_slots"):
+        pen = float(st.get("speed_penalty_pct", 0.0))
+        pen_s = f"  (speed −{pen:.0f}%)" if pen > 1e-9 else ""
+        lines.append(
+            f"{ind}modules: {int(st['quality_slots'])}x quality-"
+            f"{st.get('quality_module_tier', 3)}-"
+            f"{st.get('quality_module_quality', 'normal')}{pen_s}"
+        )
+    if st.get("power_kw"):
+        lines.append(f"{ind}power: {_fmt_power(st['power_kw'])}")
+    # Outputs (-> primary/basket) then inputs (<- ingredients), cli-style.
+    outs: dict = {}
+    if st.get("product"):
+        outs = {st["product"]: st.get("rate_per_min", 0.0)}
+    elif st["role"] == "mining" and st.get("item"):
+        outs = {st["item"]: st.get("rate_per_min", 0.0)}
+    elif st.get("outputs"):
+        outs = st["outputs"]
+    elif st["role"] == "scrap-quality-source" and st.get("covered"):
+        outs = st["covered"]
+    for k, v in sorted(outs.items(), key=lambda x: -float(x[1])):
+        lines.append(f"{ind}-> {_humanize(k)}  {float(v):.2f}/min")
+    ins = st.get("inputs") or {}
+    for k, v in sorted(ins.items(), key=lambda x: -float(x[1])):
+        lines.append(f"{ind}<- {_humanize(k)}  {float(v):.2f}/min")
+    return lines
+
+
 def format_human(out: dict) -> str:
     L: list[str] = []
     tgt = out["target"]
@@ -6975,6 +7031,7 @@ def format_human(out: dict) -> str:
         mc = _module_config_summary(st.get("module_config_per_tier", {}))
         if mc:
             L.append(f"                 modules: {mc}")
+        L.extend(_stage_detail_lines(st, tier))
     L.append("")
     L.append(f"Total machines: {out['total_machine_count']:.2f}")
     if "total_power_mw" in out:
