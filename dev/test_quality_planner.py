@@ -1659,7 +1659,7 @@ class TestQualityScrapSeeding(unittest.TestCase):
         # (Refreshed after the Pass-1 topological demand fix, which corrected the
         # previously under-counted plate demand — see TestWalkerDemandConservation.)
         no_mods = self._fulgora_qm2(miner_quality_modules=False)
-        self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 9161.25, delta=1e-1)
+        self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 4160.92, delta=1e-1)
 
 
 class TestScrapDisposalDropped(unittest.TestCase):
@@ -1716,13 +1716,13 @@ class TestScrapDisposalDropped(unittest.TestCase):
     def test_byproducts_carry_per_tier_rates(self):
         st = self._scrap_stage(self._fulgora_qm2())
         self.assertIn("byproducts", st)
-        # Steel-plate is a pure co-product; it should surface at multiple tiers.
-        steel = st["byproducts"]["steel-plate"]
-        self.assertIn("normal", steel)
-        self.assertGreater(steel["normal"], 0.0)
-        # A demanded leaf with no upcycle route (plastic-bar) surfaces its genuine
-        # sub-target fraction as byproduct.
-        self.assertGreater(st["byproducts"]["plastic-bar"]["normal"], 0.0)
+        # Pure co-products (steel-plate, concrete) surface their full per-tier
+        # spread — they're never upcycled, so the sub-target tiers are real
+        # byproduct.  (The demanded plates are all upcycled under ALL_TECH, so
+        # their sub-target is consumed, not surfaced — see the upcycled-leaf test.)
+        for co in ("steel-plate", "concrete"):
+            self.assertIn("normal", st["byproducts"][co])
+            self.assertGreater(st["byproducts"][co]["normal"], 0.0)
 
     def test_upcycled_leaf_has_no_subtarget_byproduct(self):
         # iron/copper plate are fed through the scrap-upcycle loop, which climbs
@@ -1760,7 +1760,7 @@ class TestScrapDisposalDropped(unittest.TestCase):
         # (Value reflects the Pass-1 topological demand fix; the disposal-drop
         # itself leaves scrap input unchanged — see the yield-invariance test.)
         out = self._fulgora_qm2()
-        self.assertAlmostEqual(out["scrap_input"]["scrap"], 573640.52, delta=1.0)
+        self.assertAlmostEqual(out["scrap_input"]["scrap"], 330699.18, delta=1.0)
 
     def test_disposal_drop_cuts_recycler_count(self):
         # The productive-only stage is materially smaller than the old
@@ -1853,6 +1853,44 @@ class TestScrapUpcycleLoops(unittest.TestCase):
         targets = {s["target"] for s in no_foundry["stages"]
                    if s["role"] == "scrap-upcycle-loop"}
         self.assertEqual(targets, {"iron-plate", "copper-plate"})
+
+    def test_plastic_bar_upcycles_via_lds_only_with_foundry(self):
+        # plastic-bar has no CO-INGREDIENT-FREE wrap without the foundry: its
+        # only recycling-only route is advanced-circuit (4 copper-cable + 2
+        # electronic-circuit per craft), whose co-ingredient make-up the scrap-
+        # upcycle path can't cost — so it is declined and plastic-bar single-
+        # passes.  With the foundry it climbs via the LDS wrap (single-ingredient).
+        base = dict(target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+                    quality_module_tier=2, machine_quality="rare", location="fulgora")
+        no_foundry = qp.plan("quality-module-2", 60, _data(),
+                             tech_state={"recycling": 1}, **base)
+        nf = {s["target"] for s in no_foundry["stages"]
+              if s["role"] == "scrap-upcycle-loop"}
+        self.assertNotIn("plastic-bar", nf)
+
+        with_foundry = qp.plan("quality-module-2", 60, _data(),
+                               tech_state=qp.ALL_TECH_UNLOCKED, **base)
+        wf = {s["target"]: s for s in with_foundry["stages"]
+              if s["role"] == "scrap-upcycle-loop"}
+        self.assertIn("plastic-bar", wf)
+        self.assertEqual(wf["plastic-bar"]["container"], "low-density-structure")
+        self.assertEqual(wf["plastic-bar"]["machine"], "foundry")
+        # And it's a real win: plastic-bar was the binding leaf; upcycling it cuts
+        # scrap vs the no-foundry plan.
+        self.assertLess(with_foundry["scrap_input"]["scrap"],
+                        no_foundry["scrap_input"]["scrap"])
+
+    def test_multi_ingredient_wrap_declined_in_scrap_path(self):
+        # The scrap-upcycle path must never build a wrap with solid co-ingredients
+        # (it can't source their make-up).  No scrap-upcycle stage should use the
+        # advanced-circuit container.
+        out = qp.plan("quality-module-2", 60, _data(),
+                      target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+                      quality_module_tier=2, machine_quality="rare",
+                      location="fulgora", tech_state=qp.ALL_TECH_UNLOCKED)
+        containers = {s.get("container") for s in out["stages"]
+                      if s["role"] == "scrap-upcycle-loop"}
+        self.assertNotIn("advanced-circuit", containers)
 
     def test_faithfulness_check(self):
         # Disabling scrap upcycle loops should match the exact old C3 baseline scrap requirement.
@@ -2009,11 +2047,15 @@ class TestLocationFulgora(unittest.TestCase):
 
     def test_metals_sourced_from_scrap(self):
         # copper-plate is scrap-reachable, so it must come from the scrap source
-        # (here as overflow of the scrap basket) rather than asteroid copper-ore.
+        # rather than asteroid copper-ore.  (It's the binding leaf here — fully
+        # consumed, no overflow — so assert it's produced/covered by the scrap
+        # stage, which is robust to which leaf binds.)
         out = self._plan("quality-module-2")
         self.assertEqual(out["asteroid_input"], {})
         self.assertEqual(out["mined_input"], {})
-        self.assertIn("copper-plate", out["scrap_overflow"])
+        scrap_stage = [s for s in out["stages"]
+                       if s["role"] == "scrap-quality-source"][0]
+        self.assertIn("copper-plate", scrap_stage["covered"])
 
     def test_recipe_selection_forbids_ore_routes(self):
         # With forbid_ore_routes the walker must pick the plain copper-cable

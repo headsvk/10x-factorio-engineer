@@ -2203,7 +2203,12 @@ def _compose_miner_and_recycler_rolls(q_miner: float, q_rec: float, d: int) -> l
 
 
 def _is_upcyclable_scrap_leaf(item_key: str) -> bool:
-    return item_key in ("iron-plate", "copper-plate")
+    # iron/copper-plate climb via a single-ingredient wrap (iron-gear-wheel /
+    # copper-cable).  plastic-bar has no single-ingredient wrap whose machine is
+    # unlocked on Fulgora, but it climbs via the advanced-circuit wrap (the
+    # recycler already returns plastic-bar) — a multi-ingredient wrap on the EM
+    # plant, co-ingredients (electronic-circuit, copper-cable) cycled by the loop.
+    return item_key in ("iron-plate", "copper-plate", "plastic-bar")
 
 
 def compute_loop_flows(
@@ -2390,10 +2395,26 @@ def compute_scrap_source(
                     _cache=_cache,
                 )
 
-                if wrap_route is None and mr is None:
-                    # No direct craft leg AND no wrap route → genuinely no way to
-                    # upcycle this leaf under the current tech; leave it to the
-                    # single-pass scrap yield.
+                # The scrap-upcycle stage builder counts only the wrap-craft +
+                # recycler machines — it does NOT source the wrap's solid
+                # co-ingredients (nor the make-up for the ~75% lost each pass to
+                # recycler retention).  So only accept CO-INGREDIENT-FREE wraps
+                # here (iron-gear-wheel, copper-cable, LDS-from-plastic); a
+                # multi-ingredient wrap (e.g. plastic-bar's advanced-circuit
+                # route, 4 copper-cable + 2 electronic-circuit per craft) would
+                # be badly under-counted and is usually a net loss anyway.
+                if wrap_route is not None and wrap_route.get("co_solids"):
+                    wrap_route = None
+                    wrap_machine_info = None
+
+                if wrap_route is None:
+                    # These leaves (iron/copper/plastic plate) can't self-recycle
+                    # to climb — their own recycling voids — so a co-ingredient-
+                    # free WRAP is the ONLY valid scrap upcycle.  Without one
+                    # (e.g. plastic-bar with the foundry locked, whose only wrap
+                    # is the co-ingredient-heavy advanced-circuit route), leave
+                    # the leaf to the single-pass scrap yield rather than emit a
+                    # degenerate loop.
                     continue
 
                 v_total, configs = solve_self_recycle_target_loop_memoized(
