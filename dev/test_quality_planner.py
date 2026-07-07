@@ -1664,8 +1664,39 @@ class TestScrapDisposalDropped(unittest.TestCase):
         steel = st["byproducts"]["steel-plate"]
         self.assertIn("normal", steel)
         self.assertGreater(steel["normal"], 0.0)
-        # Demanded-leaf sub-target fraction surfaces too (normal iron-plate is huge).
-        self.assertGreater(st["byproducts"]["iron-plate"]["normal"], 0.0)
+        # A demanded leaf with no upcycle route (plastic-bar) surfaces its genuine
+        # sub-target fraction as byproduct.
+        self.assertGreater(st["byproducts"]["plastic-bar"]["normal"], 0.0)
+
+    def test_upcycled_leaf_has_no_subtarget_byproduct(self):
+        # iron/copper plate are fed through the scrap-upcycle loop, which climbs
+        # the ENTIRE sub-target flow to target — so none of it falls out as
+        # byproduct; only the target-tier surplus (== overflow) remains.
+        out = self._fulgora_qm2()
+        st = self._scrap_stage(out)
+        loops = {s["target"] for s in out["stages"]
+                 if s["role"] == "scrap-upcycle-loop"}
+        self.assertIn("iron-plate", loops)  # loop is active in this plan
+        iron = st["byproducts"].get("iron-plate", {})
+        self.assertNotIn("normal", iron)
+        self.assertNotIn("uncommon", iron)
+        self.assertAlmostEqual(
+            iron.get("rare", 0.0), st["overflow"].get("iron-plate", 0.0), delta=1.0,
+        )
+
+    def test_byproducts_capped_at_target_tier(self):
+        # Target is rare → no epic/legendary tiers surface; rare-or-better folds
+        # into one "rare" bucket that matches the overflow of the demanded leaves.
+        out = self._fulgora_qm2()
+        st = self._scrap_stage(out)
+        for it, tiers in st["byproducts"].items():
+            self.assertNotIn("epic", tiers)
+            self.assertNotIn("legendary", tiers)
+        # The rare byproduct of a demanded leaf == its target-or-better surplus.
+        self.assertAlmostEqual(
+            st["byproducts"]["iron-plate"].get("rare", 0.0),
+            st["overflow"].get("iron-plate", 0.0), delta=1.0,
+        )
 
     def test_scrap_input_unaffected_by_dropping_disposal(self):
         # Dropping disposal recyclers must NOT change scrap input (yields are set

@@ -2506,7 +2506,11 @@ def compute_scrap_source(
     # (we only keep target-or-better, up to demand) plus the pure co-products
     # (steel-plate, concrete, solid-fuel, ice, holmium-ore, …).  Each is broken
     # out per quality tier from the same miner+recycler roll convolution used for
-    # yields, so the rates line up with the rest of the plan.
+    # yields, so the rates line up with the rest of the plan.  Tiers ABOVE the
+    # target are folded into the target tier: at ``--target-quality rare`` the
+    # plan treats rare-or-better as one bucket (an epic/legendary tier-skip is
+    # just "rare or better"), matching the mined-scrap quality split and the
+    # target-or-better yield — so a rare plan never surfaces epic/legendary.
     byproducts: dict[str, dict[str, float]] = {}
     for it, depths in byproduct_depth.items():
         per = [0.0] * 5
@@ -2517,16 +2521,24 @@ def compute_scrap_source(
             rate = scrap_per_min * amt
             for t in range(5):
                 per[t] += rate * dist[t]
-        # For a demanded leaf, the target-or-better fraction we actually use is
-        # the product (see ``covered``); subtract it so only the genuine surplus
-        # (sub-target tiers + any target-tier overflow) shows up as byproduct.
-        used = covered.get(it, 0.0)
-        for t in range(target_tier, 5):
-            take = min(used, per[t])
-            per[t] -= take
-            used -= take
+        # Collapse everything above the target tier into it (rare-or-better is a
+        # single bucket for a rare target).
+        for t in range(target_tier + 1, 5):
+            per[target_tier] += per[t]
+            per[t] = 0.0
+        if it in demanded_leaves:
+            # Stay consistent with the solver's own accounting for a plate we
+            # actually use: its target-or-better surplus is ``overflow`` (which
+            # already reflects any upcycle loop), NOT a fresh no-loop re-roll.
+            per[target_tier] = overflow.get(it, 0.0)
+            if it in V_loops:
+                # The scrap-upcycle loop consumes the ENTIRE sub-target flow
+                # (every t < target feeds the loop and is climbed to target), so
+                # none of it falls out as byproduct.
+                for t in range(target_tier):
+                    per[t] = 0.0
         tiers = {
-            QUALITY_TIERS[t]: per[t] for t in range(5) if per[t] > 1e-6
+            QUALITY_TIERS[t]: per[t] for t in range(target_tier + 1) if per[t] > 1e-6
         }
         if tiers:
             byproducts[it] = tiers
