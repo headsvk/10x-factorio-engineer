@@ -1898,6 +1898,74 @@ class TestScrapUpcycleLoops(unittest.TestCase):
         self.assertAlmostEqual(no_loops["scrap_input"]["scrap"], 4277.3705, delta=1e-1)
 
 
+class TestFinalUpcycle(unittest.TestCase):
+    """--final-upcycle: roll quality only at the finished item via a craft+recycle
+    loop, ingredients sourced at normal."""
+
+    def _plan(self, **kw):
+        return qp.plan_final_upcycle(
+            "quality-module-2", 1, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+            quality_module_tier=2, machine_quality="rare",
+            tech_state={"recycling": 1}, location="fulgora", **kw,
+        )
+
+    def test_loop_dp_yield(self):
+        loop = qp.solve_final_upcycle_loop(
+            "quality-module-2", _data(), craft_machine_key="electromagnetic-plant",
+            craft_slots=5, craft_inherent_prod=0.5, module_quality="rare",
+            quality_module_tier=2, target_tier=qp.QUALITY_INDEX["rare"],
+        )
+        self.assertIsNotNone(loop)
+        # ~0.10 rare qm2 per fresh normal ingredient-set (craft roll + recycler roll).
+        self.assertAlmostEqual(loop["v0"], 0.1033, delta=2e-3)
+        self.assertAlmostEqual(loop["set_retention"], 0.25, delta=1e-9)
+
+    def test_loop_none_for_void_recycling_item(self):
+        # iron-plate recycling returns NOTHING (voids) — no ingredient-return loop.
+        loop = qp.solve_final_upcycle_loop(
+            "iron-plate", _data(), craft_machine_key="electromagnetic-plant",
+            craft_slots=5, craft_inherent_prod=0.0, module_quality="rare",
+            quality_module_tier=2, target_tier=qp.QUALITY_INDEX["rare"],
+        )
+        self.assertIsNone(loop)
+
+    def test_plan_shape_and_scrap(self):
+        out = self._plan()
+        self.assertEqual(out["strategy"], "final-upcycle")
+        roles = {s["role"] for s in out["stages"]}
+        self.assertIn("final-upcycle-loop", roles)
+        self.assertIn("mining", roles)
+        self.assertIn("scrap-quality-source", roles)
+        # No plate upcycle loops — quality is rolled only at the qm2 step.
+        self.assertNotIn("scrap-upcycle-loop", roles)
+        # Anchor the scrap (matches the hand model ~11.8k).
+        self.assertAlmostEqual(out["scrap_input"]["scrap"], 11826.9, delta=5.0)
+
+    def test_roll_early_beats_roll_late_on_scrap(self):
+        # The whole point of the comparison: rolling at the plates (default) needs
+        # LESS scrap than rolling only at the finished module.
+        late = self._plan()["scrap_input"]["scrap"]
+        early = qp.plan(
+            "quality-module-2", 1, _data(), target_tier=qp.QUALITY_INDEX["rare"],
+            module_quality="rare", quality_module_tier=2, machine_quality="rare",
+            tech_state={"recycling": 1}, location="fulgora",
+        )["scrap_input"]["scrap"]
+        self.assertLess(early, late)
+
+    def test_linear_scaling(self):
+        a = self._plan()
+        b = qp.plan_final_upcycle(
+            "quality-module-2", 2, _data(), target_tier=qp.QUALITY_INDEX["rare"],
+            module_quality="rare", quality_module_tier=2, machine_quality="rare",
+            tech_state={"recycling": 1}, location="fulgora",
+        )
+        self.assertAlmostEqual(b["scrap_input"]["scrap"],
+                               2 * a["scrap_input"]["scrap"], delta=1.0)
+        self.assertAlmostEqual(b["total_machine_count"],
+                               2 * a["total_machine_count"], delta=0.1)
+
+
 class TestNoAsteroids(unittest.TestCase):
     """V3 small: --no-asteroids flag forces all quality through planet
     self-recycle paths. iron-ore/copper-ore/ice/calcite are sourced from
