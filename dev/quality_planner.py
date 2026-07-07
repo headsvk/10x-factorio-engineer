@@ -2346,17 +2346,32 @@ def compute_scrap_source(
                     locked_machines=locked_machines, assembler_level=assembler_level,
                     forbid_ore_routes=forbid_ore_routes,
                 )
-                if craft_recipe is None:
-                    continue
-                mr = _machine_for_recipe(craft_recipe, assembler_level, locked_machines)
-                if mr is None:
-                    continue
-                machine_key, machine_speed = mr
-                machine_slots = slots_map.get(machine_key, 0)
+                mr = (
+                    _machine_for_recipe(craft_recipe, assembler_level, locked_machines)
+                    if craft_recipe is not None else None
+                )
+                if mr is not None:
+                    machine_key, machine_speed = mr
+                    machine_slots = slots_map.get(machine_key, 0)
+                    inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+                    research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels or {})
+                else:
+                    # The leaf's fluid-preferred DIRECT craft recipe is machine-
+                    # locked — e.g. copper-plate resolves to casting-copper on the
+                    # foundry, which is absent on Fulgora.  That does NOT block
+                    # upcycling: the plate climbs via a WRAP (copper-cable /
+                    # iron-gear-wheel), so use a plain assembler as the nominal
+                    # craft leg for the no-wrap baseline and let _choose_wrap_route
+                    # pick the real wrap machine (EM plant on Fulgora, foundry on
+                    # Vulcanus).  Previously the loop bailed here, spuriously
+                    # gating copper/iron-plate upcycling behind the foundry.
+                    machine_key = f"assembling-machine-{assembler_level}"
+                    machine_speed = _machine_speed(machine_key)
+                    machine_slots = slots_map.get(machine_key, 0)
+                    inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+                    research_prod = 0.0
                 machine_allow_prod = True
-                inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
-                research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels or {})
-                
+
                 wrap_route, wrap_machine_info = _choose_wrap_route(
                     leaf, data,
                     assembler_level=assembler_level,
@@ -2374,7 +2389,13 @@ def compute_scrap_source(
                     research_levels=research_levels or {},
                     _cache=_cache,
                 )
-                
+
+                if wrap_route is None and mr is None:
+                    # No direct craft leg AND no wrap route → genuinely no way to
+                    # upcycle this leaf under the current tech; leave it to the
+                    # single-pass scrap yield.
+                    continue
+
                 v_total, configs = solve_self_recycle_target_loop_memoized(
                     leaf, data,
                     machine_key=machine_key,

@@ -1822,6 +1822,38 @@ class TestScrapUpcycleLoops(unittest.TestCase):
         self.assertIn("[upcycle]      Iron Plate", human)
         self.assertIn("[upcycle]      Copper Plate", human)
 
+    def test_copper_plate_upcycles_without_foundry_on_em_plant(self):
+        # Regression: copper-plate upcycling must NOT be gated behind the foundry.
+        # On Fulgora the EM plant is auto-unlocked but the foundry is not; the
+        # plate climbs via the copper-cable WRAP on the EM plant.  Previously the
+        # loop bailed because the leaf's fluid-preferred DIRECT recipe is
+        # casting-copper (a foundry recipe), spuriously requiring --tech
+        # tungsten-carbide.
+        out = qp.plan(
+            "quality-module-2", 60, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+            quality_module_tier=2, machine_quality="rare",
+            location="fulgora", tech_state={"recycling": 1},  # NO foundry tech
+        )
+        loops = {s["target"]: s for s in out["stages"]
+                 if s["role"] == "scrap-upcycle-loop"}
+        self.assertIn("copper-plate", loops)
+        self.assertEqual(loops["copper-plate"]["machine"], "electromagnetic-plant")
+        # iron-plate wraps in iron-gear-wheel (mechanical, not electronics) — its
+        # wrap-craft rides the assembler, not the EM plant.
+        self.assertIn("iron-plate", loops)
+
+    def test_foundry_tech_not_required_for_scrap_upcycle(self):
+        # Adding the foundry (tungsten-carbide) must NOT be what unlocks the
+        # copper/iron upcycle — the recycling-only plan already has both loops.
+        base = dict(target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+                    quality_module_tier=2, machine_quality="rare", location="fulgora")
+        no_foundry = qp.plan("quality-module-2", 60, _data(),
+                             tech_state={"recycling": 1}, **base)
+        targets = {s["target"] for s in no_foundry["stages"]
+                   if s["role"] == "scrap-upcycle-loop"}
+        self.assertEqual(targets, {"iron-plate", "copper-plate"})
+
     def test_faithfulness_check(self):
         # Disabling scrap upcycle loops should match the exact old C3 baseline scrap requirement.
         no_loops = self._fulgora_acc(scrap_upcycle_loops=False, miner_quality_modules=False)
