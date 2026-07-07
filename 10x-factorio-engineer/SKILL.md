@@ -1073,7 +1073,7 @@ alters sourcing today; other `--location` values just unlock that planet.
   and activates the ones whose recycle outputs overlap with the chain's
   legendary leaves.  Common picks: `low-density-structure`,
   `advanced-circuit`, `electronic-circuit`, `engine-unit`, `battery`.
-- **Roadmap Q1–Q9 flags:** `--preset {nauvis-starter,end-game-nauvis,end-game-fulgora}`
+- **Roadmap Q1–Q9 flags:** `--preset {nauvis-starter,end-game-nauvis,late-game-vulcanus}`
   (Q9 shortcuts; explicit flags still win); `--beacons N` (Q7, +2.5 speed each,
   shrinks the fleet); `--objective {machines,power,raw-input,cost}` (Q8, the
   metric the `all` auto-selectors minimise, also reported); `--demand

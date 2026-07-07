@@ -4382,14 +4382,14 @@ class TestObjectiveFunction(unittest.TestCase):
 class TestPresets(unittest.TestCase):
     """Milestone Q9 unit tests: CLI presets."""
 
-    def test_apply_preset_end_game_fulgora(self):
+    def test_apply_preset_late_game_vulcanus(self):
         import argparse
         # planets defaults to "" (the real argparse default), not None — the
         # preset must still override it (regression: "" was not treated as unset).
-        ns = argparse.Namespace(preset="end-game-fulgora", location=None, planets="", tech=[], enable_shuffles=None, beacons=0)
+        ns = argparse.Namespace(preset="late-game-vulcanus", location=None, planets="", tech=[], enable_shuffles=None, beacons=0)
         out = qp.apply_preset(ns)
-        self.assertEqual(out.location, "fulgora")
-        self.assertEqual(out.planets, "fulgora")
+        self.assertEqual(out.location, "vulcanus")
+        self.assertEqual(out.planets, "nauvis,vulcanus,fulgora,gleba,aquilo")
         self.assertEqual(out.tech, ["all"])
         self.assertEqual(out.enable_shuffles, "all")
         self.assertEqual(out.beacons, 8)

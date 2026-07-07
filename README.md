@@ -281,7 +281,7 @@ python dev/quality_planner.py --item quality-module-2 --rate 1 \
 #   --objective METRIC      Q8: machines|power|raw-input|cost — the metric the
 #                               auto-selectors (--enable-shuffles/-drivers all)
 #                               minimise; also reported in the output.
-#   --preset NAME           Q9: nauvis-starter | end-game-nauvis | end-game-fulgora
+#   --preset NAME           Q9: nauvis-starter | end-game-nauvis | late-game-vulcanus
 #                               shortcuts (explicit flags always win).
 python dev/quality_planner.py --preset end-game-nauvis --item processing-unit --rate 60
 python dev/quality_planner.py --item iron-plate --rate 60 --tech recycling=1 \

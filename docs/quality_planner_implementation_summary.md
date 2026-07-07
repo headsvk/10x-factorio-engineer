@@ -64,7 +64,7 @@ This document records the architectural decisions, mechanics adaptations, and de
 
 ### 9. Ergonomics & CLI Presets (Q9)
 - **Implementation:** Added `--preset PRESET` shortcuts:
-  - `end-game-fulgora`: sets `--location fulgora --planets fulgora --tech all --enable-shuffles all --beacons 8`.
+  - `late-game-vulcanus`: sets `--location vulcanus --planets nauvis,vulcanus,fulgora,gleba,aquilo --tech all --enable-shuffles all --beacons 8`.
   - `end-game-nauvis`: sets `--location nauvis --planets nauvis --tech all --enable-shuffles all --beacons 8`.
   - `nauvis-starter`: sets `--location nauvis --planets nauvis --no-asteroids`.
 

@@ -7246,7 +7246,7 @@ def parse_args() -> argparse.Namespace:
         help="Objective function to minimize: machines, power, raw-input, or cost (roadmap Q8).",
     )
     p.add_argument(
-        "--preset", default=None, choices=["end-game-fulgora", "end-game-nauvis", "nauvis-starter"],
+        "--preset", default=None, choices=["end-game-nauvis", "late-game-vulcanus", "nauvis-starter"],
         help="CLI configuration preset (roadmap Q9).",
     )
     p.add_argument("--format", default="human", choices=["human", "json"])
@@ -7254,9 +7254,9 @@ def parse_args() -> argparse.Namespace:
 
 
 PRESETS = {
-    "end-game-fulgora": {
-        "location": "fulgora",
-        "planets": "fulgora",
+    "late-game-vulcanus": {
+        "location": "vulcanus",
+        "planets": "nauvis,vulcanus,fulgora,gleba,aquilo",
         "tech": ["all"],
         "enable_shuffles": "all",
         "beacons": 8,

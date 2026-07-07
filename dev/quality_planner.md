@@ -19,7 +19,7 @@ This document is the single source of truth — supersedes the original `quality
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 Currently shipped:
-- **Ergonomics & CLI Presets (2026-07-04, Q9)** — Added `--preset end-game-fulgora|end-game-nauvis|nauvis-starter` shortcuts for rapid multi-flag configuration.
+- **Ergonomics & CLI Presets (2026-07-04, Q9)** — Added `--preset end-game-nauvis|late-game-vulcanus|nauvis-starter` shortcuts for rapid multi-flag configuration.
 - **Custom Objective Function (2026-07-04, Q8)** — Added `--objective machines|power|raw-input|cost` flag and `_evaluate_objective` evaluation function to customize optimization metrics.
 - **Beacon & Speed-Module Integration (2026-07-04, Q7)** — Added `--beacons COUNT` flag. Applies beacon speed multipliers to crafting machines, scaling machine counts and power consumption.
 - **Mixed-Tier Demand & Surplus Extraction (2026-07-04, Q6)** — Added `--demand ITEM@TIER:RATE,...` spec parser and `--keep-tiers TIERS` flag for multi-tier demand specification and surplus extraction.
