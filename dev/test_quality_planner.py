@@ -222,6 +222,61 @@ class TestAssemblyPropagation(unittest.TestCase):
         self.assertIn("casting-iron-gear-wheel", recipes)
 
 
+class TestWalkerDemandConservation(unittest.TestCase):
+    """Pass-1 demand must be mass-balanced: every stage produces >= what the
+    chain consumes.  Guards the topological-order fix (a LIFO BFS under-counted
+    the ingredients of any diamond dependency — an intermediate shared by
+    parents discovered at different depths — silently undersizing raws)."""
+
+    def _conservation_deficits(self, out, eps=1e-3):
+        from collections import defaultdict
+        made = defaultdict(float)
+        consumed = defaultdict(float)
+        for s in out["stages"]:
+            p = s.get("product")
+            if p:
+                made[p] += s.get("rate_per_min", 0.0)
+            for k, v in (s.get("solid_inputs") or {}).items():
+                consumed[k] += v
+            for k, v in (s.get("fluid_inputs") or {}).items():
+                consumed[k] += v
+        # An item is under-produced if a stage makes it AND the chain consumes
+        # more than is made (raws/scrap-sourced items have made==0 and are sized
+        # separately, so only flag items with a producing stage).
+        return {
+            it: consumed[it] - made[it]
+            for it in made
+            if made[it] > 0 and consumed[it] - made[it] > eps
+        }
+
+    def test_processing_unit_molten_copper_balanced(self):
+        # The regression case: copper-cable (cast from molten-copper) is consumed
+        # by BOTH electronic-circuit and advanced-circuit, so its molten-copper
+        # demand was under-counted, undersizing the ore/asteroid supply ~9x.
+        out = qp.plan("processing-unit", 60, _data(), target_tier=4,
+                      planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                      module_quality="legendary")
+        self.assertEqual(self._conservation_deficits(out), {})
+
+    def test_quality_module_2_chain_balanced(self):
+        out = qp.plan("quality-module-2", 60, _data(), target_tier=2,
+                      planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                      module_quality="rare", quality_module_tier=2)
+        self.assertEqual(self._conservation_deficits(out), {})
+
+    def test_diamond_dependency_raw_scales_with_demand(self):
+        # Under the old bug a diamond's ingredient demand was under-propagated;
+        # doubling rate must exactly double the deepest raw (linear scaling).
+        a = qp.plan("processing-unit", 60, _data(), target_tier=4,
+                    planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                    module_quality="legendary")
+        b = qp.plan("processing-unit", 120, _data(), target_tier=4,
+                    planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                    module_quality="legendary")
+        for chunk, amt in a["asteroid_input"].items():
+            self.assertAlmostEqual(b["asteroid_input"][chunk], 2 * amt, delta=1.0)
+
+
 # ---------------------------------------------------------------------------
 # Research productivity
 # ---------------------------------------------------------------------------
@@ -1600,10 +1655,130 @@ class TestQualityScrapSeeding(unittest.TestCase):
         self.assertLess(scrap_big, scrap_ele)
 
     def test_faithfulness_check(self):
-        # C1/baseline had no miner quality modules modeled (equivalent to miner_quality_modules=False).
-        # We assert that setting miner_quality_modules=False produces the exact old baseline rate.
+        # miner_quality_modules=False reproduces the no-drill-seed baseline rate.
+        # (Refreshed after the Pass-1 topological demand fix, which corrected the
+        # previously under-counted plate demand — see TestWalkerDemandConservation.)
         no_mods = self._fulgora_qm2(miner_quality_modules=False)
-        self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 3775.72, delta=1e-1)
+        self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 4160.92, delta=1e-1)
+
+
+class TestScrapDisposalDropped(unittest.TestCase):
+    """Scrap cascade recycles only productive steps; unneeded output is byproduct."""
+
+    def _fulgora_qm2(self, **kw):
+        return qp.plan(
+            "quality-module-2", 60, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare", quality_module_tier=2,
+            location="fulgora", tech_state=qp.ALL_TECH_UNLOCKED, **kw,
+        )
+
+    def _scrap_stage(self, out):
+        return [s for s in out["stages"] if s["role"] == "scrap-quality-source"][0]
+
+    def test_productive_recycle_set_excludes_void_and_kept_plates(self):
+        data = _data()
+        recycle_set, byproducts = qp._scrap_productive_recycle(
+            data, {"iron-plate": 1.0, "copper-plate": 1.0, "plastic-bar": 1.0}
+        )
+        # Productive intermediates that route to a demanded plate stay in.
+        for it in ("scrap", "iron-gear-wheel", "copper-cable", "advanced-circuit",
+                   "low-density-structure", "battery", "electronic-circuit",
+                   "processing-unit"):
+            self.assertIn(it, recycle_set)
+        # Demanded leaves are kept (product), pure junk / dead-ends are dropped;
+        # each still-produced one surfaces as a byproduct.
+        for it in ("iron-plate", "copper-plate", "plastic-bar", "steel-plate",
+                   "concrete", "solid-fuel", "ice", "holmium-ore"):
+            self.assertNotIn(it, recycle_set)
+            self.assertIn(it, byproducts)
+        # stone-brick was only ever produced BY recycling concrete; now that we
+        # don't recycle concrete (concrete is itself a byproduct), stone-brick is
+        # never produced — neither recycled nor a byproduct.
+        self.assertNotIn("stone-brick", recycle_set)
+        self.assertNotIn("stone-brick", byproducts)
+
+    def test_no_disposal_step_in_recycle_steps(self):
+        st = self._scrap_stage(self._fulgora_qm2())
+        recycled = {s["item"] for s in st["recycle_steps"]}
+        # None of the void / kept-plate items should be recycled any more.
+        self.assertFalse(recycled & {
+            "iron-plate", "copper-plate", "plastic-bar", "steel-plate",
+            "concrete", "solid-fuel", "ice", "holmium-ore", "stone-brick",
+        })
+
+    def test_recycle_steps_sum_to_machine_count(self):
+        st = self._scrap_stage(self._fulgora_qm2())
+        self.assertAlmostEqual(
+            sum(s["machine_count"] for s in st["recycle_steps"]),
+            st["machine_count"], delta=1e-6,
+        )
+
+    def test_byproducts_carry_per_tier_rates(self):
+        st = self._scrap_stage(self._fulgora_qm2())
+        self.assertIn("byproducts", st)
+        # Pure co-products (steel-plate, concrete) surface their full per-tier
+        # spread — they're never upcycled, so the sub-target tiers are real
+        # byproduct.  (The demanded plates are all upcycled under ALL_TECH, so
+        # their sub-target is consumed, not surfaced — see the upcycled-leaf test.)
+        for co in ("steel-plate", "concrete"):
+            self.assertIn("normal", st["byproducts"][co])
+            self.assertGreater(st["byproducts"][co]["normal"], 0.0)
+
+    def test_upcycled_leaf_has_no_subtarget_byproduct(self):
+        # iron/copper plate are fed through the scrap-upcycle loop, which climbs
+        # the ENTIRE sub-target flow to target — so none of it falls out as
+        # byproduct; only the target-tier surplus (== overflow) remains.
+        out = self._fulgora_qm2()
+        st = self._scrap_stage(out)
+        loops = {s["target"] for s in out["stages"]
+                 if s["role"] == "scrap-upcycle-loop"}
+        self.assertIn("iron-plate", loops)  # loop is active in this plan
+        iron = st["byproducts"].get("iron-plate", {})
+        self.assertNotIn("normal", iron)
+        self.assertNotIn("uncommon", iron)
+        self.assertAlmostEqual(
+            iron.get("rare", 0.0), st["overflow"].get("iron-plate", 0.0), delta=1.0,
+        )
+
+    def test_byproducts_capped_at_target_tier(self):
+        # Target is rare → no epic/legendary tiers surface; rare-or-better folds
+        # into one "rare" bucket that matches the overflow of the demanded leaves.
+        out = self._fulgora_qm2()
+        st = self._scrap_stage(out)
+        for it, tiers in st["byproducts"].items():
+            self.assertNotIn("epic", tiers)
+            self.assertNotIn("legendary", tiers)
+        # The rare byproduct of a demanded leaf == its target-or-better surplus.
+        self.assertAlmostEqual(
+            st["byproducts"]["iron-plate"].get("rare", 0.0),
+            st["overflow"].get("iron-plate", 0.0), delta=1.0,
+        )
+
+    def test_scrap_input_unaffected_by_dropping_disposal(self):
+        # Dropping disposal recyclers must NOT change scrap input (yields are set
+        # by the productive steps only).  Anchor the binding-leaf scrap rate.
+        # (Value reflects the Pass-1 topological demand fix; the disposal-drop
+        # itself leaves scrap input unchanged — see the yield-invariance test.)
+        out = self._fulgora_qm2()
+        self.assertAlmostEqual(out["scrap_input"]["scrap"], 330699.18, delta=1.0)
+
+    def test_disposal_drop_cuts_recycler_count(self):
+        # The productive-only stage is materially smaller than the old
+        # recycle-everything model.  Reconstruct the full-recycle count from the
+        # cascade and assert the productive count is well below it (>15% cut).
+        out = self._fulgora_qm2()
+        st = self._scrap_stage(out)
+        data = _data()
+        cascade = qp.build_scrap_cascade(data)
+        scrap = out["scrap_input"]["scrap"]
+        qm_speed = 1.0  # machine_quality defaults to normal here
+        denom = (qp.RECYCLER_SPEED * qm_speed
+                 * qp._module_speed_mult(quality_slots=qp.RECYCLER_SLOTS) * 60.0)
+        full = scrap * sum(
+            cascade["recycle_amounts"][it] * cascade["recycle_time"].get(it, 0.2)
+            for it in cascade["recycle_amounts"]
+        ) / denom
+        self.assertLess(st["machine_count"], 0.85 * full)
 
 
 class TestScrapUpcycleLoops(unittest.TestCase):
@@ -1647,10 +1822,148 @@ class TestScrapUpcycleLoops(unittest.TestCase):
         self.assertIn("[upcycle]      Iron Plate", human)
         self.assertIn("[upcycle]      Copper Plate", human)
 
+    def test_copper_plate_upcycles_without_foundry_on_em_plant(self):
+        # Regression: copper-plate upcycling must NOT be gated behind the foundry.
+        # On Fulgora the EM plant is auto-unlocked but the foundry is not; the
+        # plate climbs via the copper-cable WRAP on the EM plant.  Previously the
+        # loop bailed because the leaf's fluid-preferred DIRECT recipe is
+        # casting-copper (a foundry recipe), spuriously requiring --tech
+        # tungsten-carbide.
+        out = qp.plan(
+            "quality-module-2", 60, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+            quality_module_tier=2, machine_quality="rare",
+            location="fulgora", tech_state={"recycling": 1},  # NO foundry tech
+        )
+        loops = {s["target"]: s for s in out["stages"]
+                 if s["role"] == "scrap-upcycle-loop"}
+        self.assertIn("copper-plate", loops)
+        self.assertEqual(loops["copper-plate"]["machine"], "electromagnetic-plant")
+        # iron-plate wraps in iron-gear-wheel (mechanical, not electronics) — its
+        # wrap-craft rides the assembler, not the EM plant.
+        self.assertIn("iron-plate", loops)
+
+    def test_foundry_tech_not_required_for_scrap_upcycle(self):
+        # Adding the foundry (tungsten-carbide) must NOT be what unlocks the
+        # copper/iron upcycle — the recycling-only plan already has both loops.
+        base = dict(target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+                    quality_module_tier=2, machine_quality="rare", location="fulgora")
+        no_foundry = qp.plan("quality-module-2", 60, _data(),
+                             tech_state={"recycling": 1}, **base)
+        targets = {s["target"] for s in no_foundry["stages"]
+                   if s["role"] == "scrap-upcycle-loop"}
+        self.assertEqual(targets, {"iron-plate", "copper-plate"})
+
+    def test_plastic_bar_upcycles_via_lds_only_with_foundry(self):
+        # plastic-bar has no CO-INGREDIENT-FREE wrap without the foundry: its
+        # only recycling-only route is advanced-circuit (4 copper-cable + 2
+        # electronic-circuit per craft), whose co-ingredient make-up the scrap-
+        # upcycle path can't cost — so it is declined and plastic-bar single-
+        # passes.  With the foundry it climbs via the LDS wrap (single-ingredient).
+        base = dict(target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+                    quality_module_tier=2, machine_quality="rare", location="fulgora")
+        no_foundry = qp.plan("quality-module-2", 60, _data(),
+                             tech_state={"recycling": 1}, **base)
+        nf = {s["target"] for s in no_foundry["stages"]
+              if s["role"] == "scrap-upcycle-loop"}
+        self.assertNotIn("plastic-bar", nf)
+
+        with_foundry = qp.plan("quality-module-2", 60, _data(),
+                               tech_state=qp.ALL_TECH_UNLOCKED, **base)
+        wf = {s["target"]: s for s in with_foundry["stages"]
+              if s["role"] == "scrap-upcycle-loop"}
+        self.assertIn("plastic-bar", wf)
+        self.assertEqual(wf["plastic-bar"]["container"], "low-density-structure")
+        self.assertEqual(wf["plastic-bar"]["machine"], "foundry")
+        # And it's a real win: plastic-bar was the binding leaf; upcycling it cuts
+        # scrap vs the no-foundry plan.
+        self.assertLess(with_foundry["scrap_input"]["scrap"],
+                        no_foundry["scrap_input"]["scrap"])
+
+    def test_multi_ingredient_wrap_declined_in_scrap_path(self):
+        # The scrap-upcycle path must never build a wrap with solid co-ingredients
+        # (it can't source their make-up).  No scrap-upcycle stage should use the
+        # advanced-circuit container.
+        out = qp.plan("quality-module-2", 60, _data(),
+                      target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+                      quality_module_tier=2, machine_quality="rare",
+                      location="fulgora", tech_state=qp.ALL_TECH_UNLOCKED)
+        containers = {s.get("container") for s in out["stages"]
+                      if s["role"] == "scrap-upcycle-loop"}
+        self.assertNotIn("advanced-circuit", containers)
+
     def test_faithfulness_check(self):
         # Disabling scrap upcycle loops should match the exact old C3 baseline scrap requirement.
         no_loops = self._fulgora_acc(scrap_upcycle_loops=False, miner_quality_modules=False)
         self.assertAlmostEqual(no_loops["scrap_input"]["scrap"], 4277.3705, delta=1e-1)
+
+
+class TestFinalUpcycle(unittest.TestCase):
+    """--final-upcycle: roll quality only at the finished item via a craft+recycle
+    loop, ingredients sourced at normal."""
+
+    def _plan(self, **kw):
+        return qp.plan_final_upcycle(
+            "quality-module-2", 1, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+            quality_module_tier=2, machine_quality="rare",
+            tech_state={"recycling": 1}, location="fulgora", **kw,
+        )
+
+    def test_loop_dp_yield(self):
+        loop = qp.solve_final_upcycle_loop(
+            "quality-module-2", _data(), craft_machine_key="electromagnetic-plant",
+            craft_slots=5, craft_inherent_prod=0.5, module_quality="rare",
+            quality_module_tier=2, target_tier=qp.QUALITY_INDEX["rare"],
+        )
+        self.assertIsNotNone(loop)
+        # ~0.10 rare qm2 per fresh normal ingredient-set (craft roll + recycler roll).
+        self.assertAlmostEqual(loop["v0"], 0.1033, delta=2e-3)
+        self.assertAlmostEqual(loop["set_retention"], 0.25, delta=1e-9)
+
+    def test_loop_none_for_void_recycling_item(self):
+        # iron-plate recycling returns NOTHING (voids) — no ingredient-return loop.
+        loop = qp.solve_final_upcycle_loop(
+            "iron-plate", _data(), craft_machine_key="electromagnetic-plant",
+            craft_slots=5, craft_inherent_prod=0.0, module_quality="rare",
+            quality_module_tier=2, target_tier=qp.QUALITY_INDEX["rare"],
+        )
+        self.assertIsNone(loop)
+
+    def test_plan_shape_and_scrap(self):
+        out = self._plan()
+        self.assertEqual(out["strategy"], "final-upcycle")
+        roles = {s["role"] for s in out["stages"]}
+        self.assertIn("final-upcycle-loop", roles)
+        self.assertIn("mining", roles)
+        self.assertIn("scrap-quality-source", roles)
+        # No plate upcycle loops — quality is rolled only at the qm2 step.
+        self.assertNotIn("scrap-upcycle-loop", roles)
+        # Anchor the scrap (matches the hand model ~11.8k).
+        self.assertAlmostEqual(out["scrap_input"]["scrap"], 11826.9, delta=5.0)
+
+    def test_roll_early_beats_roll_late_on_scrap(self):
+        # The whole point of the comparison: rolling at the plates (default) needs
+        # LESS scrap than rolling only at the finished module.
+        late = self._plan()["scrap_input"]["scrap"]
+        early = qp.plan(
+            "quality-module-2", 1, _data(), target_tier=qp.QUALITY_INDEX["rare"],
+            module_quality="rare", quality_module_tier=2, machine_quality="rare",
+            tech_state={"recycling": 1}, location="fulgora",
+        )["scrap_input"]["scrap"]
+        self.assertLess(early, late)
+
+    def test_linear_scaling(self):
+        a = self._plan()
+        b = qp.plan_final_upcycle(
+            "quality-module-2", 2, _data(), target_tier=qp.QUALITY_INDEX["rare"],
+            module_quality="rare", quality_module_tier=2, machine_quality="rare",
+            tech_state={"recycling": 1}, location="fulgora",
+        )
+        self.assertAlmostEqual(b["scrap_input"]["scrap"],
+                               2 * a["scrap_input"]["scrap"], delta=1.0)
+        self.assertAlmostEqual(b["total_machine_count"],
+                               2 * a["total_machine_count"], delta=0.1)
 
 
 class TestNoAsteroids(unittest.TestCase):
@@ -1802,11 +2115,15 @@ class TestLocationFulgora(unittest.TestCase):
 
     def test_metals_sourced_from_scrap(self):
         # copper-plate is scrap-reachable, so it must come from the scrap source
-        # (here as overflow of the scrap basket) rather than asteroid copper-ore.
+        # rather than asteroid copper-ore.  (It's the binding leaf here — fully
+        # consumed, no overflow — so assert it's produced/covered by the scrap
+        # stage, which is robust to which leaf binds.)
         out = self._plan("quality-module-2")
         self.assertEqual(out["asteroid_input"], {})
         self.assertEqual(out["mined_input"], {})
-        self.assertIn("copper-plate", out["scrap_overflow"])
+        scrap_stage = [s for s in out["stages"]
+                       if s["role"] == "scrap-quality-source"][0]
+        self.assertIn("copper-plate", scrap_stage["covered"])
 
     def test_recipe_selection_forbids_ore_routes(self):
         # With forbid_ore_routes the walker must pick the plain copper-cable

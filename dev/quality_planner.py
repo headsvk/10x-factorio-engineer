@@ -79,7 +79,7 @@ import math
 import os
 import subprocess
 import sys
-from collections import defaultdict, namedtuple
+from collections import defaultdict, deque, namedtuple
 from dataclasses import dataclass, field
 from fractions import Fraction
 
@@ -1956,7 +1956,14 @@ def solve_mined_raw_self_recycle_loop(
 #   * One scrap produces the whole basket simultaneously, so the binding (most
 #     scrap-hungry) demanded leaf sets the scrap rate; the other outputs are
 #     credited against chain demand or counted as overflow.
-#   * Sub-target items that cannot climb further are part of the overflow.
+#   * We recycle ONLY the steps that lead to a demanded leaf (see
+#     ``_scrap_productive_recycle``).  Terminal plates we want and pure-junk
+#     co-products are NOT recycled to void — they fall out as byproducts (per
+#     quality tier).  This drops the "disposal" recyclers that previously added
+#     machines + quality modules + the −20% quality-slot speed penalty for zero
+#     yield.  Yields (hence scrap input + the miner fleet) are unchanged; only
+#     the recycler count shrinks.
+#   * Sub-target items that cannot climb further leave the array as byproducts.
 
 SCRAP_RECYCLING_RECIPE = "scrap-recycling"
 _SCRAP_CASCADE_CACHE: dict[int, dict] = {}
@@ -2038,6 +2045,122 @@ def build_scrap_cascade(data: dict, max_depth: int = 6) -> dict:
     return result
 
 
+def _scrap_productive_recycle(
+    data: dict, demanded_leaves, max_depth: int = 6
+) -> tuple[set[str], dict[str, dict[int, float]]]:
+    """Split the scrap cascade into *productive* recycling vs. *byproducts*.
+
+    The old cascade recycled every item to the bottom, including terminal plates
+    we actually want and pure-junk co-products — so the recycler count (and its
+    quality-module loadout + speed penalty) was inflated by "disposal" recyclers
+    that void their input for zero quality yield.  This function instead keeps
+    only the recycling steps that lead somewhere useful:
+
+    Returns ``(recycle_set, byproduct_depth_amounts)``:
+      * ``recycle_set`` — items we actively recycle because their recycling
+        leads (transitively) to a demanded leaf.  ``scrap`` is always included;
+        demanded leaves are KEPT (never recycled — they're the product).
+      * ``byproduct_depth_amounts`` — ``{item: {depth: amt_per_scrap}}`` for
+        every NON-recycled item that falls out when only ``recycle_set`` items
+        are expanded (so phantom production from would-be disposal steps — e.g.
+        stone-brick from concrete you no longer recycle — is excluded).  Fluids
+        are omitted (quality-transparent, not a quality byproduct).
+
+    Yields of the demanded leaves are UNAFFECTED: every demanded leaf is still
+    produced by the same productive steps, so ``scrap_target_yield`` (and thus
+    scrap input + the miner fleet) is identical with or without this filter.
+    Only the recycler count changes.
+    """
+    fluids = build_fluid_set(data)
+    recipes_by_key = {r["key"]: r for r in data.get("recipes", [])}
+    mined_raws = {
+        r["name"]
+        for res in data.get("resources", [])
+        for r in res.get("results", [])
+        if r.get("name") and r["name"] != "scrap"
+    }
+
+    def rec_outputs(item: str) -> dict[str, float] | None:
+        r = recipes_by_key.get(f"{item}-recycling")
+        if r is None:
+            return None
+        out: dict[str, float] = {}
+        for res in r.get("results", []):
+            if res.get("name") == item:
+                continue
+            nm = res.get("name")
+            if nm in mined_raws:
+                continue  # never re-derive a base material back into ore
+            amt = res.get("amount")
+            if amt is None:
+                amt = (res.get("amount_min", 0) + res.get("amount_max", 0)) / 2.0
+            out[nm] = out.get(nm, 0.0) + float(amt) * float(res.get("probability", 1.0))
+        return out
+
+    demanded = set(demanded_leaves)
+
+    # Every item reachable from scrap via recycling (bounds the fixpoint below).
+    reachable: set[str] = set()
+    frontier = {"scrap"}
+    for _ in range(max_depth + 1):
+        nxt: set[str] = set()
+        for it in frontier:
+            outs = rec_outputs(it)
+            if not outs:
+                continue
+            for k in outs:
+                if k not in reachable and k not in fluids:
+                    reachable.add(k)
+                    nxt.add(k)
+        frontier = nxt
+        if not frontier:
+            break
+
+    # Fixpoint: X (not a demanded leaf) is productive-to-recycle iff its recycle
+    # basket contains a demanded leaf or another productive item.  ``scrap`` is
+    # always productive (it is the cascade root).
+    recycle_set = {"scrap"}
+    changed = True
+    while changed:
+        changed = False
+        for X in reachable:
+            if X in recycle_set or X in demanded:
+                continue
+            outs = rec_outputs(X)
+            if not outs:
+                continue
+            if any((k in demanded) or (k in recycle_set) for k in outs):
+                recycle_set.add(X)
+                changed = True
+
+    # Forward BFS expanding only ``recycle_set`` items; anything else that comes
+    # out is a byproduct (recorded at the depth it first appears, accumulated
+    # across depths — e.g. iron-plate emitted at d1 by gears and at d2 by
+    # circuits).
+    byproduct_depth: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    cur = {"scrap": 1.0}
+    for depth in range(max_depth):
+        nxt_amt: dict[str, float] = defaultdict(float)
+        for item, amt in cur.items():
+            if item not in recycle_set:
+                continue
+            outs = rec_outputs(item)
+            if not outs:
+                continue
+            for k, v in outs.items():
+                produced = amt * v
+                if k in recycle_set:
+                    if k not in fluids:
+                        nxt_amt[k] += produced
+                elif k not in fluids:
+                    byproduct_depth[k][depth + 1] += produced
+        cur = dict(nxt_amt)
+        if not cur:
+            break
+
+    return recycle_set, {k: dict(v) for k, v in byproduct_depth.items()}
+
+
 def _compose_quality_rolls(q_chance: float, d: int) -> list[float]:
     """Tier distribution (len 5) after ``d`` independent quality rolls starting
     from normal (tier 0).  Each roll uses the game's tier-skip spread."""
@@ -2080,7 +2203,12 @@ def _compose_miner_and_recycler_rolls(q_miner: float, q_rec: float, d: int) -> l
 
 
 def _is_upcyclable_scrap_leaf(item_key: str) -> bool:
-    return item_key in ("iron-plate", "copper-plate")
+    # iron/copper-plate climb via a single-ingredient wrap (iron-gear-wheel /
+    # copper-cable).  plastic-bar has no single-ingredient wrap whose machine is
+    # unlocked on Fulgora, but it climbs via the advanced-circuit wrap (the
+    # recycler already returns plastic-bar) — a multi-ingredient wrap on the EM
+    # plant, co-ingredients (electronic-circuit, copper-cable) cycled by the loop.
+    return item_key in ("iron-plate", "copper-plate", "plastic-bar")
 
 
 def compute_loop_flows(
@@ -2223,17 +2351,32 @@ def compute_scrap_source(
                     locked_machines=locked_machines, assembler_level=assembler_level,
                     forbid_ore_routes=forbid_ore_routes,
                 )
-                if craft_recipe is None:
-                    continue
-                mr = _machine_for_recipe(craft_recipe, assembler_level, locked_machines)
-                if mr is None:
-                    continue
-                machine_key, machine_speed = mr
-                machine_slots = slots_map.get(machine_key, 0)
+                mr = (
+                    _machine_for_recipe(craft_recipe, assembler_level, locked_machines)
+                    if craft_recipe is not None else None
+                )
+                if mr is not None:
+                    machine_key, machine_speed = mr
+                    machine_slots = slots_map.get(machine_key, 0)
+                    inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+                    research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels or {})
+                else:
+                    # The leaf's fluid-preferred DIRECT craft recipe is machine-
+                    # locked — e.g. copper-plate resolves to casting-copper on the
+                    # foundry, which is absent on Fulgora.  That does NOT block
+                    # upcycling: the plate climbs via a WRAP (copper-cable /
+                    # iron-gear-wheel), so use a plain assembler as the nominal
+                    # craft leg for the no-wrap baseline and let _choose_wrap_route
+                    # pick the real wrap machine (EM plant on Fulgora, foundry on
+                    # Vulcanus).  Previously the loop bailed here, spuriously
+                    # gating copper/iron-plate upcycling behind the foundry.
+                    machine_key = f"assembling-machine-{assembler_level}"
+                    machine_speed = _machine_speed(machine_key)
+                    machine_slots = slots_map.get(machine_key, 0)
+                    inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
+                    research_prod = 0.0
                 machine_allow_prod = True
-                inherent_prod = MACHINE_INHERENT_PROD.get(machine_key, 0.0)
-                research_prod = _research_prod_for_recipe(craft_recipe["key"], research_levels or {})
-                
+
                 wrap_route, wrap_machine_info = _choose_wrap_route(
                     leaf, data,
                     assembler_level=assembler_level,
@@ -2251,7 +2394,29 @@ def compute_scrap_source(
                     research_levels=research_levels or {},
                     _cache=_cache,
                 )
-                
+
+                # The scrap-upcycle stage builder counts only the wrap-craft +
+                # recycler machines — it does NOT source the wrap's solid
+                # co-ingredients (nor the make-up for the ~75% lost each pass to
+                # recycler retention).  So only accept CO-INGREDIENT-FREE wraps
+                # here (iron-gear-wheel, copper-cable, LDS-from-plastic); a
+                # multi-ingredient wrap (e.g. plastic-bar's advanced-circuit
+                # route, 4 copper-cable + 2 electronic-circuit per craft) would
+                # be badly under-counted and is usually a net loss anyway.
+                if wrap_route is not None and wrap_route.get("co_solids"):
+                    wrap_route = None
+                    wrap_machine_info = None
+
+                if wrap_route is None:
+                    # These leaves (iron/copper/plastic plate) can't self-recycle
+                    # to climb — their own recycling voids — so a co-ingredient-
+                    # free WRAP is the ONLY valid scrap upcycle.  Without one
+                    # (e.g. plastic-bar with the foundry locked, whose only wrap
+                    # is the co-ingredient-heavy advanced-circuit route), leave
+                    # the leaf to the single-pass scrap yield rather than emit a
+                    # degenerate loop.
+                    continue
+
                 v_total, configs = solve_self_recycle_target_loop_memoized(
                     leaf, data,
                     machine_key=machine_key,
@@ -2316,10 +2481,18 @@ def compute_scrap_source(
         if surplus > 1e-9:
             overflow[leaf] = surplus
 
+    # Only recycle what leads to a demanded leaf.  Terminal plates we want and
+    # pure-junk co-products are NOT recycled — they fall out as byproducts (see
+    # ``byproducts`` below) instead of being destroyed by quality-moduled
+    # disposal recyclers.  This drops the "voiding" recyclers that added
+    # machines + modules + the −20% quality-slot speed penalty for zero yield.
+    recycle_set, byproduct_depth = _scrap_productive_recycle(data, demanded_leaves)
+
     qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
     recycle_load = sum(
         cascade["recycle_amounts"].get(it, 0.0) * cascade["recycle_time"].get(it, 0.2)
-        for it in cascade["recycle_amounts"]
+        for it in recycle_set
+        if it in cascade["recycle_amounts"]
     )
     recycle_denom = (
         RECYCLER_SPEED * qm_speed_mult
@@ -2354,8 +2527,8 @@ def compute_scrap_source(
     }
     recycle_steps: list[dict] = []
     for it, amt_per_scrap in cascade["recycle_amounts"].items():
-        if amt_per_scrap <= 0:
-            continue
+        if amt_per_scrap <= 0 or it not in recycle_set:
+            continue  # disposal steps dropped — their items are byproducts now
         amt_min = scrap_per_min * amt_per_scrap
         cnt = amt_min * cascade["recycle_time"].get(it, 0.2) / recycle_denom
         recycle_steps.append({
@@ -2369,6 +2542,49 @@ def compute_scrap_source(
     recycle_steps.sort(key=lambda s: (s["depth"], -s["machine_count"]))
 
     q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
+
+    # Byproducts: everything the scrap basket produces that the productive chain
+    # does not consume — the sub-target-quality fraction of the demanded plates
+    # (we only keep target-or-better, up to demand) plus the pure co-products
+    # (steel-plate, concrete, solid-fuel, ice, holmium-ore, …).  Each is broken
+    # out per quality tier from the same miner+recycler roll convolution used for
+    # yields, so the rates line up with the rest of the plan.  Tiers ABOVE the
+    # target are folded into the target tier: at ``--target-quality rare`` the
+    # plan treats rare-or-better as one bucket (an epic/legendary tier-skip is
+    # just "rare or better"), matching the mined-scrap quality split and the
+    # target-or-better yield — so a rare plan never surfaces epic/legendary.
+    byproducts: dict[str, dict[str, float]] = {}
+    for it, depths in byproduct_depth.items():
+        per = [0.0] * 5
+        for d, amt in depths.items():
+            if d <= 0:
+                continue
+            dist = _compose_miner_and_recycler_rolls(q_miner, q, d)
+            rate = scrap_per_min * amt
+            for t in range(5):
+                per[t] += rate * dist[t]
+        # Collapse everything above the target tier into it (rare-or-better is a
+        # single bucket for a rare target).
+        for t in range(target_tier + 1, 5):
+            per[target_tier] += per[t]
+            per[t] = 0.0
+        if it in demanded_leaves:
+            # Stay consistent with the solver's own accounting for a plate we
+            # actually use: its target-or-better surplus is ``overflow`` (which
+            # already reflects any upcycle loop), NOT a fresh no-loop re-roll.
+            per[target_tier] = overflow.get(it, 0.0)
+            if it in V_loops:
+                # The scrap-upcycle loop consumes the ENTIRE sub-target flow
+                # (every t < target feeds the loop and is climbed to target), so
+                # none of it falls out as byproduct.
+                for t in range(target_tier):
+                    per[t] = 0.0
+        tiers = {
+            QUALITY_TIERS[t]: per[t] for t in range(target_tier + 1) if per[t] > 1e-6
+        }
+        if tiers:
+            byproducts[it] = tiers
+
     stage = {
         "role": "scrap-quality-source",
         "recipe": SCRAP_RECYCLING_RECIPE,
@@ -2387,9 +2603,14 @@ def compute_scrap_source(
         "q_miner": q_miner,
         "q_rec": q,
         "recycle_steps": recycle_steps,
-        # Every recycler in the cascade carries the same quality-module loadout
-        # (RECYCLER_SLOTS quality modules) — including the byproduct-void steps,
-        # where quality is inert.  Surfaced so the assumption is auditable.
+        # Per-tier surplus basket (see byproducts computation above): the
+        # sub-target plate fractions + pure co-products that are no longer
+        # recycled to void.  {item: {tier_name: rate_per_min}}.
+        "byproducts": byproducts,
+        # Every (productive) recycler in the cascade carries the same
+        # quality-module loadout (RECYCLER_SLOTS quality modules).  Disposal
+        # steps are no longer counted, so this loadout now applies only to
+        # recyclers doing real quality work.  Surfaced so it stays auditable.
         "recycler_modules_label": f"{RECYCLER_SLOTS}x quality-{quality_module_tier}-{module_quality}",
         "recycler_speed_penalty_pct": (1.0 - _module_speed_mult(quality_slots=RECYCLER_SLOTS)) * 100.0,
         "module_config_per_tier": {
@@ -3295,9 +3516,19 @@ def walk_recipe_tree(
     # ``molten-*`` fluids are the exception: they carry quality through casting.
     normal_fluid_leaves: set[str] = set()
 
-    # BFS-like accumulation
+    # ---- Pass 1a: DISCOVER the recipe DAG (no demand yet) ----
+    # Record each expandable item's chosen recipe, effective prod, per-craft
+    # output, and its walked ingredient edges.  Demand is NOT accumulated here:
+    # propagating during this BFS under-counts any intermediate that gets
+    # expanded before all of its consumers are seen (a diamond dependency — an
+    # item shared by parents discovered at different depths).  Pass 1b then
+    # propagates demand in TOPOLOGICAL order so every item is expanded only
+    # after all its consumers have contributed, making ``demand`` exact.
+    node_children: dict[str, list[tuple[str, float]]] = {}  # item -> [(ingredient, amount_per_craft)]
+    node_output: dict[str, float] = {}                      # item -> per-craft output amount
+    node_effprod: dict[str, float] = {}                     # item -> eff_prod
+
     pending = [item_key]
-    # Build demand by recursive expansion; stop at raws.
     while pending:
         current = pending.pop()
         if current in seen:
@@ -3317,7 +3548,9 @@ def walk_recipe_tree(
             # If the item is a SELF_RECYCLE_TARGETS member AND a dispatch
             # cache is available AND the caller hasn't asked us to bypass
             # this gate (Path B re-entry), defer dispatch to the end of
-            # Pass 1 so the dispatcher gets fully-accumulated demand.
+            # Pass 1 so the dispatcher gets fully-accumulated demand.  The
+            # item is a demand SINK here (no children) — the sub-plan owns
+            # its ingredients.
             if (
                 current in SELF_RECYCLE_TARGETS
                 and current not in _force_tree_walk_for
@@ -3366,8 +3599,6 @@ def walk_recipe_tree(
         eff_prod = 1.0 + research_prod + module_prod_p1
         if eff_prod > 4.0:
             eff_prod = 4.0
-        net_demand = max(0.0, demand[current])
-        cycles_per_min = net_demand / (per_craft_output * eff_prod)
         # A fluid ingredient carries this recipe's quality only when it is the
         # primary material — i.e. the recipe has NO solid ingredient (casting /
         # holmium-plate) or the fluid is a molten metal.  When the recipe has a
@@ -3376,12 +3607,12 @@ def walk_recipe_tree(
         recipe_has_solid = any(
             i["name"] not in fluids for i in recipe.get("ingredients", [])
         )
+        children: list[tuple[str, float]] = []
         for ing in recipe.get("ingredients", []):
             iname = ing["name"]
             amt = float(ing.get("amount", 0))
-            ing_rate = amt * cycles_per_min
+            children.append((iname, amt))  # every ingredient contributes demand
             if iname in fluids:
-                demand[iname] += ing_rate
                 if iname.startswith("molten-") or not recipe_has_solid:
                     # Quality-carrying fluid (casting / fluid-only recipe): walk
                     # into it so the upstream demand (e.g. molten-iron ->
@@ -3393,13 +3624,45 @@ def walk_recipe_tree(
                 else:
                     # Quality-irrelevant reagent fluid: source at normal quality
                     # and do NOT expand its sub-tree into the legendary walk (so
-                    # e.g. sulfur for sulfuric-acid stays normal).
+                    # e.g. sulfur for sulfuric-acid stays normal).  Demand sink.
                     normal_fluid_leaves.add(iname)
-            else:
-                demand[iname] += ing_rate
-                if iname not in seen and iname not in raw_set:
-                    pending.append(iname)
-                    order.append(iname)
+            elif iname not in seen and iname not in raw_set:
+                pending.append(iname)
+                order.append(iname)
+        node_children[current] = children
+        node_output[current] = per_craft_output
+        node_effprod[current] = eff_prod
+
+    # ---- Pass 1b: propagate demand in TOPOLOGICAL order ----
+    # Process an expandable item only once every expandable item that consumes
+    # it has already been processed, so ``demand[item]`` is final before it is
+    # divided into cycles.  in_degree counts distinct expandable consumers.
+    in_degree: dict[str, int] = {n: 0 for n in node_children}
+    for parent, ch in node_children.items():
+        for c in {c for c, _ in ch if c in node_children}:
+            in_degree[c] += 1
+    queue = deque(n for n in node_children if in_degree[n] == 0)
+    processed: set[str] = set()
+    while queue:
+        cur = queue.popleft()
+        processed.add(cur)
+        cycles = max(0.0, demand[cur]) / (node_output[cur] * node_effprod[cur])
+        for iname, amt in node_children[cur]:
+            demand[iname] += amt * cycles
+        for c in {c for c, _ in node_children[cur] if c in node_children}:
+            in_degree[c] -= 1
+            if in_degree[c] == 0:
+                queue.append(c)
+    # Defensive fallback for a (non-vanilla) recipe cycle: any expandable node
+    # never reaching in_degree 0 is propagated once in discovery order so demand
+    # still flows rather than silently dropping.
+    if len(processed) < len(node_children):
+        for cur in order:
+            if cur in node_children and cur not in processed:
+                processed.add(cur)
+                cycles = max(0.0, demand[cur]) / (node_output[cur] * node_effprod[cur])
+                for iname, amt in node_children[cur]:
+                    demand[iname] += amt * cycles
 
     # Resolve any deferred self-recycle-target intermediate dispatches.
     # Must happen AFTER the BFS so each intermediate's accumulated demand is
@@ -4098,6 +4361,118 @@ class _DispatchCache:
     # Test instrumentation: counts only on a CACHE MISS (real kernel work).
     plan_kernel_calls: int = 0
     solver_kernel_calls: int = 0
+
+
+def solve_final_upcycle_loop(
+    item_key: str,
+    data: dict,
+    *,
+    craft_machine_key: str,
+    craft_slots: int,
+    craft_inherent_prod: float,
+    module_quality: str,
+    quality_module_tier: int,
+    target_tier: int,
+) -> dict | None:
+    """Upcycle a FINISHED item via its own craft+recycle loop.
+
+    The "roll quality late" strategy: craft ``item_key`` from NORMAL ingredients
+    while rolling quality at the craft (quality modules in the craft machine),
+    keep the target-or-better output, and **recycle the sub-target output back
+    into its ingredients** — rolling quality AGAIN on the returned set (quality
+    modules in the recycler) so the ingredient tier climbs — then re-craft.  A
+    tier-t ingredient set makes a tier-t item baseline, which rolls up; the loop
+    ratchets normal ingredients up to target-tier ``item_key``.
+
+    Only valid when ``item_key``'s recycling returns its own solid ingredients
+    (a "shuffle"-shaped recycler).  Fixed module config: all craft slots +
+    all recycler slots are quality (max climb; craft prod = inherent only).
+
+    Returns ``None`` if the item can't self-recycle to its ingredients, else a
+    dict with:
+      * ``v0``           — target-or-better items per fresh NORMAL ingredient-set
+      * ``flow``         — ``[per-tier]`` ingredient-sets crafted at tier t per
+                           fresh normal set (drives craft + recycler machine counts)
+      * ``made``         — items produced per set craft (output × (1+prod))
+      * ``set_retention``— ingredient-set fraction returned per item recycled
+      * ``q_craft`` / ``q_rec`` — the two per-roll quality chances
+      * ``craft_time`` / ``recycle_time`` — recipe energies (for machine sizing)
+      * ``set_ingredients`` — ``{ingredient: amount_per_craft}`` (solids only)
+    """
+    recipes_by_key = {r["key"]: r for r in data.get("recipes", [])}
+    recipe = recipes_by_key.get(item_key)
+    rec = recipes_by_key.get(f"{item_key}-recycling")
+    if recipe is None or rec is None:
+        return None
+    out_amt = _recipe_result_amount(recipe, item_key)
+    if out_amt <= 0:
+        return None
+    fluids = build_fluid_set(data)
+    set_ingredients = {
+        ing["name"]: float(ing.get("amount", 0))
+        for ing in recipe.get("ingredients", [])
+        if ing["name"] not in fluids
+    }
+    # The recycler must return the item's own solid ingredients for the loop to
+    # close.  Set retention = min return ratio across those ingredients.
+    members = [
+        nm for nm in set_ingredients
+        if _recipe_result_amount(rec, nm) > 0 and set_ingredients[nm] > 0
+    ]
+    if not members:
+        return None
+    set_retention = min(
+        _recipe_result_amount(rec, nm) / set_ingredients[nm] for nm in members
+    )
+    if set_retention <= 0:
+        return None
+
+    q_craft = _quality_chance(craft_slots, quality_module_tier, module_quality)
+    q_rec = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
+    made = out_amt * (1.0 + craft_inherent_prod)
+
+    def _dist_from(q: float, t: int) -> list[float]:
+        rel = _tier_skip_probs(q, t)
+        d = [0.0] * 5
+        for k, p in enumerate(rel):
+            if t + k < 5:
+                d[t + k] += p
+        return d
+
+    dc = [_dist_from(q_craft, t) for t in range(5)]
+    dr = [_dist_from(q_rec, s) for s in range(5)]
+
+    # Forward flow: flow[t] = ingredient-sets crafted at tier t per 1 fresh
+    # normal set.  Sets enter at tier 0 (fresh) and climb via recycled sub-target
+    # items (crafted at t → rolled to s<target → recycled → 25% × rolled-up to u).
+    flow = [0.0] * 5
+    fresh = [1.0, 0.0, 0.0, 0.0, 0.0]
+    for u in range(5):
+        inflow = fresh[u]
+        for t in range(u):
+            for s in range(t, target_tier):
+                inflow += flow[t] * made * dc[t][s] * set_retention * dr[s][u]
+        self_coef = 0.0
+        if u < target_tier:
+            self_coef = made * dc[u][u] * set_retention * dr[u][u]
+        flow[u] = inflow / (1.0 - self_coef) if self_coef < 1.0 else 0.0
+
+    v0 = sum(flow[t] * made * sum(dc[t][target_tier:]) for t in range(5))
+    if v0 <= 0:
+        return None
+    return {
+        "v0": v0,
+        "flow": flow,
+        "made": made,
+        "set_retention": set_retention,
+        "q_craft": q_craft,
+        "q_rec": q_rec,
+        "craft_time": float(recipe.get("energy_required", 1.0)),
+        "recycle_time": float(rec.get("energy_required", 0.2)),
+        "set_ingredients": set_ingredients,
+        "craft_machine_key": craft_machine_key,
+        "dc": dc,
+    }
 
 
 def solve_self_recycle_target_loop_memoized(
@@ -5424,6 +5799,170 @@ def optimize_quality_placement(
     best_plan["notes"] = notes
     best_plan["placements"] = placements
     return best_plan
+
+
+def plan_final_upcycle(
+    item_key: str,
+    rate: float,
+    data: dict,
+    *,
+    target_tier: int,
+    module_quality: str,
+    quality_module_tier: int,
+    machine_quality: str,
+    tech_state: dict[str, int],
+    planets: frozenset[str] | None = None,
+    location: str | None = None,
+    research_levels: dict[str, int] | None = None,
+    miner_type: str = "electric",
+    assembler_level: int = 3,
+    _cache: _DispatchCache | None = None,
+) -> dict:
+    """The "roll quality late" plan: produce ``item_key``'s ingredients at NORMAL
+    quality, then upcycle the finished item via its own craft+recycle loop
+    (:func:`solve_final_upcycle_loop`).  Fulgora-oriented — normal plates come
+    from a bare (no-quality) scrap source.  Returns a plan dict shaped like
+    :func:`plan` (stages, total_machine_count, scrap_input, summary) for
+    side-by-side comparison with the roll-early default.
+    """
+    research_levels = research_levels or {}
+    planets_fs = frozenset(planets or ([] if location is None else [location]))
+    fulgora_mode = location == "fulgora"
+    forbid_ore_routes = fulgora_mode
+    if fulgora_mode:
+        tech_state = {**tech_state, "recycling": 1, "electromagnetic-plant": 1}
+        planets_fs = planets_fs | {"fulgora"}
+    fluids = build_fluid_set(data)
+    planet_props = _combined_planet_props(data, planets_fs)
+    locked = _tech_locked_machines(tech_state)
+    recipe_idx = cli.build_recipe_index(data)
+    slots_map = cli.build_machine_module_slots(data)
+
+    # Craft machine for the finished item (EM plant on Fulgora for modules).
+    craft_recipe = _pick_recipe_fluid_preferred(
+        item_key, recipe_idx, fluids, planets_fs, planet_props,
+        locked_machines=locked, assembler_level=assembler_level,
+        forbid_ore_routes=forbid_ore_routes,
+    )
+    mr = _machine_for_recipe(craft_recipe, assembler_level, locked) if craft_recipe else None
+    if mr is None:
+        raise ValueError(f"ERROR: no unlocked craft machine for '{item_key}'")
+    craft_machine_key, craft_speed = mr
+    craft_slots = slots_map.get(craft_machine_key, 0)
+    craft_inherent = MACHINE_INHERENT_PROD.get(craft_machine_key, 0.0)
+
+    loop = solve_final_upcycle_loop(
+        item_key, data, craft_machine_key=craft_machine_key, craft_slots=craft_slots,
+        craft_inherent_prod=craft_inherent, module_quality=module_quality,
+        quality_module_tier=quality_module_tier, target_tier=target_tier,
+    )
+    if loop is None:
+        raise ValueError(
+            f"ERROR: '{item_key}' has no final-upcycle loop — its recycling must "
+            "return its own solid ingredients (a shuffle-shaped recycler)."
+        )
+    v0, made, flow = loop["v0"], loop["made"], loop["flow"]
+    fresh_sets = rate / v0            # fresh NORMAL ingredient-sets / min
+    norm_crafts = fresh_sets * made   # normal item-crafts feeding the loop = fresh_sets of ingredients
+
+    # Ingredient sub-factory (normal throughput; walker is quality-agnostic).
+    scrap_reachable = set(build_scrap_cascade(data)["depth_amounts"])
+    scrap_terminals = scrap_terminal_set(scrap_reachable, item_key, data, fluids)
+    ing_all, raw = walk_recipe_tree(
+        item_key, norm_crafts, data, research_levels, assembler_level, fluids,
+        planet_props, planets_fs, extra_raws=scrap_terminals or None,
+        machine_quality=machine_quality, tech_state=tech_state,
+        forbid_ore_routes=forbid_ore_routes,
+    )
+    # Drop the item's own craft stage — the loop does that crafting, not a
+    # one-shot assembly stage.
+    ing_stages = [s for s in ing_all if s.get("product") != item_key]
+    plate_demand = {
+        k: raw[k] for k in scrap_terminals
+        if raw.get(k, 0) > 0 and k not in fluids
+    }
+    fluid_input = {k: float(v) for k, v in raw.items() if k in fluids and v > 0}
+
+    # Normal plate sourcing: target_tier=0 makes the scrap-source yield = ALL
+    # plate per scrap (every tier counts as "≥ normal"), i.e. no quality rolling.
+    src = compute_scrap_source(
+        plate_demand, data, target_tier=0, quality_module_tier=quality_module_tier,
+        module_quality="normal", machine_quality=machine_quality, miner_type=miner_type,
+        miner_quality_modules=False, scrap_upcycle_loops=False, assembler_level=assembler_level,
+        tech_state=tech_state, research_levels=research_levels, planets=planets_fs,
+        forbid_ore_routes=forbid_ore_routes, _cache=_cache,
+    )
+    scrap_per_min = float(src["scrap_per_min"]) if src else 0.0
+    scrap_stages = [src["stage"]] if src else []
+
+    # Mining fleet for the scrap (no drill quality modules — normal scrap).
+    miner_stages: list[dict] = []
+    if scrap_per_min > 0:
+        miners = cli.compute_miners(
+            {"scrap": Fraction(str(scrap_per_min))}, cli.build_resource_info(data),
+            miner_type, machine_power_w=cli.build_machine_power_w(data),
+            mining_productivity_level=research_levels.get("mining-productivity", 0),
+            machine_quality=machine_quality,
+        )
+        for it, entry in miners.items():
+            if "machine_count" not in entry:
+                continue
+            miner_stages.append({
+                "role": "mining", "item": it, "recipe": f"mine-{it}",
+                "machine": entry["machine"], "machine_count": float(entry["machine_count"]),
+                "rate_per_min": float(entry.get("rate_per_min", 0.0)),
+            })
+
+    # Final-upcycle loop stages (item craft + item recycle).
+    qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
+    craft_penalty = _module_speed_mult(quality_slots=craft_slots)
+    rec_penalty = _module_speed_mult(quality_slots=RECYCLER_SLOTS)
+    dc = loop["dc"]
+    total_crafts = sum(flow) * fresh_sets
+    subtarget_recycled = sum(
+        flow[t] * made * sum(dc[t][s] for s in range(t, target_tier)) for t in range(5)
+    ) * fresh_sets
+    craft_machines = total_crafts * loop["craft_time"] / (craft_speed * qm_speed_mult * craft_penalty * 60.0)
+    rec_machines = subtarget_recycled * loop["recycle_time"] / (RECYCLER_SPEED * qm_speed_mult * rec_penalty * 60.0)
+    loop_stage = {
+        "role": "final-upcycle-loop", "target": item_key, "recipe": f"{item_key}-upcycle-loop",
+        "machine": craft_machine_key, "machine_count": craft_machines + rec_machines,
+        "craft_machines": craft_machines, "recycler_machines": rec_machines,
+        "rate_per_min": rate, "crafts_per_min": total_crafts, "recycles_per_min": subtarget_recycled,
+        "fresh_sets_per_min": fresh_sets, "v0": v0,
+        "q_craft": loop["q_craft"], "q_rec": loop["q_rec"],
+        "craft_slots": craft_slots,
+        "quality_module_tier": quality_module_tier, "quality_module_quality": module_quality,
+    }
+
+    all_stages = miner_stages + scrap_stages + ing_stages + [loop_stage]
+    total_machines = sum(float(s.get("machine_count", 0.0)) for s in all_stages)
+    by_role: dict[str, dict] = defaultdict(lambda: {"machines": 0.0, "stage_count": 0})
+    for s in all_stages:
+        b = by_role[s["role"]]
+        b["machines"] += float(s.get("machine_count", 0.0))
+        b["stage_count"] += 1
+    for b in by_role.values():
+        b["machines_pct"] = 100.0 * b["machines"] / total_machines if total_machines else 0.0
+
+    return {
+        "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
+        "strategy": "final-upcycle",
+        "scrap_input": {"scrap": scrap_per_min} if scrap_per_min > 0 else {},
+        "asteroid_input": {}, "mined_input": {}, "fluid_input": fluid_input,
+        "stages": all_stages,
+        "total_machine_count": total_machines,
+        "summary": {"by_role": dict(by_role)},
+        "module_quality": module_quality, "planets": sorted(planets_fs),
+        "assembler_level": assembler_level, "research_levels": research_levels,
+        "notes": [
+            "scrap-source plates are produced at NORMAL quality (the tier tags on "
+            "the [scrap] stage reflect the plan's target, not these plates).",
+            f"final-upcycle: roll quality only at the {item_key} step "
+            f"(loop yield {v0:.4f} rare/{item_key}-set; {fresh_sets/rate:.1f} fresh normal sets per output). "
+            "Ingredients sourced at NORMAL from a bare scrap array.",
+        ],
+    }
 
 
 def plan(
@@ -6891,6 +7430,26 @@ def _stage_detail_lines(st: dict, tier: str) -> list[str]:
                 f"{step['recycled_per_min']:.1f}/min → {basket}  "
                 f"({step['machine_count']:.2f} rec)"
             )
+    # Byproducts: the scrap basket's surplus that the productive chain does not
+    # consume — sub-target plate fractions + pure co-products — broken out per
+    # quality tier.  These are NOT recycled to void (no disposal recyclers); they
+    # leave the array as usable material.
+    if st.get("byproducts"):
+        lines.append(f"{ind}byproducts (unneeded scrap output, /min):")
+        # Order by total rate desc so the biggest streams read first.
+        for it, tiers in sorted(
+            st["byproducts"].items(),
+            key=lambda kv: -sum(kv[1].values()),
+        ):
+            parts = ", ".join(
+                f"{_humanize(t)} {r:.1f}"
+                for t, r in sorted(
+                    tiers.items(), key=lambda x: QUALITY_INDEX.get(x[0], 0)
+                )
+                if r > 0.5
+            )
+            if parts:
+                lines.append(f"{ind}  {_humanize(it)}: {parts}")
     # Outputs (-> primary/basket) then inputs (<- ingredients), cli-style.
     outs: dict = {}
     if st.get("product"):
@@ -7057,6 +7616,23 @@ def format_human(out: dict) -> str:
                 f"{st['rate_per_min']:.2f}/min {tier} "
                 f"({st['craft_machines']:.2f} × {_humanize(st['machine'])}{wrap} + "
                 f"{st['recycler_machines']:.2f} recyclers)"
+            )
+        elif role == "final-upcycle-loop":
+            L.append(
+                f"  [final-upcycle] {_humanize(st['target'])}: "
+                f"{st['rate_per_min']:.2f}/min {tier} "
+                f"({st['craft_machines']:.2f} × {_humanize(st['machine'])} craft + "
+                f"{st['recycler_machines']:.2f} recyclers)"
+            )
+            L.append(
+                f"                 {st['crafts_per_min']:.1f} crafts/min, "
+                f"{st['recycles_per_min']:.1f} recycles/min  "
+                f"(roll: craft q={st['q_craft']*100:.1f}%, recycle q={st['q_rec']*100:.1f}%)"
+            )
+            L.append(
+                f"                 yield: {st['v0']:.4f} {tier} {_humanize(st['target'])} "
+                f"per fresh normal ingredient-set  "
+                f"({st['fresh_sets_per_min']/st['rate_per_min']:.1f} sets per output)"
             )
         elif role == "self-feed-target":
             L.append(
@@ -7426,6 +8002,13 @@ def parse_args() -> argparse.Namespace:
         help="Disable closed-loop plate upcycling on Fulgora.",
     )
     p.add_argument(
+        "--final-upcycle", action="store_true",
+        help="Roll quality ONLY at the final item step: build ingredients at "
+             "normal, then upcycle the finished item via its own craft+recycle "
+             "loop. Fulgora-oriented; use to compare against the roll-early "
+             "default. Requires the item's recycling to return its own ingredients.",
+    )
+    p.add_argument(
         "--no-spoilage", action="store_true",
         help="Disable spoilage timing and decay loss modelling (for A/B testing).",
     )
@@ -7646,6 +8229,20 @@ def main() -> None:
             sys.exit(f"Invalid --keep-tiers value(s) {bad}; valid: {list(QUALITY_TIERS)}")
 
     def _run_plan(item_key: str, rate: float, ttier: int) -> dict:
+        if args.final_upcycle:
+            return plan_final_upcycle(
+                item_key, rate, data,
+                target_tier=ttier,
+                module_quality=args.module_quality or "normal",
+                quality_module_tier=args.quality_module_tier,
+                machine_quality=args.machine_quality,
+                tech_state=tech_state,
+                planets=frozenset(planets_list) if planets_list else None,
+                location=args.location,
+                research_levels=research,
+                miner_type=args.miner,
+                assembler_level=args.assembler_level,
+            )
         return plan(
             item_key, rate, data,
             module_quality=args.module_quality,
