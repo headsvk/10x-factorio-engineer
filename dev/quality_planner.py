@@ -6408,12 +6408,19 @@ def plan(
                 # produced at, before it all feeds the recycler).
                 q_mine = _quality_chance(miner_slots, quality_module_tier, module_quality)
                 split_probs = _tier_skip_probs(q_mine, 0)
+                # Cap at the target tier: the player can't roll a quality above
+                # what they've researched (--target-quality is the ceiling), so
+                # roll mass above it folds onto it — mirrors cli --max-quality
+                # and the solver's own `sum(dist[target_tier:])` yield.
+                capped = [0.0] * 5
+                for t in range(5):
+                    capped[min(t, target_tier)] += split_probs[t]
                 mined_rate = float(entry.get("rate_per_min", 0.0))
                 stage["q_miner"] = q_mine
                 stage["quality_split"] = {
-                    QUALITY_TIERS[t]: split_probs[t] * mined_rate
-                    for t in range(5)
-                    if split_probs[t] * mined_rate > 1e-9
+                    QUALITY_TIERS[t]: capped[t] * mined_rate
+                    for t in range(target_tier + 1)
+                    if capped[t] * mined_rate > 1e-9
                 }
             miner_stages.append(stage)
 

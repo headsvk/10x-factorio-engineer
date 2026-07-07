@@ -4565,6 +4565,17 @@ class TestFullStepsHumanFormat(unittest.TestCase):
         out = self._plan(miner_type="electric", miner_quality_modules=True)
         self.assertEqual(out["target"]["rate_per_min"], 1)
 
+    def test_mining_quality_split_caps_at_target_tier(self):
+        # A rare target means rare is the researched ceiling — the drill roll
+        # can't produce epic/legendary; that mass folds onto rare.
+        out = self._plan(miner_type="electric", miner_quality_modules=True)
+        mining = next(s for s in out["stages"] if s["role"] == "mining")
+        self.assertNotIn("epic", mining["quality_split"])
+        self.assertNotIn("legendary", mining["quality_split"])
+        # Split still totals the full mined rate (folding conserves mass).
+        self.assertAlmostEqual(
+            sum(mining["quality_split"].values()), mining["rate_per_min"], delta=1e-6)
+
 
 if __name__ == "__main__":
     unittest.main()

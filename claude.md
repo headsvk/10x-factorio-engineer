@@ -124,7 +124,7 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/update_research.py` | Applies a research-level change to a factory state and re-runs only the affected lines (`python dev/update_research.py TECH=LEVEL ... [--state PATH] [--dry-run] [--list]`; default state = `dev/my-factory.json`). Use this instead of hand-editing `research_levels` + manually re-running lines — it reconstructs each line's CLI command from its `cli_args` + shared top-level config, re-solves the affected lines, and rewrites their `cli_result` (LF output). Mining-prod re-runs miner lines; recipe-prod re-runs lines whose steps touch a boosted recipe; lab-only techs (`research-productivity` / `lab-research-speed`) update the field but trigger no re-run. See the **research-level updates** workflow note below. |
 | `dev/test_cli.py` | `unittest` suite (281 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner — separate stdlib-only tool implementing the full quality roadmap (Q1–Q9, see `dev/quality-roadmap.md`). Post-2.1.8 asteroid sourcing = crushing quality roll + ore recycler upcycle (reprocessing no longer accepts quality modules); DP/LP quality-loop solvers, cross-item shuffles, Gleba spoilage-timing warnings (Q3), quality-module placement optimizer (Q4), mixed-tier `--demand`/`--keep-tiers` (Q6), `--beacons` (Q7), `--objective` (Q8), and `--preset` shortcuts (Q9). `--location fulgora` switches to scrap-only sourcing (no asteroid platform; metals terminate at scrap-reachable plates via `forbid_ore_routes`) |
-| `dev/test_quality_planner.py` | `unittest` suite (377 tests) for quality_planner |
+| `dev/test_quality_planner.py` | `unittest` suite (378 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
 | `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
 | `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
@@ -667,7 +667,7 @@ python -m unittest dev.test_cli -v
 
 | `TestVanillaEmptyQualityTables` | Regression: the vanilla dataset has no quality modules, so the derived quality tables are empty — speed modules (machine or beacon) and stray quality specs must not KeyError; they contribute zero quality chance/penalty on vanilla |
 
-### `dev/test_quality_planner.py` (377 tests)
+### `dev/test_quality_planner.py` (378 tests)
 
 Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-partial LDS-shuffle wiring:
 
