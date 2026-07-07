@@ -999,7 +999,7 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--target-quality uncommon|rare|epic|legendary]        # default: legendary (the goal tier — see note above)
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
     [--location nauvis|vulcanus|fulgora|gleba|aquilo|space-platform]  # build location; --location fulgora = scrap-only sourcing
-    [--module-quality normal|uncommon|rare|epic|legendary] # default: matches --target-quality; may not exceed it
+    [--module-quality normal|uncommon|rare|epic|legendary] # seed-module quality; default: normal; may not exceed --target-quality
     [--quality-module-tier 1|2|3]                          # default: 3
     [--assembler-level 2|3]                                # default: 3
     [--machine-quality normal|uncommon|rare|epic|legendary] # default: normal
@@ -1073,7 +1073,7 @@ alters sourcing today; other `--location` values just unlock that planet.
   and activates the ones whose recycle outputs overlap with the chain's
   legendary leaves.  Common picks: `low-density-structure`,
   `advanced-circuit`, `electronic-circuit`, `engine-unit`, `battery`.
-- **Roadmap Q1–Q9 flags:** `--preset {nauvis-starter,end-game-nauvis,end-game-fulgora}`
+- **Roadmap Q1–Q9 flags:** `--preset {nauvis-starter,end-game-nauvis,late-game-vulcanus}`
   (Q9 shortcuts; explicit flags still win); `--beacons N` (Q7, +2.5 speed each,
   shrinks the fleet); `--objective {machines,power,raw-input,cost}` (Q8, the
   metric the `all` auto-selectors minimise, also reported); `--demand

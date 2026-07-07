@@ -12,14 +12,16 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-04. Tests: `python -m unittest dev.test_quality_planner -v` — **367 tests, all passing, ~6.9 s.**
+**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **381 tests, all passing, ~11 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 Currently shipped:
-- **Ergonomics & CLI Presets (2026-07-04, Q9)** — Added `--preset end-game-fulgora|end-game-nauvis|nauvis-starter` shortcuts for rapid multi-flag configuration.
+- **Sensible seed-module default (2026-07-07)** — `--module-quality` now defaults to **`normal`** (was `--target-quality`). Researching a quality tier does not give you quality *modules* at that quality — you have to manufacture them, which is the planner's whole purpose — so defaulting the seed gear to the target tier assumed you'd already bootstrapped rare/legendary modules. Now consistent with `--machine-quality` (also `normal`); raise it explicitly (up to `--target-quality`) to model feeding better modules back once the line runs. Materially changes default machine counts (e.g. rare `quality-module-2` on Fulgora: ~118 machines at the old tier-3-rare seed default vs the honest ~311 at tier-2 normal). A **behaviour** change, not display-only.
+- **cli.py-style full-step human output + quality visibility (2026-07-07)** — `format_human` now renders a per-stage detail block under each headline: buildable (ceil) machine count + exact, per-stage `power`, and arrowed outputs (`->`) / inputs (`<-`) **tagged with their quality tier** (assembly recipes are single-quality — `-> Quality Module 2 (rare)`, `<- Advanced Circuit (rare)`; mined raw is `(mixed — see split)`; fluids untagged). For Fulgora scrap seeding it also surfaces: the drill quality-module config + speed penalty (`modules: 3x quality-3-rare (speed −15%)`), the **mined-scrap quality split** from the single drill roll (`quality split (/min): (roll 12.0%) Normal 2847.21, Uncommon 349.43, …`), and the **scrap→target yield** per leaf with the two per-roll chances (`rolls: miner q=12.0%, recycler q=16.0%` / `yield: 0.00321 rare Plastic Bar / scrap (binding)`) so the conversion is auditable (`scrap_per_min == demand / yield` for the binding leaf). It also breaks the collapsed `[scrap]` line into its **full per-recipe recycling cascade** — scrap-recycling (depth 0, no plates) plus every intermediate `<item>-recycling` step with its own recycler count and depth, so the real path (scrap → blue circuits/LDS → advanced-circuit → plastic-bar, …) is explicit; step counts sum exactly to the stage's aggregate recycler count. New stage fields: `mining` carries `quality_slots`/`quality_module_tier`/`quality_module_quality`/`speed_penalty_pct`/`q_miner`/`quality_split`; `scrap-quality-source` carries `yields`/`q_miner`/`q_rec`/`recycle_steps`. Display-only; no solver-math change.
+- **Ergonomics & CLI Presets (2026-07-04, Q9)** — Added `--preset end-game-nauvis|late-game-vulcanus|nauvis-starter` shortcuts for rapid multi-flag configuration.
 - **Custom Objective Function (2026-07-04, Q8)** — Added `--objective machines|power|raw-input|cost` flag and `_evaluate_objective` evaluation function to customize optimization metrics.
 - **Beacon & Speed-Module Integration (2026-07-04, Q7)** — Added `--beacons COUNT` flag. Applies beacon speed multipliers to crafting machines, scaling machine counts and power consumption.
 - **Mixed-Tier Demand & Surplus Extraction (2026-07-04, Q6)** — Added `--demand ITEM@TIER:RATE,...` spec parser and `--keep-tiers TIERS` flag for multi-tier demand specification and surplus extraction.
@@ -132,7 +134,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `--target-quality Q` | `legendary` | Goal quality tier. The quality loops stop here instead of pushing to legendary (e.g. `rare` treats rare-or-better as success — much cheaper than full legendary). Choices: `uncommon,rare,epic,legendary` |
 | `--planets P1,P2,…` | empty | Unlocked planets. Empty = asteroid-only. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
 | `--location P` | none | Single planet the factory is **built on** (mirrors `cli.py --location`). Unlocks that planet's raws. **`--location fulgora` additionally switches to scrap-only sourcing**: no asteroid platform, so base materials come from the scrap-recycling quality source and metals terminate at their scrap-reachable plate form (no casting/molten-ore routes). Only `fulgora` alters sourcing today; other values just unlock that planet. Choices: `nauvis,vulcanus,fulgora,gleba,aquilo,space-platform` |
-| `--module-quality Q` | `--target-quality` | Quality of quality-modules in loops. Defaults to (and may not exceed) `--target-quality` — you can't have modules of a quality you haven't researched. Choices: `normal,uncommon,rare,epic,legendary` |
+| `--module-quality Q` | `normal` | Quality of the quality-modules you place in the drills/recyclers (seed gear, not the product). Defaults to **`normal`** (like `--machine-quality`): researching a tier doesn't give you modules *at* that quality — you must manufacture them (the planner's whole job), so assuming you already hold rare/legendary seed modules is a bootstrapping paradox. Raise it (up to `--target-quality`, may not exceed) once your line produces better modules to feed back. Choices: `normal,uncommon,rare,epic,legendary` |
 | `--quality-module-tier {1,2,3}` | `3` | Tier of quality modules. Self-declaring — not gated by `--tech` (you'd only request a tier you've researched). |
 | `--assembler-level {2,3}` | `3` | Assembler tier for non-categorised recipes |
 | `--machine-quality Q` | `normal` | Quality of every assembly / crusher / recycler machine. Applies `cli.MACHINE_QUALITY_SPEED` (+0/+30/+60/+90/+150 %) |
@@ -214,13 +216,13 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots). Has `module_config_per_tier` (crusher quality slots per tier) |
 | `raw-crushing` | plan() | crusher | Legendary chunk → legendary ore (advanced crushing, 2 outputs per recipe) |
 | `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite. Has `module_config_per_tier` (recycler quality slots per tier) |
-| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables. Convolved with miner quality modules when `miner_quality_modules` is active. Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier` |
+| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables. Convolved with miner quality modules when `miner_quality_modules` is active. Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier`, and (for audit) `yields` (target-tier items per scrap, per leaf), `q_miner`, `q_rec`, plus `recycle_steps` — the per-recipe decomposition of the aggregate recycler count (`{recipe, item, recycled_per_min, machine_count, depth, outputs}` for scrap-recycling + every intermediate `<item>-recycling`, step counts summing to `machine_count`) so the multi-step scrap→plates path is visible, and `recycler_modules_label`/`recycler_speed_penalty_pct` (every recycler in the cascade carries the same `RECYCLER_SLOTS`-slot quality-module loadout, including the byproduct-void steps) |
 | `scrap-upcycle-loop` | `compute_scrap_source` | craft+recycler | Closed-loop upcycling on Fulgora for iron and copper plates. Splits `craft_machines` and `recycler_machines` |
 | `cross-item-shuffle` | plan() | foundry+recycler | LDS cast + recycle. Splits machine count between `foundry_machines` and `recycler_machines`. Has `byproduct_legendary`, `byproduct_credited`, `byproduct_overflow`, `fluid_demand` |
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
 | `co-product-driver` | plan() | per recipe | Driven activation: recipe runs purely for its non-primary solid output (e.g. `molten-iron-from-lava` for stone). Has `target`, `co_product_per_min`, `crafts_per_min`, `inputs`, `overflow_outputs` |
 | `fluid-chain` | plan() (Fulgora) | chemical-plant | One `cli.py` production step of a delegated Fulgora fluid sub-chain (e.g. sulfuric-acid for processing-unit). Has `recipe`, `rate_per_min`, `fluid_target` |
-| `mining` | plan() | electric/big-mining-drill | Drill fleet for one solid raw (scrap or a planet-mined ore), sized by `cli.compute_miners`. Has `item`, `recipe` (`mine-<item>`), `rate_per_min`. `--miner` picks the drill; mining-prod research reduces the count. Main `plan()` body only (not the self-recycle/self-feed early-return paths) |
+| `mining` | plan() | electric/big-mining-drill | Drill fleet for one solid raw (scrap or a planet-mined ore), sized by `cli.compute_miners`. Has `item`, `recipe` (`mine-<item>`), `rate_per_min`. When drills carry quality modules (Fulgora scrap seeding), also has `quality_slots`, `quality_module_tier`, `quality_module_quality`, `speed_penalty_pct`, `q_miner`, and `quality_split` (per-tier /min of the mined output from the single drill roll) so `format_human` can render them. `--miner` picks the drill; mining-prod research reduces the count. Main `plan()` body only (not the self-recycle/self-feed early-return paths) |
 
 ---
 
@@ -279,7 +281,7 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_tier_skip_probs` | 90/9/0.9/0.1 tier-jump distribution |
 | `_prod_bonus` | Module-prod fraction at given tier+quality |
 | `solve_recycle_loop` | Shuffle-style DP (recycler returns ingredient → re-craft). Library only |
-| `solve_asteroid_reprocessing_loop` | 80 % retention, 2 slots, quality-only. **Known limitation:** still models quality modules in the reprocessing crusher, but 2.1.8 removed `quality` from reprocessing `allowed_effects` — asteroid-sourced counts are optimistic vs current game rules; plans with reprocessing stages carry an explanatory note |
+| `solve_asteroid_reprocessing_loop` | 80 % retention, 2 slots, quality-only. **Legacy — no live call sites.** 2.1.8 removed `quality` from reprocessing `allowed_effects`, so the chunk-tier quality climb is impossible in-game. The active plan() rolls quality at the crushing step and upcycles ores via recycler self-loops (`raw-crushing` + `asteroid-ore-upcycle`); this kernel is retained only for reference |
 | `solve_lds_shuffle_loop` | LDS foundry-cast + recycle joint DP, returns per-plastic legendary yield |
 | `compute_lds_shuffle_stage` | Sizes a LDS shuffle stage from `legendary_plastic_per_min`; returns `foundry_machines`, `recycler_machines`, `byproduct_legendary`, `fluid_demand` |
 | `solve_mined_raw_self_recycle_loop` | 25 % retention, 4 slots, quality-only (no prod) |
@@ -462,7 +464,7 @@ When a primary machine is locked, `_machine_for_recipe` consults `CATEGORY_FALLB
 - `*-or-chemistry` / `chemistry-or-cryogenics` → chemical-plant.
 - Categories without an entry (`metallurgy`, `cryogenics`, `electromagnetics`, `organic`) have no fallback — recipes routing through them fail-fast with an actionable hint naming the missing tech.
 
-Quality ceiling is set by `--target-quality` (the assumption: if you've researched epic/legendary quality you'd be targeting it, not rare).  `--module-quality` defaults to `--target-quality` and `plan()` fails-fast if `--module-quality` or `--machine-quality` exceeds it — you can't have modules or machines of a quality you haven't researched.
+Quality ceiling is set by `--target-quality` (the assumption: if you've researched epic/legendary quality you'd be targeting it, not rare).  `--module-quality` and `--machine-quality` both default to **`normal`** (the seed gear everyone has — researching a tier doesn't hand you modules/machines *at* that quality; you must manufacture them, which is the planner's job).  `plan()` fails-fast if either exceeds `--target-quality` (you can't seed with a quality above the tier you're producing).
 
 ### Hot-spot advisor
 
@@ -553,7 +555,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **367 tests**, 55 classes.
+`dev/test_quality_planner.py` — **381 tests**, 56 classes.
 
 | Class | Coverage |
 |---|---|

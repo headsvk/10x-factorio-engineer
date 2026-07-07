@@ -12,13 +12,14 @@ V1 scope (asteroid-only, Nauvis-subset):
     asteroid reprocessing (iron-ore, copper-ore, coal, stone, calcite, ice).
   * DP-based quality loop solver (backward induction over tiers).
   * Asteroid *crushing* as a legendary raw source (the chunk crushing step still
-    permits quality modules).  KNOWN LIMITATION: as of 2.1.8 asteroid
-    *reprocessing* no longer permits quality modules (allowed_effects drops
-    "quality"), but the active kernel (`solve_asteroid_reprocessing_loop`) and
-    the plan() asteroid path still model the pre-2.1.8 reprocessing chunk-tier
-    climb, so asteroid-sourced counts are optimistic vs current game rules.
-    A game-accurate redesign (quality rolled at crushing + ore self-recycle)
-    is future work; plans with reprocessing stages carry an explanatory note.
+    permits quality modules).  Quality is rolled at the crushing step and the
+    resulting ores are upcycled to the target tier via recycler self-loops
+    (`raw-crushing` + `asteroid-ore-upcycle` stage roles) — the game-accurate
+    post-2.1.8 model, and the only asteroid quality path on the active plan().
+    Asteroid *reprocessing* no longer permits quality modules (2.1.8 dropped
+    "quality" from its allowed_effects), so the pre-2.1.8 reprocessing chunk-tier
+    climb is gone: `solve_asteroid_reprocessing_loop` is retained only as a
+    legacy reference kernel with no live call sites.
   * Fluid quality transparency (foundry casting preferred when available).
   * Productivity research per recipe family, capped at +300 %.
 
@@ -125,17 +126,15 @@ SPOIL_TIMES_SECONDS: dict[str, float] = {
     "agricultural-science-pack": 3600.0,
 }
 
-# Asteroid reprocessing: crusher processes chunk -> (mostly) chunk.  These
-# recipes drive chunk *quantity* sourcing (self-output retention).
-# KNOWN LIMITATION (2.1.8): reprocessing recipes no longer permit quality
-# modules (allowed_effects drops "quality"), which makes the chunk-tier quality
-# climb impossible in the current game.  The active kernel
-# (`solve_asteroid_reprocessing_loop`) still models the pre-2.1.8 climb with
-# quality modules in the reprocessing crusher — only the unused reference
-# kernel (`_unused_solve_loop_reference`) gates on recipe_allows_quality.
-# Asteroid-sourced counts are therefore optimistic; a game-accurate redesign
-# (roll quality at the crushing step + upcycle ores via self-recycle) is
-# tracked as future work.
+# Asteroid reprocessing: crusher processes chunk -> (mostly) chunk.  This map is
+# kept only to classify the chunk item keys as asteroid raws (see build of
+# `asteroid_raws` below); it no longer drives any quality climb.
+# As of 2.1.8 reprocessing recipes no longer permit quality modules
+# (allowed_effects drops "quality"), so the chunk-tier quality climb is
+# impossible in the current game.  The planner instead rolls quality at the
+# crushing step and upcycles the resulting ores via recycler self-loops
+# (`raw-crushing` + `asteroid-ore-upcycle` roles).  `solve_asteroid_reprocessing_loop`
+# is a legacy reference kernel with no live call sites.
 ASTEROID_REPROCESSING_RECIPES: dict[str, str] = {
     "metallic-asteroid-chunk":  "metallic-asteroid-reprocessing",
     "carbonic-asteroid-chunk":  "carbonic-asteroid-reprocessing",
@@ -1068,6 +1067,11 @@ def solve_asteroid_reprocessing_loop(
     target_tier: int = 4,
 ) -> tuple[float, dict]:
     """DP for legendary-chunk per normal-chunk via reprocessing.
+
+    LEGACY / no live call sites.  2.1.8 removed `quality` from reprocessing
+    `allowed_effects`, so this chunk-tier climb is not achievable in-game; the
+    active plan() rolls quality at the crushing step instead (see the module
+    header).  Retained only as a reference kernel.
 
     Reprocessing recipe: 1 chunk in, ~0.4 same-chunk out + 0.2 each of 2
     other chunk types.  Runs on crusher (2 slots, quality-only — reprocessing
@@ -2317,10 +2321,52 @@ def compute_scrap_source(
         cascade["recycle_amounts"].get(it, 0.0) * cascade["recycle_time"].get(it, 0.2)
         for it in cascade["recycle_amounts"]
     )
-    machine_count = scrap_per_min * recycle_load / (
+    recycle_denom = (
         RECYCLER_SPEED * qm_speed_mult
         * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
     )
+    machine_count = scrap_per_min * recycle_load / recycle_denom
+
+    # Per-recipe decomposition of that aggregate recycler count: every
+    # <item>-recycling step the cascade runs (scrap-recycling itself + each
+    # intermediate — processing-unit, low-density-structure, advanced-circuit,
+    # iron-gear-wheel, …), so the output can show the real multi-step path from
+    # scrap to plates instead of implying scrap → plate directly.  The step
+    # counts sum exactly to machine_count.
+    recipes_by_key = {r["key"]: r for r in data.get("recipes", [])}
+
+    def _recycle_basket(it: str) -> dict[str, float]:
+        r = recipes_by_key.get(SCRAP_RECYCLING_RECIPE if it == "scrap" else f"{it}-recycling")
+        if r is None:
+            return {}
+        out: dict[str, float] = {}
+        for res in r.get("results", []):
+            if res.get("name") == it:
+                continue
+            amt = res.get("amount")
+            if amt is None:
+                amt = (res.get("amount_min", 0) + res.get("amount_max", 0)) / 2.0
+            out[res["name"]] = out.get(res["name"], 0.0) + float(amt) * float(res.get("probability", 1.0))
+        return out
+
+    min_depth = {
+        k: (min(v) if v else 1) for k, v in cascade["depth_amounts"].items()
+    }
+    recycle_steps: list[dict] = []
+    for it, amt_per_scrap in cascade["recycle_amounts"].items():
+        if amt_per_scrap <= 0:
+            continue
+        amt_min = scrap_per_min * amt_per_scrap
+        cnt = amt_min * cascade["recycle_time"].get(it, 0.2) / recycle_denom
+        recycle_steps.append({
+            "recipe": SCRAP_RECYCLING_RECIPE if it == "scrap" else f"{it}-recycling",
+            "item": it,
+            "recycled_per_min": amt_min,
+            "machine_count": cnt,
+            "depth": 0 if it == "scrap" else min_depth.get(it, 1),
+            "outputs": {k: amt_min * v for k, v in _recycle_basket(it).items()},
+        })
+    recycle_steps.sort(key=lambda s: (s["depth"], -s["machine_count"]))
 
     q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
     stage = {
@@ -2333,6 +2379,19 @@ def compute_scrap_source(
         "covered": covered,
         "overflow": overflow,
         "recycler_quality_chance": q,
+        # Yield transparency (so the scrap→target conversion is auditable):
+        # target-tier items produced per 1 normal scrap, per leaf, plus the two
+        # per-roll quality chances that produce them.  scrap_per_min for the
+        # binding leaf == demand / yields[binding_leaf].
+        "yields": {leaf: y for leaf, y in yields.items() if demanded_leaves.get(leaf, 0) > 0},
+        "q_miner": q_miner,
+        "q_rec": q,
+        "recycle_steps": recycle_steps,
+        # Every recycler in the cascade carries the same quality-module loadout
+        # (RECYCLER_SLOTS quality modules) — including the byproduct-void steps,
+        # where quality is inert.  Surfaced so the assumption is auditable.
+        "recycler_modules_label": f"{RECYCLER_SLOTS}x quality-{quality_module_tier}-{module_quality}",
+        "recycler_speed_penalty_pct": (1.0 - _module_speed_mult(quality_slots=RECYCLER_SLOTS)) * 100.0,
         "module_config_per_tier": {
             QUALITY_TIERS[t]: {
                 "craft": "n/a",
@@ -5448,11 +5507,15 @@ def plan(
     # plans that omitted --tech recycling=1.
     if fulgora_mode:
         tech_state = {**tech_state, "recycling": 1, "electromagnetic-plant": 1}
-    # Module/machine quality default to the target tier and may not exceed it:
-    # you can't have modules or machines of a quality you haven't researched
-    # (and if you've researched epic/legendary you'd be targeting it, not rare).
+    # Seed-module quality defaults to NORMAL (like --machine-quality), not the
+    # target tier: researching a quality tier does not give you quality *modules*
+    # at that quality — you have to manufacture those, which is the very problem
+    # this planner solves.  Assuming you already hold rare/legendary modules to
+    # seed with is a bootstrapping paradox, so the honest default is the modules
+    # everyone has (normal); pass --module-quality to model better seed gear once
+    # your line is producing it.  It still may not exceed --target-quality.
     if module_quality is None:
-        module_quality = QUALITY_TIERS[target_tier]
+        module_quality = "normal"
     if QUALITY_INDEX[module_quality] > target_tier:
         raise ValueError(
             f"ERROR: --module-quality {module_quality} exceeds --target-quality "
@@ -6376,14 +6439,42 @@ def plan(
             if "machine_count" not in entry:
                 continue  # fluids report required_yield_pct, not a drill count
             drill_count = float(entry["machine_count"]) / drill_speed_mult
-            miner_stages.append({
+            stage = {
                 "role": "mining",
                 "item": it,
                 "recipe": f"mine-{it}",
                 "machine": entry["machine"],
                 "machine_count": drill_count,
                 "rate_per_min": float(entry.get("rate_per_min", 0.0)),
-            })
+            }
+            # Surface the drill quality-module config so format_human can render
+            # it (the drills seed quality onto the mined raw; the -5%/slot speed
+            # penalty is already baked into drill_count above).
+            if miner_quality_modules and module_quality:
+                stage["quality_slots"] = miner_slots
+                stage["quality_module_tier"] = quality_module_tier
+                stage["quality_module_quality"] = module_quality
+                stage["speed_penalty_pct"] = (1.0 - drill_speed_mult) * 100.0
+                # Per-tier split of the mined output from the single drill quality
+                # roll (this is the "mixed quality at different rates" the raw is
+                # produced at, before it all feeds the recycler).
+                q_mine = _quality_chance(miner_slots, quality_module_tier, module_quality)
+                split_probs = _tier_skip_probs(q_mine, 0)
+                # Cap at the target tier: the player can't roll a quality above
+                # what they've researched (--target-quality is the ceiling), so
+                # roll mass above it folds onto it — mirrors cli --max-quality
+                # and the solver's own `sum(dist[target_tier:])` yield.
+                capped = [0.0] * 5
+                for t in range(5):
+                    capped[min(t, target_tier)] += split_probs[t]
+                mined_rate = float(entry.get("rate_per_min", 0.0))
+                stage["q_miner"] = q_mine
+                stage["quality_split"] = {
+                    QUALITY_TIERS[t]: capped[t] * mined_rate
+                    for t in range(target_tier + 1)
+                    if capped[t] * mined_rate > 1e-9
+                }
+            miner_stages.append(stage)
 
     # Total machine count
     total_machines = (
@@ -6528,10 +6619,11 @@ def plan(
             f"incidental byproduct surplus: {surplus:.2f} legendary "
             f"{byprod}/min unused (no downstream demand)"
         )
-    # Known-limitation marker: the reprocessing quality climb predates the
-    # 2.1.8 rule change (reprocessing recipes no longer accept quality
-    # modules), so asteroid-sourced counts are optimistic.  See the module
-    # header / ASTEROID_REPROCESSING_RECIPES comment.
+    # Dormant guard: no stage carries the "asteroid-reprocessing" role anymore
+    # (the pre-2.1.8 quality climb was retired in favour of crushing + ore
+    # self-recycle), so `reprocessing_stages` is always empty and this note
+    # never fires.  Kept as a tripwire in case a reprocessing path is ever
+    # reintroduced.  See the module header / ASTEROID_REPROCESSING_RECIPES comment.
     if reprocessing_stages:
         notes.append(
             "asteroid-reprocessing modelling predates the 2.1.8 rule change "
@@ -6721,6 +6813,114 @@ def _module_config_summary(mcfg: dict) -> str:
     if len(distinct) == 1:
         return next(iter(distinct))
     return "; ".join(f"{t}: {lbl}" for t, lbl in per_tier.items())
+
+
+def _fmt_power(kw: float) -> str:
+    kw = float(kw)
+    return f"{kw / 1000.0:.2f} MW" if kw >= 1000.0 else f"{kw:.0f} kW"
+
+
+def _stage_detail_lines(st: dict, tier: str) -> list[str]:
+    """cli.py-style per-stage detail block: buildable machine count, modules,
+    power, and arrowed inputs/outputs.  Additive under each stage headline so
+    the planner's human output reads like ``cli.py --format human``."""
+    ind = " " * 17
+    lines: list[str] = []
+    mc = st.get("machine_count")
+    machine = st.get("machine")
+    if mc is not None and machine:
+        lines.append(
+            f"{ind}build: {math.ceil(float(mc) - 1e-9)} × {_humanize(machine)}  "
+            f"(exact {float(mc):.2f})"
+        )
+    # Drill quality modules (mining stage) — otherwise invisible in the headline.
+    if st.get("quality_slots"):
+        pen = float(st.get("speed_penalty_pct", 0.0))
+        pen_s = f"  (speed −{pen:.0f}%)" if pen > 1e-9 else ""
+        lines.append(
+            f"{ind}modules: {int(st['quality_slots'])}x quality-"
+            f"{st.get('quality_module_tier', 3)}-"
+            f"{st.get('quality_module_quality', 'normal')}{pen_s}"
+        )
+    # Mined-raw quality split from the single drill roll — the mixed-quality
+    # output (all tiers feed the recycler downstream).
+    if st.get("quality_split"):
+        qm = float(st.get("q_miner", 0.0))
+        qm_s = f"  (roll {qm * 100:.1f}%)" if qm > 1e-9 else ""
+        split = ", ".join(
+            f"{_humanize(t)} {r:.2f}" for t, r in st["quality_split"].items()
+        )
+        lines.append(f"{ind}quality split (/min):{qm_s} {split}")
+    if st.get("power_kw"):
+        lines.append(f"{ind}power: {_fmt_power(st['power_kw'])}")
+    # Scrap→target yield transparency, so the conversion is auditable:
+    # scrap_per_min == demand / yield for the binding leaf.
+    if st["role"] == "scrap-quality-source" and st.get("yields"):
+        qmi = float(st.get("q_miner", 0.0))
+        qre = float(st.get("q_rec", 0.0))
+        lines.append(
+            f"{ind}rolls: miner q={qmi * 100:.1f}%, recycler q={qre * 100:.1f}%"
+        )
+        for leaf, y in sorted(st["yields"].items(), key=lambda x: x[1]):
+            bind = "  (binding)" if leaf == st.get("binding_leaf") else ""
+            lines.append(
+                f"{ind}yield: {float(y):.5f} {tier} {_humanize(leaf)} / scrap{bind}"
+            )
+    # Full per-recipe recycling cascade: scrap-recycling and every intermediate
+    # <item>-recycling step, with its own recycler count and depth.  Makes the
+    # real multi-step path (scrap → blue circuits/LDS → … → plates) explicit
+    # instead of implying scrap recycles straight into plates.  Step counts sum
+    # to this stage's machine_count.
+    if st.get("recycle_steps"):
+        lbl = st.get("recycler_modules_label")
+        pen = float(st.get("recycler_speed_penalty_pct", 0.0))
+        mod_note = (
+            f" — every recycler: {lbl}, speed −{pen:.0f}%" if lbl else ""
+        )
+        lines.append(
+            f"{ind}recycling cascade (per recipe, "
+            f"{float(st.get('machine_count', 0.0)):.2f} recyclers total{mod_note}):"
+        )
+        for step in st["recycle_steps"]:
+            basket = ", ".join(
+                f"{_humanize(k)} {v:.1f}"
+                for k, v in sorted(step["outputs"].items(), key=lambda x: -x[1])
+            ) or "—"
+            lines.append(
+                f"{ind}  d{step['depth']} {step['recipe']}: "
+                f"{step['recycled_per_min']:.1f}/min → {basket}  "
+                f"({step['machine_count']:.2f} rec)"
+            )
+    # Outputs (-> primary/basket) then inputs (<- ingredients), cli-style.
+    outs: dict = {}
+    if st.get("product"):
+        outs = {st["product"]: st.get("rate_per_min", 0.0)}
+    elif st["role"] == "mining" and st.get("item"):
+        outs = {st["item"]: st.get("rate_per_min", 0.0)}
+    elif st.get("outputs"):
+        outs = st["outputs"]
+    elif st["role"] == "scrap-quality-source" and st.get("covered"):
+        outs = st["covered"]
+    # Quality tag for this stage's I/O.  Factorio recipes are single-quality: a
+    # rare recipe consumes rare inputs and yields a rare output (no mixing).  So
+    # assembly stages run entirely at the target tier (or normal on a normal
+    # leg); the scrap/crushing/loop stages emit the target tier; mined raw is a
+    # mix (see the quality split); fluids are quality-transparent.
+    if st["role"] == "assembly":
+        sq = "normal" if st.get("normal_quality_chain") else tier
+        out_tag = in_tag = f" ({sq})"
+    elif st["role"] == "mining":
+        out_tag, in_tag = "  (mixed — see split)", ""
+    elif st["role"] == "fluid-chain":
+        out_tag = in_tag = ""  # fluids have no quality
+    else:
+        out_tag = in_tag = f" ({tier})"
+    for k, v in sorted(outs.items(), key=lambda x: -float(x[1])):
+        lines.append(f"{ind}-> {_humanize(k)}{out_tag}  {float(v):.2f}/min")
+    ins = st.get("inputs") or {}
+    for k, v in sorted(ins.items(), key=lambda x: -float(x[1])):
+        lines.append(f"{ind}<- {_humanize(k)}{in_tag}  {float(v):.2f}/min")
+    return lines
 
 
 def format_human(out: dict) -> str:
@@ -6970,6 +7170,7 @@ def format_human(out: dict) -> str:
         mc = _module_config_summary(st.get("module_config_per_tier", {}))
         if mc:
             L.append(f"                 modules: {mc}")
+        L.extend(_stage_detail_lines(st, tier))
     L.append("")
     L.append(f"Total machines: {out['total_machine_count']:.2f}")
     if "total_power_mw" in out:
@@ -7084,9 +7285,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--module-quality", default=None, choices=list(QUALITY_TIERS),
         help=(
-            "Quality of the quality-modules used in the loops.  Defaults to "
-            "--target-quality and may not exceed it (you can't have modules of "
-            "a quality you haven't researched)."
+            "Quality of the quality-modules you place in the drills/recyclers "
+            "(the seed gear, not the product).  Defaults to NORMAL (like "
+            "--machine-quality): researching a tier doesn't hand you modules AT "
+            "that quality — you must manufacture them, which is what this planner "
+            "is for.  Raise it (up to --target-quality) once your line is "
+            "producing better modules to feed back as seed gear."
         ),
     )
     p.add_argument("--quality-module-tier", default=3, type=int, choices=[1, 2, 3])
@@ -7246,7 +7450,7 @@ def parse_args() -> argparse.Namespace:
         help="Objective function to minimize: machines, power, raw-input, or cost (roadmap Q8).",
     )
     p.add_argument(
-        "--preset", default=None, choices=["end-game-fulgora", "end-game-nauvis", "nauvis-starter"],
+        "--preset", default=None, choices=["end-game-nauvis", "late-game-vulcanus", "nauvis-starter"],
         help="CLI configuration preset (roadmap Q9).",
     )
     p.add_argument("--format", default="human", choices=["human", "json"])
@@ -7254,9 +7458,9 @@ def parse_args() -> argparse.Namespace:
 
 
 PRESETS = {
-    "end-game-fulgora": {
-        "location": "fulgora",
-        "planets": "fulgora",
+    "late-game-vulcanus": {
+        "location": "vulcanus",
+        "planets": "nauvis,vulcanus,fulgora,gleba,aquilo",
         "tech": ["all"],
         "enable_shuffles": "all",
         "beacons": 8,
