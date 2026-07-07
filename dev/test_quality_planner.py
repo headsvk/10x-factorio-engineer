@@ -331,7 +331,7 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("target", j)
 
     def test_human_format_runs(self):
-        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        out = qp.plan("iron-plate", 60, _data(), module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
         self.assertIn("Target:", text)
         self.assertIn("Asteroid Input", text)
@@ -1057,10 +1057,11 @@ class TestAssemblyModules(unittest.TestCase):
                 self.assertAlmostEqual(st.get("module_prod", 0.0), inherent)
 
     def test_flag_reduces_total_machines(self):
-        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Modules cut total machines by an order of magnitude on chained
@@ -1070,10 +1071,11 @@ class TestAssemblyModules(unittest.TestCase):
         )
 
     def test_flag_reduces_raw_demand(self):
-        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Asteroid input drops because every assembly stage's ingredient demand
@@ -1088,6 +1090,7 @@ class TestAssemblyModules(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         em_stages = [
@@ -1154,6 +1157,7 @@ class TestAssemblyModules(unittest.TestCase):
         out = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         text = qp.format_human(out)
@@ -1201,10 +1205,11 @@ class TestGlebaPartial(unittest.TestCase):
         self.assertIn("yumako", out["mined_input"])
 
     def test_assembly_modules_reduce_gleba_chain(self):
-        out_off = qp.plan("bioflux", 60, _data(), planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED)
+        out_off = qp.plan("bioflux", 60, _data(), planets=["gleba"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "bioflux", 60, _data(),
             planets=["gleba"], assembly_modules=True,
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Biochambers have 4 slots; --assembly-modules adds prod modules on top of
@@ -1303,10 +1308,11 @@ class TestStagePower(unittest.TestCase):
             self.assertEqual(s["power_kw"], 0.0)
 
     def test_assembly_modules_reduce_power(self):
-        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], tech_state=qp.ALL_TECH_UNLOCKED)
+        out_off = qp.plan("processing-unit", 60, _data(), planets=["nauvis"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         out_on = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # Modules cut machine count → power drops proportionally.  The baseline
@@ -2125,7 +2131,7 @@ class TestHotSpotAdvisor(unittest.TestCase):
     def test_e2e_default_iron_plate_no_suggestion(self):
         # iron-plate default (legendary T3, no plastic) — asteroid is dominant
         # but nothing actionable, so no hot-spot note.
-        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        out = qp.plan("iron-plate", 60, _data(), module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         hot_notes = [n for n in out.get("notes", []) if "hot spot" in n]
         self.assertEqual(hot_notes, [])
 
@@ -2381,11 +2387,13 @@ class TestEnableShufflesAll(unittest.TestCase):
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
             active_shuffles={"all"},
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         out_without = qp.plan(
             "processing-unit", 60, _data(),
             planets=["nauvis"], assembly_modules=True,
+            module_quality="legendary",
             tech_state=qp.ALL_TECH_UNLOCKED,
         )
         # --enable-shuffles all should NEVER make total worse than baseline.
@@ -3505,21 +3513,23 @@ class TestTargetQuality(unittest.TestCase):
         self.assertNotIn("legendary out", text)
         self.assertNotIn("at tier legendary", text)
 
-    def test_module_quality_defaults_to_target(self):
-        # Unspecified module quality follows the target tier (no legendary
-        # default leaking into a rare plan).
+    def test_module_quality_defaults_to_normal(self):
+        # Unspecified seed-module quality defaults to NORMAL (the modules everyone
+        # has), not the target tier — researching rare doesn't hand you rare
+        # quality *modules* to seed with (you have to manufacture them).
         out = qp.plan(
             "accumulator", 10, _data(), planets=["fulgora"],
             tech_state=qp.ALL_TECH_UNLOCKED, target_tier=2,
         )
-        self.assertEqual(out["module_quality"], "rare")
+        self.assertEqual(out["module_quality"], "normal")
 
-    def test_default_target_keeps_legendary_modules(self):
-        # No flags: target defaults legendary, so modules default legendary too.
+    def test_default_module_quality_normal_even_for_legendary_target(self):
+        # No flags: target defaults legendary, but seed modules still default
+        # normal (bootstrapping — you don't hold legendary modules yet).
         out = qp.plan(
             "iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED,
         )
-        self.assertEqual(out["module_quality"], "legendary")
+        self.assertEqual(out["module_quality"], "normal")
 
     def test_module_quality_above_target_rejected(self):
         with self.assertRaises(ValueError):
@@ -3923,7 +3933,7 @@ class TestWrapDP(unittest.TestCase):
         # wrap path lands well under 500.
         out = qp.plan(
             "holmium-plate", 60, _data(),
-            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+            planets=["fulgora"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
         )
         st = next(s for s in out["stages"] if s.get("role") == "self-recycle-target")
         # Wrap-specific fields populated.
@@ -3945,7 +3955,7 @@ class TestWrapDP(unittest.TestCase):
     def test_holmium_plate_emits_wrap_note(self):
         out = qp.plan(
             "holmium-plate", 60, _data(),
-            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+            planets=["fulgora"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
         )
         notes = "\n".join(out["notes"])
         self.assertIn("wrap-and-recycle via", notes)
@@ -4015,11 +4025,11 @@ class TestWrapDP(unittest.TestCase):
         # Linear scaling holds even on the wrap path.
         a = qp.plan(
             "holmium-plate", 60, _data(),
-            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+            planets=["fulgora"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
         )
         b = qp.plan(
             "holmium-plate", 120, _data(),
-            planets=["fulgora"], tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
+            planets=["fulgora"], module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED, target_tier=4,
         )
         self.assertAlmostEqual(
             b["total_machine_count"] / a["total_machine_count"], 2.0, places=3,
@@ -4138,7 +4148,7 @@ class TestModuleConfigSurface(unittest.TestCase):
         self.assertIn("modules: 4x quality-2-rare", text)
 
     def test_asteroid_stage_renders_modules(self):
-        out = qp.plan("iron-plate", 60, _data(), tech_state=qp.ALL_TECH_UNLOCKED)
+        out = qp.plan("iron-plate", 60, _data(), module_quality="legendary", tech_state=qp.ALL_TECH_UNLOCKED)
         text = qp.format_human(out)
         self.assertIn("modules: 4x quality-3-legendary", text)
 

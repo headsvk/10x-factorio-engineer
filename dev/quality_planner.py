@@ -5507,11 +5507,15 @@ def plan(
     # plans that omitted --tech recycling=1.
     if fulgora_mode:
         tech_state = {**tech_state, "recycling": 1, "electromagnetic-plant": 1}
-    # Module/machine quality default to the target tier and may not exceed it:
-    # you can't have modules or machines of a quality you haven't researched
-    # (and if you've researched epic/legendary you'd be targeting it, not rare).
+    # Seed-module quality defaults to NORMAL (like --machine-quality), not the
+    # target tier: researching a quality tier does not give you quality *modules*
+    # at that quality — you have to manufacture those, which is the very problem
+    # this planner solves.  Assuming you already hold rare/legendary modules to
+    # seed with is a bootstrapping paradox, so the honest default is the modules
+    # everyone has (normal); pass --module-quality to model better seed gear once
+    # your line is producing it.  It still may not exceed --target-quality.
     if module_quality is None:
-        module_quality = QUALITY_TIERS[target_tier]
+        module_quality = "normal"
     if QUALITY_INDEX[module_quality] > target_tier:
         raise ValueError(
             f"ERROR: --module-quality {module_quality} exceeds --target-quality "
@@ -7281,9 +7285,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--module-quality", default=None, choices=list(QUALITY_TIERS),
         help=(
-            "Quality of the quality-modules used in the loops.  Defaults to "
-            "--target-quality and may not exceed it (you can't have modules of "
-            "a quality you haven't researched)."
+            "Quality of the quality-modules you place in the drills/recyclers "
+            "(the seed gear, not the product).  Defaults to NORMAL (like "
+            "--machine-quality): researching a tier doesn't hand you modules AT "
+            "that quality — you must manufacture them, which is what this planner "
+            "is for.  Raise it (up to --target-quality) once your line is "
+            "producing better modules to feed back as seed gear."
         ),
     )
     p.add_argument("--quality-module-tier", default=3, type=int, choices=[1, 2, 3])

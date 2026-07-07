@@ -999,7 +999,7 @@ python dev/quality_planner.py --item <item-id> --rate <N>
     [--target-quality uncommon|rare|epic|legendary]        # default: legendary (the goal tier — see note above)
     [--planets nauvis,vulcanus,fulgora,gleba,aquilo]      # default: empty (asteroid-only)
     [--location nauvis|vulcanus|fulgora|gleba|aquilo|space-platform]  # build location; --location fulgora = scrap-only sourcing
-    [--module-quality normal|uncommon|rare|epic|legendary] # default: matches --target-quality; may not exceed it
+    [--module-quality normal|uncommon|rare|epic|legendary] # seed-module quality; default: normal; may not exceed --target-quality
     [--quality-module-tier 1|2|3]                          # default: 3
     [--assembler-level 2|3]                                # default: 3
     [--machine-quality normal|uncommon|rare|epic|legendary] # default: normal
