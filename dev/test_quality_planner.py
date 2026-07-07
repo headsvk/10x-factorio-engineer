@@ -4585,6 +4585,16 @@ class TestFullStepsHumanFormat(unittest.TestCase):
         self.assertIn("recycling cascade (per recipe,", text)
         self.assertIn("scrap-recycling:", text)
 
+    def test_scrap_recyclers_carry_uniform_quality_modules(self):
+        # Every recycler in the cascade is modelled with the full quality-module
+        # loadout (RECYCLER_SLOTS = 4), taking the -20% speed penalty — surfaced
+        # so the uniform assumption is visible/auditable.
+        out = self._plan(miner_type="electric", miner_quality_modules=True)
+        s = next(x for x in out["stages"] if x["role"] == "scrap-quality-source")
+        self.assertEqual(s["recycler_modules_label"], "4x quality-3-rare")
+        self.assertAlmostEqual(s["recycler_speed_penalty_pct"], 20.0, places=6)
+        self.assertIn("every recycler: 4x quality-3-rare", qp.format_human(out))
+
     def test_mining_quality_split_caps_at_target_tier(self):
         # A rare target means rare is the researched ceiling — the drill roll
         # can't produce epic/legendary; that mass folds onto rare.

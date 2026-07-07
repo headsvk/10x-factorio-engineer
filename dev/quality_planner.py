@@ -2387,6 +2387,11 @@ def compute_scrap_source(
         "q_miner": q_miner,
         "q_rec": q,
         "recycle_steps": recycle_steps,
+        # Every recycler in the cascade carries the same quality-module loadout
+        # (RECYCLER_SLOTS quality modules) — including the byproduct-void steps,
+        # where quality is inert.  Surfaced so the assumption is auditable.
+        "recycler_modules_label": f"{RECYCLER_SLOTS}x quality-{quality_module_tier}-{module_quality}",
+        "recycler_speed_penalty_pct": (1.0 - _module_speed_mult(quality_slots=RECYCLER_SLOTS)) * 100.0,
         "module_config_per_tier": {
             QUALITY_TIERS[t]: {
                 "craft": "n/a",
@@ -6863,9 +6868,14 @@ def _stage_detail_lines(st: dict, tier: str) -> list[str]:
     # instead of implying scrap recycles straight into plates.  Step counts sum
     # to this stage's machine_count.
     if st.get("recycle_steps"):
+        lbl = st.get("recycler_modules_label")
+        pen = float(st.get("recycler_speed_penalty_pct", 0.0))
+        mod_note = (
+            f" — every recycler: {lbl}, speed −{pen:.0f}%" if lbl else ""
+        )
         lines.append(
             f"{ind}recycling cascade (per recipe, "
-            f"{float(st.get('machine_count', 0.0)):.2f} recyclers total):"
+            f"{float(st.get('machine_count', 0.0)):.2f} recyclers total{mod_note}):"
         )
         for step in st["recycle_steps"]:
             basket = ", ".join(

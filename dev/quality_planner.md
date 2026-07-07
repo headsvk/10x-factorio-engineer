@@ -12,7 +12,7 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **380 tests, all passing, ~11 s.**
+**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **381 tests, all passing, ~11 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
@@ -215,7 +215,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots). Has `module_config_per_tier` (crusher quality slots per tier) |
 | `raw-crushing` | plan() | crusher | Legendary chunk → legendary ore (advanced crushing, 2 outputs per recipe) |
 | `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite. Has `module_config_per_tier` (recycler quality slots per tier) |
-| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables. Convolved with miner quality modules when `miner_quality_modules` is active. Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier`, and (for audit) `yields` (target-tier items per scrap, per leaf), `q_miner`, `q_rec`, plus `recycle_steps` — the per-recipe decomposition of the aggregate recycler count (`{recipe, item, recycled_per_min, machine_count, depth, outputs}` for scrap-recycling + every intermediate `<item>-recycling`, step counts summing to `machine_count`) so the multi-step scrap→plates path is visible |
+| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables. Convolved with miner quality modules when `miner_quality_modules` is active. Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier`, and (for audit) `yields` (target-tier items per scrap, per leaf), `q_miner`, `q_rec`, plus `recycle_steps` — the per-recipe decomposition of the aggregate recycler count (`{recipe, item, recycled_per_min, machine_count, depth, outputs}` for scrap-recycling + every intermediate `<item>-recycling`, step counts summing to `machine_count`) so the multi-step scrap→plates path is visible, and `recycler_modules_label`/`recycler_speed_penalty_pct` (every recycler in the cascade carries the same `RECYCLER_SLOTS`-slot quality-module loadout, including the byproduct-void steps) |
 | `scrap-upcycle-loop` | `compute_scrap_source` | craft+recycler | Closed-loop upcycling on Fulgora for iron and copper plates. Splits `craft_machines` and `recycler_machines` |
 | `cross-item-shuffle` | plan() | foundry+recycler | LDS cast + recycle. Splits machine count between `foundry_machines` and `recycler_machines`. Has `byproduct_legendary`, `byproduct_credited`, `byproduct_overflow`, `fluid_demand` |
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
@@ -554,7 +554,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **380 tests**, 56 classes.
+`dev/test_quality_planner.py` — **381 tests**, 56 classes.
 
 | Class | Coverage |
 |---|---|
