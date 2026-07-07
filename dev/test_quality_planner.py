@@ -4558,6 +4558,13 @@ class TestFullStepsHumanFormat(unittest.TestCase):
         self.assertIn("-> Quality Module 2 (rare)", text)
         self.assertIn("<- Processing Unit (rare)", text)
 
+    def test_mining_stage_does_not_clobber_target_rate(self):
+        # Regression: the mining-stage builder computes the mined-scrap rate for
+        # the quality split; it must NOT shadow plan()'s `rate` parameter (the
+        # target rate), or out["target"]["rate_per_min"] leaks the scrap rate.
+        out = self._plan(miner_type="electric", miner_quality_modules=True)
+        self.assertEqual(out["target"]["rate_per_min"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

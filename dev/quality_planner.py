@@ -6408,12 +6408,12 @@ def plan(
                 # produced at, before it all feeds the recycler).
                 q_mine = _quality_chance(miner_slots, quality_module_tier, module_quality)
                 split_probs = _tier_skip_probs(q_mine, 0)
-                rate = float(entry.get("rate_per_min", 0.0))
+                mined_rate = float(entry.get("rate_per_min", 0.0))
                 stage["q_miner"] = q_mine
                 stage["quality_split"] = {
-                    QUALITY_TIERS[t]: split_probs[t] * rate
+                    QUALITY_TIERS[t]: split_probs[t] * mined_rate
                     for t in range(5)
-                    if split_probs[t] * rate > 1e-9
+                    if split_probs[t] * mined_rate > 1e-9
                 }
             miner_stages.append(stage)
 
