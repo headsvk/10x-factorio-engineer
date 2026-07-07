@@ -1956,7 +1956,14 @@ def solve_mined_raw_self_recycle_loop(
 #   * One scrap produces the whole basket simultaneously, so the binding (most
 #     scrap-hungry) demanded leaf sets the scrap rate; the other outputs are
 #     credited against chain demand or counted as overflow.
-#   * Sub-target items that cannot climb further are part of the overflow.
+#   * We recycle ONLY the steps that lead to a demanded leaf (see
+#     ``_scrap_productive_recycle``).  Terminal plates we want and pure-junk
+#     co-products are NOT recycled to void — they fall out as byproducts (per
+#     quality tier).  This drops the "disposal" recyclers that previously added
+#     machines + quality modules + the −20% quality-slot speed penalty for zero
+#     yield.  Yields (hence scrap input + the miner fleet) are unchanged; only
+#     the recycler count shrinks.
+#   * Sub-target items that cannot climb further leave the array as byproducts.
 
 SCRAP_RECYCLING_RECIPE = "scrap-recycling"
 _SCRAP_CASCADE_CACHE: dict[int, dict] = {}
@@ -2036,6 +2043,122 @@ def build_scrap_cascade(data: dict, max_depth: int = 6) -> dict:
     }
     _SCRAP_CASCADE_CACHE[id(data)] = result
     return result
+
+
+def _scrap_productive_recycle(
+    data: dict, demanded_leaves, max_depth: int = 6
+) -> tuple[set[str], dict[str, dict[int, float]]]:
+    """Split the scrap cascade into *productive* recycling vs. *byproducts*.
+
+    The old cascade recycled every item to the bottom, including terminal plates
+    we actually want and pure-junk co-products — so the recycler count (and its
+    quality-module loadout + speed penalty) was inflated by "disposal" recyclers
+    that void their input for zero quality yield.  This function instead keeps
+    only the recycling steps that lead somewhere useful:
+
+    Returns ``(recycle_set, byproduct_depth_amounts)``:
+      * ``recycle_set`` — items we actively recycle because their recycling
+        leads (transitively) to a demanded leaf.  ``scrap`` is always included;
+        demanded leaves are KEPT (never recycled — they're the product).
+      * ``byproduct_depth_amounts`` — ``{item: {depth: amt_per_scrap}}`` for
+        every NON-recycled item that falls out when only ``recycle_set`` items
+        are expanded (so phantom production from would-be disposal steps — e.g.
+        stone-brick from concrete you no longer recycle — is excluded).  Fluids
+        are omitted (quality-transparent, not a quality byproduct).
+
+    Yields of the demanded leaves are UNAFFECTED: every demanded leaf is still
+    produced by the same productive steps, so ``scrap_target_yield`` (and thus
+    scrap input + the miner fleet) is identical with or without this filter.
+    Only the recycler count changes.
+    """
+    fluids = build_fluid_set(data)
+    recipes_by_key = {r["key"]: r for r in data.get("recipes", [])}
+    mined_raws = {
+        r["name"]
+        for res in data.get("resources", [])
+        for r in res.get("results", [])
+        if r.get("name") and r["name"] != "scrap"
+    }
+
+    def rec_outputs(item: str) -> dict[str, float] | None:
+        r = recipes_by_key.get(f"{item}-recycling")
+        if r is None:
+            return None
+        out: dict[str, float] = {}
+        for res in r.get("results", []):
+            if res.get("name") == item:
+                continue
+            nm = res.get("name")
+            if nm in mined_raws:
+                continue  # never re-derive a base material back into ore
+            amt = res.get("amount")
+            if amt is None:
+                amt = (res.get("amount_min", 0) + res.get("amount_max", 0)) / 2.0
+            out[nm] = out.get(nm, 0.0) + float(amt) * float(res.get("probability", 1.0))
+        return out
+
+    demanded = set(demanded_leaves)
+
+    # Every item reachable from scrap via recycling (bounds the fixpoint below).
+    reachable: set[str] = set()
+    frontier = {"scrap"}
+    for _ in range(max_depth + 1):
+        nxt: set[str] = set()
+        for it in frontier:
+            outs = rec_outputs(it)
+            if not outs:
+                continue
+            for k in outs:
+                if k not in reachable and k not in fluids:
+                    reachable.add(k)
+                    nxt.add(k)
+        frontier = nxt
+        if not frontier:
+            break
+
+    # Fixpoint: X (not a demanded leaf) is productive-to-recycle iff its recycle
+    # basket contains a demanded leaf or another productive item.  ``scrap`` is
+    # always productive (it is the cascade root).
+    recycle_set = {"scrap"}
+    changed = True
+    while changed:
+        changed = False
+        for X in reachable:
+            if X in recycle_set or X in demanded:
+                continue
+            outs = rec_outputs(X)
+            if not outs:
+                continue
+            if any((k in demanded) or (k in recycle_set) for k in outs):
+                recycle_set.add(X)
+                changed = True
+
+    # Forward BFS expanding only ``recycle_set`` items; anything else that comes
+    # out is a byproduct (recorded at the depth it first appears, accumulated
+    # across depths — e.g. iron-plate emitted at d1 by gears and at d2 by
+    # circuits).
+    byproduct_depth: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    cur = {"scrap": 1.0}
+    for depth in range(max_depth):
+        nxt_amt: dict[str, float] = defaultdict(float)
+        for item, amt in cur.items():
+            if item not in recycle_set:
+                continue
+            outs = rec_outputs(item)
+            if not outs:
+                continue
+            for k, v in outs.items():
+                produced = amt * v
+                if k in recycle_set:
+                    if k not in fluids:
+                        nxt_amt[k] += produced
+                elif k not in fluids:
+                    byproduct_depth[k][depth + 1] += produced
+        cur = dict(nxt_amt)
+        if not cur:
+            break
+
+    return recycle_set, {k: dict(v) for k, v in byproduct_depth.items()}
 
 
 def _compose_quality_rolls(q_chance: float, d: int) -> list[float]:
@@ -2316,10 +2439,18 @@ def compute_scrap_source(
         if surplus > 1e-9:
             overflow[leaf] = surplus
 
+    # Only recycle what leads to a demanded leaf.  Terminal plates we want and
+    # pure-junk co-products are NOT recycled — they fall out as byproducts (see
+    # ``byproducts`` below) instead of being destroyed by quality-moduled
+    # disposal recyclers.  This drops the "voiding" recyclers that added
+    # machines + modules + the −20% quality-slot speed penalty for zero yield.
+    recycle_set, byproduct_depth = _scrap_productive_recycle(data, demanded_leaves)
+
     qm_speed_mult = 1.0 + float(cli.MACHINE_QUALITY_SPEED.get(machine_quality, 0))
     recycle_load = sum(
         cascade["recycle_amounts"].get(it, 0.0) * cascade["recycle_time"].get(it, 0.2)
-        for it in cascade["recycle_amounts"]
+        for it in recycle_set
+        if it in cascade["recycle_amounts"]
     )
     recycle_denom = (
         RECYCLER_SPEED * qm_speed_mult
@@ -2354,8 +2485,8 @@ def compute_scrap_source(
     }
     recycle_steps: list[dict] = []
     for it, amt_per_scrap in cascade["recycle_amounts"].items():
-        if amt_per_scrap <= 0:
-            continue
+        if amt_per_scrap <= 0 or it not in recycle_set:
+            continue  # disposal steps dropped — their items are byproducts now
         amt_min = scrap_per_min * amt_per_scrap
         cnt = amt_min * cascade["recycle_time"].get(it, 0.2) / recycle_denom
         recycle_steps.append({
@@ -2369,6 +2500,37 @@ def compute_scrap_source(
     recycle_steps.sort(key=lambda s: (s["depth"], -s["machine_count"]))
 
     q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
+
+    # Byproducts: everything the scrap basket produces that the productive chain
+    # does not consume — the sub-target-quality fraction of the demanded plates
+    # (we only keep target-or-better, up to demand) plus the pure co-products
+    # (steel-plate, concrete, solid-fuel, ice, holmium-ore, …).  Each is broken
+    # out per quality tier from the same miner+recycler roll convolution used for
+    # yields, so the rates line up with the rest of the plan.
+    byproducts: dict[str, dict[str, float]] = {}
+    for it, depths in byproduct_depth.items():
+        per = [0.0] * 5
+        for d, amt in depths.items():
+            if d <= 0:
+                continue
+            dist = _compose_miner_and_recycler_rolls(q_miner, q, d)
+            rate = scrap_per_min * amt
+            for t in range(5):
+                per[t] += rate * dist[t]
+        # For a demanded leaf, the target-or-better fraction we actually use is
+        # the product (see ``covered``); subtract it so only the genuine surplus
+        # (sub-target tiers + any target-tier overflow) shows up as byproduct.
+        used = covered.get(it, 0.0)
+        for t in range(target_tier, 5):
+            take = min(used, per[t])
+            per[t] -= take
+            used -= take
+        tiers = {
+            QUALITY_TIERS[t]: per[t] for t in range(5) if per[t] > 1e-6
+        }
+        if tiers:
+            byproducts[it] = tiers
+
     stage = {
         "role": "scrap-quality-source",
         "recipe": SCRAP_RECYCLING_RECIPE,
@@ -2387,9 +2549,14 @@ def compute_scrap_source(
         "q_miner": q_miner,
         "q_rec": q,
         "recycle_steps": recycle_steps,
-        # Every recycler in the cascade carries the same quality-module loadout
-        # (RECYCLER_SLOTS quality modules) — including the byproduct-void steps,
-        # where quality is inert.  Surfaced so the assumption is auditable.
+        # Per-tier surplus basket (see byproducts computation above): the
+        # sub-target plate fractions + pure co-products that are no longer
+        # recycled to void.  {item: {tier_name: rate_per_min}}.
+        "byproducts": byproducts,
+        # Every (productive) recycler in the cascade carries the same
+        # quality-module loadout (RECYCLER_SLOTS quality modules).  Disposal
+        # steps are no longer counted, so this loadout now applies only to
+        # recyclers doing real quality work.  Surfaced so it stays auditable.
         "recycler_modules_label": f"{RECYCLER_SLOTS}x quality-{quality_module_tier}-{module_quality}",
         "recycler_speed_penalty_pct": (1.0 - _module_speed_mult(quality_slots=RECYCLER_SLOTS)) * 100.0,
         "module_config_per_tier": {
@@ -6891,6 +7058,26 @@ def _stage_detail_lines(st: dict, tier: str) -> list[str]:
                 f"{step['recycled_per_min']:.1f}/min → {basket}  "
                 f"({step['machine_count']:.2f} rec)"
             )
+    # Byproducts: the scrap basket's surplus that the productive chain does not
+    # consume — sub-target plate fractions + pure co-products — broken out per
+    # quality tier.  These are NOT recycled to void (no disposal recyclers); they
+    # leave the array as usable material.
+    if st.get("byproducts"):
+        lines.append(f"{ind}byproducts (unneeded scrap output, /min):")
+        # Order by total rate desc so the biggest streams read first.
+        for it, tiers in sorted(
+            st["byproducts"].items(),
+            key=lambda kv: -sum(kv[1].values()),
+        ):
+            parts = ", ".join(
+                f"{_humanize(t)} {r:.1f}"
+                for t, r in sorted(
+                    tiers.items(), key=lambda x: QUALITY_INDEX.get(x[0], 0)
+                )
+                if r > 0.5
+            )
+            if parts:
+                lines.append(f"{ind}  {_humanize(it)}: {parts}")
     # Outputs (-> primary/basket) then inputs (<- ingredients), cli-style.
     outs: dict = {}
     if st.get("product"):

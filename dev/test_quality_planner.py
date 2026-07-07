@@ -1606,6 +1606,92 @@ class TestQualityScrapSeeding(unittest.TestCase):
         self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 3775.72, delta=1e-1)
 
 
+class TestScrapDisposalDropped(unittest.TestCase):
+    """Scrap cascade recycles only productive steps; unneeded output is byproduct."""
+
+    def _fulgora_qm2(self, **kw):
+        return qp.plan(
+            "quality-module-2", 60, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare", quality_module_tier=2,
+            location="fulgora", tech_state=qp.ALL_TECH_UNLOCKED, **kw,
+        )
+
+    def _scrap_stage(self, out):
+        return [s for s in out["stages"] if s["role"] == "scrap-quality-source"][0]
+
+    def test_productive_recycle_set_excludes_void_and_kept_plates(self):
+        data = _data()
+        recycle_set, byproducts = qp._scrap_productive_recycle(
+            data, {"iron-plate": 1.0, "copper-plate": 1.0, "plastic-bar": 1.0}
+        )
+        # Productive intermediates that route to a demanded plate stay in.
+        for it in ("scrap", "iron-gear-wheel", "copper-cable", "advanced-circuit",
+                   "low-density-structure", "battery", "electronic-circuit",
+                   "processing-unit"):
+            self.assertIn(it, recycle_set)
+        # Demanded leaves are kept (product), pure junk / dead-ends are dropped;
+        # each still-produced one surfaces as a byproduct.
+        for it in ("iron-plate", "copper-plate", "plastic-bar", "steel-plate",
+                   "concrete", "solid-fuel", "ice", "holmium-ore"):
+            self.assertNotIn(it, recycle_set)
+            self.assertIn(it, byproducts)
+        # stone-brick was only ever produced BY recycling concrete; now that we
+        # don't recycle concrete (concrete is itself a byproduct), stone-brick is
+        # never produced — neither recycled nor a byproduct.
+        self.assertNotIn("stone-brick", recycle_set)
+        self.assertNotIn("stone-brick", byproducts)
+
+    def test_no_disposal_step_in_recycle_steps(self):
+        st = self._scrap_stage(self._fulgora_qm2())
+        recycled = {s["item"] for s in st["recycle_steps"]}
+        # None of the void / kept-plate items should be recycled any more.
+        self.assertFalse(recycled & {
+            "iron-plate", "copper-plate", "plastic-bar", "steel-plate",
+            "concrete", "solid-fuel", "ice", "holmium-ore", "stone-brick",
+        })
+
+    def test_recycle_steps_sum_to_machine_count(self):
+        st = self._scrap_stage(self._fulgora_qm2())
+        self.assertAlmostEqual(
+            sum(s["machine_count"] for s in st["recycle_steps"]),
+            st["machine_count"], delta=1e-6,
+        )
+
+    def test_byproducts_carry_per_tier_rates(self):
+        st = self._scrap_stage(self._fulgora_qm2())
+        self.assertIn("byproducts", st)
+        # Steel-plate is a pure co-product; it should surface at multiple tiers.
+        steel = st["byproducts"]["steel-plate"]
+        self.assertIn("normal", steel)
+        self.assertGreater(steel["normal"], 0.0)
+        # Demanded-leaf sub-target fraction surfaces too (normal iron-plate is huge).
+        self.assertGreater(st["byproducts"]["iron-plate"]["normal"], 0.0)
+
+    def test_scrap_input_unaffected_by_dropping_disposal(self):
+        # Dropping disposal recyclers must NOT change scrap input (yields are set
+        # by the productive steps only).  Anchor the binding-leaf scrap rate.
+        out = self._fulgora_qm2()
+        self.assertAlmostEqual(out["scrap_input"]["scrap"], 267698.91, delta=1.0)
+
+    def test_disposal_drop_cuts_recycler_count(self):
+        # The productive-only stage is materially smaller than the old
+        # recycle-everything model.  Reconstruct the full-recycle count from the
+        # cascade and assert the productive count is well below it (>15% cut).
+        out = self._fulgora_qm2()
+        st = self._scrap_stage(out)
+        data = _data()
+        cascade = qp.build_scrap_cascade(data)
+        scrap = out["scrap_input"]["scrap"]
+        qm_speed = 1.0  # machine_quality defaults to normal here
+        denom = (qp.RECYCLER_SPEED * qm_speed
+                 * qp._module_speed_mult(quality_slots=qp.RECYCLER_SLOTS) * 60.0)
+        full = scrap * sum(
+            cascade["recycle_amounts"][it] * cascade["recycle_time"].get(it, 0.2)
+            for it in cascade["recycle_amounts"]
+        ) / denom
+        self.assertLess(st["machine_count"], 0.85 * full)
+
+
 class TestScrapUpcycleLoops(unittest.TestCase):
     """C4: CLOSED-LOOP plate upcycling on Fulgora."""
 
