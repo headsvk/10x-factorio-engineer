@@ -2337,6 +2337,13 @@ def compute_scrap_source(
         "covered": covered,
         "overflow": overflow,
         "recycler_quality_chance": q,
+        # Yield transparency (so the scrap→target conversion is auditable):
+        # target-tier items produced per 1 normal scrap, per leaf, plus the two
+        # per-roll quality chances that produce them.  scrap_per_min for the
+        # binding leaf == demand / yields[binding_leaf].
+        "yields": {leaf: y for leaf, y in yields.items() if demanded_leaves.get(leaf, 0) > 0},
+        "q_miner": q_miner,
+        "q_rec": q,
         "module_config_per_tier": {
             QUALITY_TIERS[t]: {
                 "craft": "n/a",
@@ -6396,6 +6403,18 @@ def plan(
                 stage["quality_module_tier"] = quality_module_tier
                 stage["quality_module_quality"] = module_quality
                 stage["speed_penalty_pct"] = (1.0 - drill_speed_mult) * 100.0
+                # Per-tier split of the mined output from the single drill quality
+                # roll (this is the "mixed quality at different rates" the raw is
+                # produced at, before it all feeds the recycler).
+                q_mine = _quality_chance(miner_slots, quality_module_tier, module_quality)
+                split_probs = _tier_skip_probs(q_mine, 0)
+                rate = float(entry.get("rate_per_min", 0.0))
+                stage["q_miner"] = q_mine
+                stage["quality_split"] = {
+                    QUALITY_TIERS[t]: split_probs[t] * rate
+                    for t in range(5)
+                    if split_probs[t] * rate > 1e-9
+                }
             miner_stages.append(stage)
 
     # Total machine count
@@ -6764,8 +6783,30 @@ def _stage_detail_lines(st: dict, tier: str) -> list[str]:
             f"{st.get('quality_module_tier', 3)}-"
             f"{st.get('quality_module_quality', 'normal')}{pen_s}"
         )
+    # Mined-raw quality split from the single drill roll — the mixed-quality
+    # output (all tiers feed the recycler downstream).
+    if st.get("quality_split"):
+        qm = float(st.get("q_miner", 0.0))
+        qm_s = f"  (roll {qm * 100:.1f}%)" if qm > 1e-9 else ""
+        split = ", ".join(
+            f"{_humanize(t)} {r:.2f}" for t, r in st["quality_split"].items()
+        )
+        lines.append(f"{ind}quality split (/min):{qm_s} {split}")
     if st.get("power_kw"):
         lines.append(f"{ind}power: {_fmt_power(st['power_kw'])}")
+    # Scrap→target yield transparency, so the conversion is auditable:
+    # scrap_per_min == demand / yield for the binding leaf.
+    if st["role"] == "scrap-quality-source" and st.get("yields"):
+        qmi = float(st.get("q_miner", 0.0))
+        qre = float(st.get("q_rec", 0.0))
+        lines.append(
+            f"{ind}rolls: miner q={qmi * 100:.1f}%, recycler q={qre * 100:.1f}%"
+        )
+        for leaf, y in sorted(st["yields"].items(), key=lambda x: x[1]):
+            bind = "  (binding)" if leaf == st.get("binding_leaf") else ""
+            lines.append(
+                f"{ind}yield: {float(y):.5f} {tier} {_humanize(leaf)} / scrap{bind}"
+            )
     # Outputs (-> primary/basket) then inputs (<- ingredients), cli-style.
     outs: dict = {}
     if st.get("product"):
@@ -6776,11 +6817,25 @@ def _stage_detail_lines(st: dict, tier: str) -> list[str]:
         outs = st["outputs"]
     elif st["role"] == "scrap-quality-source" and st.get("covered"):
         outs = st["covered"]
+    # Quality tag for this stage's I/O.  Factorio recipes are single-quality: a
+    # rare recipe consumes rare inputs and yields a rare output (no mixing).  So
+    # assembly stages run entirely at the target tier (or normal on a normal
+    # leg); the scrap/crushing/loop stages emit the target tier; mined raw is a
+    # mix (see the quality split); fluids are quality-transparent.
+    if st["role"] == "assembly":
+        sq = "normal" if st.get("normal_quality_chain") else tier
+        out_tag = in_tag = f" ({sq})"
+    elif st["role"] == "mining":
+        out_tag, in_tag = "  (mixed — see split)", ""
+    elif st["role"] == "fluid-chain":
+        out_tag = in_tag = ""  # fluids have no quality
+    else:
+        out_tag = in_tag = f" ({tier})"
     for k, v in sorted(outs.items(), key=lambda x: -float(x[1])):
-        lines.append(f"{ind}-> {_humanize(k)}  {float(v):.2f}/min")
+        lines.append(f"{ind}-> {_humanize(k)}{out_tag}  {float(v):.2f}/min")
     ins = st.get("inputs") or {}
     for k, v in sorted(ins.items(), key=lambda x: -float(x[1])):
-        lines.append(f"{ind}<- {_humanize(k)}  {float(v):.2f}/min")
+        lines.append(f"{ind}<- {_humanize(k)}{in_tag}  {float(v):.2f}/min")
     return lines
 
 

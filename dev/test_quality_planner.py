@@ -4520,6 +4520,44 @@ class TestFullStepsHumanFormat(unittest.TestCase):
         self.assertIn("build:", text)   # ceil buildable count
         self.assertIn("power:", text)   # per-stage power
 
+    def test_mining_quality_split_sums_to_rate(self):
+        out = self._plan(miner_type="electric", miner_quality_modules=True)
+        mining = next(s for s in out["stages"] if s["role"] == "mining")
+        self.assertIn("quality_split", mining)
+        # The per-tier split of the mined output totals the mined rate.
+        self.assertAlmostEqual(
+            sum(mining["quality_split"].values()), mining["rate_per_min"], delta=1e-6)
+        # Normal dominates; legendary is the rarest tail (if present).
+        self.assertGreater(
+            mining["quality_split"]["normal"],
+            mining["quality_split"].get("legendary", 0.0))
+
+    def test_scrap_yield_matches_scrap_per_min(self):
+        out = self._plan(miner_type="electric", miner_quality_modules=True)
+        scrap = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
+        self.assertIn("yields", scrap)
+        binding = scrap["binding_leaf"]
+        y = scrap["yields"][binding]
+        demand = scrap["covered"][binding]
+        # The auditable invariant the display now exposes: scrap_per_min ==
+        # demand / yield for the binding leaf.
+        self.assertAlmostEqual(
+            scrap["scrap_per_min"], demand / y,
+            delta=scrap["scrap_per_min"] * 1e-6)
+
+    def test_human_renders_yield_split_and_rolls(self):
+        text = qp.format_human(self._plan(miner_quality_modules=True))
+        self.assertIn("quality split (/min):", text)
+        self.assertIn("yield:", text)
+        self.assertIn("rolls: miner q=", text)
+
+    def test_human_tags_assembly_io_with_target_quality(self):
+        # Recipes are single-quality: a rare assembly stage shows rare inputs
+        # and a rare output.
+        text = qp.format_human(self._plan(miner_quality_modules=True))
+        self.assertIn("-> Quality Module 2 (rare)", text)
+        self.assertIn("<- Processing Unit (rare)", text)
+
 
 if __name__ == "__main__":
     unittest.main()
