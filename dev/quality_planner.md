@@ -12,14 +12,14 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **378 tests, all passing, ~11 s.**
+**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **380 tests, all passing, ~11 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 Currently shipped:
-- **cli.py-style full-step human output + quality visibility (2026-07-07)** — `format_human` now renders a per-stage detail block under each headline: buildable (ceil) machine count + exact, per-stage `power`, and arrowed outputs (`->`) / inputs (`<-`) **tagged with their quality tier** (assembly recipes are single-quality — `-> Quality Module 2 (rare)`, `<- Advanced Circuit (rare)`; mined raw is `(mixed — see split)`; fluids untagged). For Fulgora scrap seeding it also surfaces: the drill quality-module config + speed penalty (`modules: 3x quality-3-rare (speed −15%)`), the **mined-scrap quality split** from the single drill roll (`quality split (/min): (roll 12.0%) Normal 2847.21, Uncommon 349.43, …`), and the **scrap→target yield** per leaf with the two per-roll chances (`rolls: miner q=12.0%, recycler q=16.0%` / `yield: 0.00321 rare Plastic Bar / scrap (binding)`) so the conversion is auditable (`scrap_per_min == demand / yield` for the binding leaf). New stage fields: `mining` carries `quality_slots`/`quality_module_tier`/`quality_module_quality`/`speed_penalty_pct`/`q_miner`/`quality_split`; `scrap-quality-source` carries `yields`/`q_miner`/`q_rec`. Display-only; no solver-math change.
+- **cli.py-style full-step human output + quality visibility (2026-07-07)** — `format_human` now renders a per-stage detail block under each headline: buildable (ceil) machine count + exact, per-stage `power`, and arrowed outputs (`->`) / inputs (`<-`) **tagged with their quality tier** (assembly recipes are single-quality — `-> Quality Module 2 (rare)`, `<- Advanced Circuit (rare)`; mined raw is `(mixed — see split)`; fluids untagged). For Fulgora scrap seeding it also surfaces: the drill quality-module config + speed penalty (`modules: 3x quality-3-rare (speed −15%)`), the **mined-scrap quality split** from the single drill roll (`quality split (/min): (roll 12.0%) Normal 2847.21, Uncommon 349.43, …`), and the **scrap→target yield** per leaf with the two per-roll chances (`rolls: miner q=12.0%, recycler q=16.0%` / `yield: 0.00321 rare Plastic Bar / scrap (binding)`) so the conversion is auditable (`scrap_per_min == demand / yield` for the binding leaf). It also breaks the collapsed `[scrap]` line into its **full per-recipe recycling cascade** — scrap-recycling (depth 0, no plates) plus every intermediate `<item>-recycling` step with its own recycler count and depth, so the real path (scrap → blue circuits/LDS → advanced-circuit → plastic-bar, …) is explicit; step counts sum exactly to the stage's aggregate recycler count. New stage fields: `mining` carries `quality_slots`/`quality_module_tier`/`quality_module_quality`/`speed_penalty_pct`/`q_miner`/`quality_split`; `scrap-quality-source` carries `yields`/`q_miner`/`q_rec`/`recycle_steps`. Display-only; no solver-math change.
 - **Ergonomics & CLI Presets (2026-07-04, Q9)** — Added `--preset end-game-nauvis|late-game-vulcanus|nauvis-starter` shortcuts for rapid multi-flag configuration.
 - **Custom Objective Function (2026-07-04, Q8)** — Added `--objective machines|power|raw-input|cost` flag and `_evaluate_objective` evaluation function to customize optimization metrics.
 - **Beacon & Speed-Module Integration (2026-07-04, Q7)** — Added `--beacons COUNT` flag. Applies beacon speed multipliers to crafting machines, scaling machine counts and power consumption.
@@ -215,7 +215,7 @@ python dev/quality_planner.py --item <id> --rate <N> [flags]
 | `asteroid-reprocessing` | plan() | crusher | Quality loop on asteroid chunks (80 % retention, 2 slots). Has `module_config_per_tier` (crusher quality slots per tier) |
 | `raw-crushing` | plan() | crusher | Legendary chunk → legendary ore (advanced crushing, 2 outputs per recipe) |
 | `mined-raw-self-recycle` | plan() | recycler | Quality loop on planet-mined raws (25 % retention, 4 slots, no prod). Covers coal, stone, tungsten-ore, scrap, holmium-ore, uranium-ore, yumako, jellynut, pentapod-egg, and (with `--no-asteroids`) iron-ore/copper-ore/ice/calcite. Has `module_config_per_tier` (recycler quality slots per tier) |
-| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables. Convolved with miner quality modules when `miner_quality_modules` is active. Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier`, and (for audit) `yields` (target-tier items per scrap, per leaf), `q_miner`, `q_rec` |
+| `scrap-quality-source` | plan() | recycler | Fulgora scrap → basket of rare/legendary recyclables. Convolved with miner quality modules when `miner_quality_modules` is active. Has `scrap_per_min`, `covered`, `overflow`, `binding_leaf`, `module_config_per_tier`, and (for audit) `yields` (target-tier items per scrap, per leaf), `q_miner`, `q_rec`, plus `recycle_steps` — the per-recipe decomposition of the aggregate recycler count (`{recipe, item, recycled_per_min, machine_count, depth, outputs}` for scrap-recycling + every intermediate `<item>-recycling`, step counts summing to `machine_count`) so the multi-step scrap→plates path is visible |
 | `scrap-upcycle-loop` | `compute_scrap_source` | craft+recycler | Closed-loop upcycling on Fulgora for iron and copper plates. Splits `craft_machines` and `recycler_machines` |
 | `cross-item-shuffle` | plan() | foundry+recycler | LDS cast + recycle. Splits machine count between `foundry_machines` and `recycler_machines`. Has `byproduct_legendary`, `byproduct_credited`, `byproduct_overflow`, `fluid_demand` |
 | `self-recycle-target` | `_plan_self_recycle_target` | craft+recycler | Recycler-only loop where the target's recycle returns itself. Splits `craft_machines` and `recycler_machines` |
@@ -554,7 +554,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **378 tests**, 56 classes.
+`dev/test_quality_planner.py` — **380 tests**, 56 classes.
 
 | Class | Coverage |
 |---|---|

@@ -2321,10 +2321,52 @@ def compute_scrap_source(
         cascade["recycle_amounts"].get(it, 0.0) * cascade["recycle_time"].get(it, 0.2)
         for it in cascade["recycle_amounts"]
     )
-    machine_count = scrap_per_min * recycle_load / (
+    recycle_denom = (
         RECYCLER_SPEED * qm_speed_mult
         * _module_speed_mult(quality_slots=RECYCLER_SLOTS) * 60.0
     )
+    machine_count = scrap_per_min * recycle_load / recycle_denom
+
+    # Per-recipe decomposition of that aggregate recycler count: every
+    # <item>-recycling step the cascade runs (scrap-recycling itself + each
+    # intermediate — processing-unit, low-density-structure, advanced-circuit,
+    # iron-gear-wheel, …), so the output can show the real multi-step path from
+    # scrap to plates instead of implying scrap → plate directly.  The step
+    # counts sum exactly to machine_count.
+    recipes_by_key = {r["key"]: r for r in data.get("recipes", [])}
+
+    def _recycle_basket(it: str) -> dict[str, float]:
+        r = recipes_by_key.get(SCRAP_RECYCLING_RECIPE if it == "scrap" else f"{it}-recycling")
+        if r is None:
+            return {}
+        out: dict[str, float] = {}
+        for res in r.get("results", []):
+            if res.get("name") == it:
+                continue
+            amt = res.get("amount")
+            if amt is None:
+                amt = (res.get("amount_min", 0) + res.get("amount_max", 0)) / 2.0
+            out[res["name"]] = out.get(res["name"], 0.0) + float(amt) * float(res.get("probability", 1.0))
+        return out
+
+    min_depth = {
+        k: (min(v) if v else 1) for k, v in cascade["depth_amounts"].items()
+    }
+    recycle_steps: list[dict] = []
+    for it, amt_per_scrap in cascade["recycle_amounts"].items():
+        if amt_per_scrap <= 0:
+            continue
+        amt_min = scrap_per_min * amt_per_scrap
+        cnt = amt_min * cascade["recycle_time"].get(it, 0.2) / recycle_denom
+        recycle_steps.append({
+            "recipe": SCRAP_RECYCLING_RECIPE if it == "scrap" else f"{it}-recycling",
+            "item": it,
+            "recycled_per_min": amt_min,
+            "machine_count": cnt,
+            "depth": 0 if it == "scrap" else min_depth.get(it, 1),
+            "outputs": {k: amt_min * v for k, v in _recycle_basket(it).items()},
+        })
+    recycle_steps.sort(key=lambda s: (s["depth"], -s["machine_count"]))
 
     q = _quality_chance(RECYCLER_SLOTS, quality_module_tier, module_quality)
     stage = {
@@ -2344,6 +2386,7 @@ def compute_scrap_source(
         "yields": {leaf: y for leaf, y in yields.items() if demanded_leaves.get(leaf, 0) > 0},
         "q_miner": q_miner,
         "q_rec": q,
+        "recycle_steps": recycle_steps,
         "module_config_per_tier": {
             QUALITY_TIERS[t]: {
                 "craft": "n/a",
@@ -6813,6 +6856,26 @@ def _stage_detail_lines(st: dict, tier: str) -> list[str]:
             bind = "  (binding)" if leaf == st.get("binding_leaf") else ""
             lines.append(
                 f"{ind}yield: {float(y):.5f} {tier} {_humanize(leaf)} / scrap{bind}"
+            )
+    # Full per-recipe recycling cascade: scrap-recycling and every intermediate
+    # <item>-recycling step, with its own recycler count and depth.  Makes the
+    # real multi-step path (scrap → blue circuits/LDS → … → plates) explicit
+    # instead of implying scrap recycles straight into plates.  Step counts sum
+    # to this stage's machine_count.
+    if st.get("recycle_steps"):
+        lines.append(
+            f"{ind}recycling cascade (per recipe, "
+            f"{float(st.get('machine_count', 0.0)):.2f} recyclers total):"
+        )
+        for step in st["recycle_steps"]:
+            basket = ", ".join(
+                f"{_humanize(k)} {v:.1f}"
+                for k, v in sorted(step["outputs"].items(), key=lambda x: -x[1])
+            ) or "—"
+            lines.append(
+                f"{ind}  d{step['depth']} {step['recipe']}: "
+                f"{step['recycled_per_min']:.1f}/min → {basket}  "
+                f"({step['machine_count']:.2f} rec)"
             )
     # Outputs (-> primary/basket) then inputs (<- ingredients), cli-style.
     outs: dict = {}

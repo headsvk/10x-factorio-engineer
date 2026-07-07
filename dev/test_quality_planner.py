@@ -4565,6 +4565,26 @@ class TestFullStepsHumanFormat(unittest.TestCase):
         out = self._plan(miner_type="electric", miner_quality_modules=True)
         self.assertEqual(out["target"]["rate_per_min"], 1)
 
+    def test_scrap_recycle_steps_sum_to_machine_count(self):
+        # The per-recipe cascade breakdown must decompose the aggregate recycler
+        # count exactly (no double-count when rendered as sub-steps).
+        out = self._plan(miner_type="electric", miner_quality_modules=True)
+        s = next(x for x in out["stages"] if x["role"] == "scrap-quality-source")
+        self.assertIn("recycle_steps", s)
+        self.assertAlmostEqual(
+            sum(st["machine_count"] for st in s["recycle_steps"]),
+            s["machine_count"], places=9)
+        # scrap-recycling is the root (depth 0); plate leaves are produced deeper.
+        roots = [st for st in s["recycle_steps"] if st["item"] == "scrap"]
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["depth"], 0)
+        self.assertNotIn("plastic-bar", roots[0]["outputs"])  # not a direct output
+
+    def test_human_renders_recycling_cascade(self):
+        text = qp.format_human(self._plan(miner_quality_modules=True))
+        self.assertIn("recycling cascade (per recipe,", text)
+        self.assertIn("scrap-recycling:", text)
+
     def test_mining_quality_split_caps_at_target_tier(self):
         # A rare target means rare is the researched ceiling — the drill roll
         # can't produce epic/legendary; that mass folds onto rare.
