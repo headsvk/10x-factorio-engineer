@@ -12,13 +12,14 @@ V1 scope (asteroid-only, Nauvis-subset):
     asteroid reprocessing (iron-ore, copper-ore, coal, stone, calcite, ice).
   * DP-based quality loop solver (backward induction over tiers).
   * Asteroid *crushing* as a legendary raw source (the chunk crushing step still
-    permits quality modules).  KNOWN LIMITATION: as of 2.1.8 asteroid
-    *reprocessing* no longer permits quality modules (allowed_effects drops
-    "quality"), but the active kernel (`solve_asteroid_reprocessing_loop`) and
-    the plan() asteroid path still model the pre-2.1.8 reprocessing chunk-tier
-    climb, so asteroid-sourced counts are optimistic vs current game rules.
-    A game-accurate redesign (quality rolled at crushing + ore self-recycle)
-    is future work; plans with reprocessing stages carry an explanatory note.
+    permits quality modules).  Quality is rolled at the crushing step and the
+    resulting ores are upcycled to the target tier via recycler self-loops
+    (`raw-crushing` + `asteroid-ore-upcycle` stage roles) — the game-accurate
+    post-2.1.8 model, and the only asteroid quality path on the active plan().
+    Asteroid *reprocessing* no longer permits quality modules (2.1.8 dropped
+    "quality" from its allowed_effects), so the pre-2.1.8 reprocessing chunk-tier
+    climb is gone: `solve_asteroid_reprocessing_loop` is retained only as a
+    legacy reference kernel with no live call sites.
   * Fluid quality transparency (foundry casting preferred when available).
   * Productivity research per recipe family, capped at +300 %.
 
@@ -125,17 +126,15 @@ SPOIL_TIMES_SECONDS: dict[str, float] = {
     "agricultural-science-pack": 3600.0,
 }
 
-# Asteroid reprocessing: crusher processes chunk -> (mostly) chunk.  These
-# recipes drive chunk *quantity* sourcing (self-output retention).
-# KNOWN LIMITATION (2.1.8): reprocessing recipes no longer permit quality
-# modules (allowed_effects drops "quality"), which makes the chunk-tier quality
-# climb impossible in the current game.  The active kernel
-# (`solve_asteroid_reprocessing_loop`) still models the pre-2.1.8 climb with
-# quality modules in the reprocessing crusher — only the unused reference
-# kernel (`_unused_solve_loop_reference`) gates on recipe_allows_quality.
-# Asteroid-sourced counts are therefore optimistic; a game-accurate redesign
-# (roll quality at the crushing step + upcycle ores via self-recycle) is
-# tracked as future work.
+# Asteroid reprocessing: crusher processes chunk -> (mostly) chunk.  This map is
+# kept only to classify the chunk item keys as asteroid raws (see build of
+# `asteroid_raws` below); it no longer drives any quality climb.
+# As of 2.1.8 reprocessing recipes no longer permit quality modules
+# (allowed_effects drops "quality"), so the chunk-tier quality climb is
+# impossible in the current game.  The planner instead rolls quality at the
+# crushing step and upcycles the resulting ores via recycler self-loops
+# (`raw-crushing` + `asteroid-ore-upcycle` roles).  `solve_asteroid_reprocessing_loop`
+# is a legacy reference kernel with no live call sites.
 ASTEROID_REPROCESSING_RECIPES: dict[str, str] = {
     "metallic-asteroid-chunk":  "metallic-asteroid-reprocessing",
     "carbonic-asteroid-chunk":  "carbonic-asteroid-reprocessing",
@@ -1068,6 +1067,11 @@ def solve_asteroid_reprocessing_loop(
     target_tier: int = 4,
 ) -> tuple[float, dict]:
     """DP for legendary-chunk per normal-chunk via reprocessing.
+
+    LEGACY / no live call sites.  2.1.8 removed `quality` from reprocessing
+    `allowed_effects`, so this chunk-tier climb is not achievable in-game; the
+    active plan() rolls quality at the crushing step instead (see the module
+    header).  Retained only as a reference kernel.
 
     Reprocessing recipe: 1 chunk in, ~0.4 same-chunk out + 0.2 each of 2
     other chunk types.  Runs on crusher (2 slots, quality-only — reprocessing
@@ -6528,10 +6532,11 @@ def plan(
             f"incidental byproduct surplus: {surplus:.2f} legendary "
             f"{byprod}/min unused (no downstream demand)"
         )
-    # Known-limitation marker: the reprocessing quality climb predates the
-    # 2.1.8 rule change (reprocessing recipes no longer accept quality
-    # modules), so asteroid-sourced counts are optimistic.  See the module
-    # header / ASTEROID_REPROCESSING_RECIPES comment.
+    # Dormant guard: no stage carries the "asteroid-reprocessing" role anymore
+    # (the pre-2.1.8 quality climb was retired in favour of crushing + ore
+    # self-recycle), so `reprocessing_stages` is always empty and this note
+    # never fires.  Kept as a tripwire in case a reprocessing path is ever
+    # reintroduced.  See the module header / ASTEROID_REPROCESSING_RECIPES comment.
     if reprocessing_stages:
         notes.append(
             "asteroid-reprocessing modelling predates the 2.1.8 rule change "

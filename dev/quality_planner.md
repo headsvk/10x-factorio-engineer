@@ -279,7 +279,7 @@ Stdlib only. Zero new deps. Shares the Space Age dataset with `cli.py`.
 | `_tier_skip_probs` | 90/9/0.9/0.1 tier-jump distribution |
 | `_prod_bonus` | Module-prod fraction at given tier+quality |
 | `solve_recycle_loop` | Shuffle-style DP (recycler returns ingredient → re-craft). Library only |
-| `solve_asteroid_reprocessing_loop` | 80 % retention, 2 slots, quality-only. **Known limitation:** still models quality modules in the reprocessing crusher, but 2.1.8 removed `quality` from reprocessing `allowed_effects` — asteroid-sourced counts are optimistic vs current game rules; plans with reprocessing stages carry an explanatory note |
+| `solve_asteroid_reprocessing_loop` | 80 % retention, 2 slots, quality-only. **Legacy — no live call sites.** 2.1.8 removed `quality` from reprocessing `allowed_effects`, so the chunk-tier quality climb is impossible in-game. The active plan() rolls quality at the crushing step and upcycles ores via recycler self-loops (`raw-crushing` + `asteroid-ore-upcycle`); this kernel is retained only for reference |
 | `solve_lds_shuffle_loop` | LDS foundry-cast + recycle joint DP, returns per-plastic legendary yield |
 | `compute_lds_shuffle_stage` | Sizes a LDS shuffle stage from `legendary_plastic_per_min`; returns `foundry_machines`, `recycler_machines`, `byproduct_legendary`, `fluid_demand` |
 | `solve_mined_raw_self_recycle_loop` | 25 % retention, 4 slots, quality-only (no prod) |
