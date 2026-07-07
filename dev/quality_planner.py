@@ -79,7 +79,7 @@ import math
 import os
 import subprocess
 import sys
-from collections import defaultdict, namedtuple
+from collections import defaultdict, deque, namedtuple
 from dataclasses import dataclass, field
 from fractions import Fraction
 
@@ -3474,9 +3474,19 @@ def walk_recipe_tree(
     # ``molten-*`` fluids are the exception: they carry quality through casting.
     normal_fluid_leaves: set[str] = set()
 
-    # BFS-like accumulation
+    # ---- Pass 1a: DISCOVER the recipe DAG (no demand yet) ----
+    # Record each expandable item's chosen recipe, effective prod, per-craft
+    # output, and its walked ingredient edges.  Demand is NOT accumulated here:
+    # propagating during this BFS under-counts any intermediate that gets
+    # expanded before all of its consumers are seen (a diamond dependency — an
+    # item shared by parents discovered at different depths).  Pass 1b then
+    # propagates demand in TOPOLOGICAL order so every item is expanded only
+    # after all its consumers have contributed, making ``demand`` exact.
+    node_children: dict[str, list[tuple[str, float]]] = {}  # item -> [(ingredient, amount_per_craft)]
+    node_output: dict[str, float] = {}                      # item -> per-craft output amount
+    node_effprod: dict[str, float] = {}                     # item -> eff_prod
+
     pending = [item_key]
-    # Build demand by recursive expansion; stop at raws.
     while pending:
         current = pending.pop()
         if current in seen:
@@ -3496,7 +3506,9 @@ def walk_recipe_tree(
             # If the item is a SELF_RECYCLE_TARGETS member AND a dispatch
             # cache is available AND the caller hasn't asked us to bypass
             # this gate (Path B re-entry), defer dispatch to the end of
-            # Pass 1 so the dispatcher gets fully-accumulated demand.
+            # Pass 1 so the dispatcher gets fully-accumulated demand.  The
+            # item is a demand SINK here (no children) — the sub-plan owns
+            # its ingredients.
             if (
                 current in SELF_RECYCLE_TARGETS
                 and current not in _force_tree_walk_for
@@ -3545,8 +3557,6 @@ def walk_recipe_tree(
         eff_prod = 1.0 + research_prod + module_prod_p1
         if eff_prod > 4.0:
             eff_prod = 4.0
-        net_demand = max(0.0, demand[current])
-        cycles_per_min = net_demand / (per_craft_output * eff_prod)
         # A fluid ingredient carries this recipe's quality only when it is the
         # primary material — i.e. the recipe has NO solid ingredient (casting /
         # holmium-plate) or the fluid is a molten metal.  When the recipe has a
@@ -3555,12 +3565,12 @@ def walk_recipe_tree(
         recipe_has_solid = any(
             i["name"] not in fluids for i in recipe.get("ingredients", [])
         )
+        children: list[tuple[str, float]] = []
         for ing in recipe.get("ingredients", []):
             iname = ing["name"]
             amt = float(ing.get("amount", 0))
-            ing_rate = amt * cycles_per_min
+            children.append((iname, amt))  # every ingredient contributes demand
             if iname in fluids:
-                demand[iname] += ing_rate
                 if iname.startswith("molten-") or not recipe_has_solid:
                     # Quality-carrying fluid (casting / fluid-only recipe): walk
                     # into it so the upstream demand (e.g. molten-iron ->
@@ -3572,13 +3582,45 @@ def walk_recipe_tree(
                 else:
                     # Quality-irrelevant reagent fluid: source at normal quality
                     # and do NOT expand its sub-tree into the legendary walk (so
-                    # e.g. sulfur for sulfuric-acid stays normal).
+                    # e.g. sulfur for sulfuric-acid stays normal).  Demand sink.
                     normal_fluid_leaves.add(iname)
-            else:
-                demand[iname] += ing_rate
-                if iname not in seen and iname not in raw_set:
-                    pending.append(iname)
-                    order.append(iname)
+            elif iname not in seen and iname not in raw_set:
+                pending.append(iname)
+                order.append(iname)
+        node_children[current] = children
+        node_output[current] = per_craft_output
+        node_effprod[current] = eff_prod
+
+    # ---- Pass 1b: propagate demand in TOPOLOGICAL order ----
+    # Process an expandable item only once every expandable item that consumes
+    # it has already been processed, so ``demand[item]`` is final before it is
+    # divided into cycles.  in_degree counts distinct expandable consumers.
+    in_degree: dict[str, int] = {n: 0 for n in node_children}
+    for parent, ch in node_children.items():
+        for c in {c for c, _ in ch if c in node_children}:
+            in_degree[c] += 1
+    queue = deque(n for n in node_children if in_degree[n] == 0)
+    processed: set[str] = set()
+    while queue:
+        cur = queue.popleft()
+        processed.add(cur)
+        cycles = max(0.0, demand[cur]) / (node_output[cur] * node_effprod[cur])
+        for iname, amt in node_children[cur]:
+            demand[iname] += amt * cycles
+        for c in {c for c, _ in node_children[cur] if c in node_children}:
+            in_degree[c] -= 1
+            if in_degree[c] == 0:
+                queue.append(c)
+    # Defensive fallback for a (non-vanilla) recipe cycle: any expandable node
+    # never reaching in_degree 0 is propagated once in discovery order so demand
+    # still flows rather than silently dropping.
+    if len(processed) < len(node_children):
+        for cur in order:
+            if cur in node_children and cur not in processed:
+                processed.add(cur)
+                cycles = max(0.0, demand[cur]) / (node_output[cur] * node_effprod[cur])
+                for iname, amt in node_children[cur]:
+                    demand[iname] += amt * cycles
 
     # Resolve any deferred self-recycle-target intermediate dispatches.
     # Must happen AFTER the BFS so each intermediate's accumulated demand is

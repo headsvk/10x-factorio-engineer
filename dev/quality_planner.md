@@ -12,13 +12,14 @@ This document is the single source of truth — supersedes the original `quality
 
 ## Status
 
-**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **389 tests, all passing, ~11 s.**
+**Last updated:** 2026-07-07. Tests: `python -m unittest dev.test_quality_planner -v` — **392 tests, all passing, ~11 s.**
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 **Roadmap:** planned quality-planning work (Q1–Q9: post-2.1.8 asteroid redesign, min-ingredient-quality rule, spoilage, placement optimizer, quality mining, mixed-tier demand, beacons, objective function, ergonomics) is specced in [`dev/quality-roadmap.md`](quality-roadmap.md).
 
 Currently shipped:
+- **Pass-1 topological demand fix (2026-07-07)** — `walk_recipe_tree`'s demand pass used a LIFO `pending.pop()` BFS that propagated each item's demand **once, at pop time**, then locked it via `seen`. For a **diamond dependency** (an intermediate consumed by several parents discovered at different BFS depths — e.g. copper-cable, consumed by both electronic-circuit and advanced-circuit) the intermediate could be expanded before all its consumers had contributed; the late demand landed in the `demand` dict (so the item's own Pass-2 stage was sized right) but never propagated to its ingredients — silently **under-sizing the raws below it**. `processing-unit @ nauvis` cast only **355/min molten-copper against 3378/min consumed** (≈9× short), undersizing the asteroid supply ~2×. Pass 1 is now split into **discovery** (build the recipe DAG) + **topological propagation** (Kahn order, so an item is expanded only after every consumer has contributed) — `demand` is exact everywhere. Linear chains (`iron-plate`) are unchanged; diamond plans rise to their correct size (`processing-unit @ nauvis` ~5 488 → ~9 387 machines; every Fulgora `quality-module-2` plan too). Guarded by `TestWalkerDemandConservation` (made ≥ consumed for every produced item). A **correctness** fix — old plans were genuinely undersized.
 - **Scrap cascade: drop disposal recyclers, surface byproducts (2026-07-07)** — the scrap-recycling cascade no longer recycles every item to the bottom. Previously *every* item with a `<item>-recycling` recipe was recycled to max depth, including (a) the terminal plates we actually want and (b) pure-junk co-products (steel-plate, concrete, solid-fuel, ice, holmium-ore) — all voided by recyclers that still carried the full quality-module loadout and its −20% speed penalty for **zero** quality yield. On rare `quality-module-2 @ Fulgora` those "disposal" recyclers were **24–34% of the scrap array** (≈11% of the whole fleet was destroying the very iron/copper/plastic plates being extracted). `_scrap_productive_recycle` now walks the recycling graph backward from the demanded leaves and recycles **only** the steps that lead somewhere useful; everything else falls out as a **byproduct**, broken out per quality tier (`byproducts` stage field, rendered as a `byproducts (unneeded scrap output, /min):` block). Byproduct tiers are **capped at the target** (rare-or-better folds into one bucket — a rare plan never surfaces epic/legendary, matching the mined-scrap split and the target-or-better yield), and stay **consistent with the solver**: a demanded leaf's target-tier byproduct is its `overflow` (loop-aware), and when a scrap-upcycle loop is active for that leaf the loop consumes the whole sub-target flow so none of it is double-reported as byproduct. **Yields — hence scrap input and the miner fleet — are byte-identical** (a demanded leaf is still produced by the same productive steps); only the recycler count shrinks. Rare `quality-module-2 @ Fulgora` (tier-2 rare seed, rare machines): scrap recyclers **2760 → 1826 (−34%)**, total machines **6105 → 5171 (−15%)**, and ~3.7k quality modules no longer wasted on void recyclers. A **behaviour** change (recycler counts), not display-only.
 - **Sensible seed-module default (2026-07-07)** — `--module-quality` now defaults to **`normal`** (was `--target-quality`). Researching a quality tier does not give you quality *modules* at that quality — you have to manufacture them, which is the planner's whole purpose — so defaulting the seed gear to the target tier assumed you'd already bootstrapped rare/legendary modules. Now consistent with `--machine-quality` (also `normal`); raise it explicitly (up to `--target-quality`) to model feeding better modules back once the line runs. Materially changes default machine counts (e.g. rare `quality-module-2` on Fulgora: ~118 machines at the old tier-3-rare seed default vs the honest ~311 at tier-2 normal). A **behaviour** change, not display-only.
 - **cli.py-style full-step human output + quality visibility (2026-07-07)** — `format_human` now renders a per-stage detail block under each headline: buildable (ceil) machine count + exact, per-stage `power`, and arrowed outputs (`->`) / inputs (`<-`) **tagged with their quality tier** (assembly recipes are single-quality — `-> Quality Module 2 (rare)`, `<- Advanced Circuit (rare)`; mined raw is `(mixed — see split)`; fluids untagged). For Fulgora scrap seeding it also surfaces: the drill quality-module config + speed penalty (`modules: 3x quality-3-rare (speed −15%)`), the **mined-scrap quality split** from the single drill roll (`quality split (/min): (roll 12.0%) Normal 2847.21, Uncommon 349.43, …`), and the **scrap→target yield** per leaf with the two per-roll chances (`rolls: miner q=12.0%, recycler q=16.0%` / `yield: 0.00321 rare Plastic Bar / scrap (binding)`) so the conversion is auditable (`scrap_per_min == demand / yield` for the binding leaf). It also breaks the collapsed `[scrap]` line into its **full per-recipe recycling cascade** — scrap-recycling (depth 0, no plates) plus every intermediate `<item>-recycling` step with its own recycler count and depth, so the real path (scrap → blue circuits/LDS → advanced-circuit → plastic-bar, …) is explicit; step counts sum exactly to the stage's aggregate recycler count. New stage fields: `mining` carries `quality_slots`/`quality_module_tier`/`quality_module_quality`/`speed_penalty_pct`/`q_miner`/`quality_split`; `scrap-quality-source` carries `yields`/`q_miner`/`q_rec`/`recycle_steps`. Display-only; no solver-math change.
@@ -108,15 +109,15 @@ python dev/quality_planner.py --item stone-wall --rate 60 \
 
 ## Regression anchors
 
-Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-07-04 after **Post-2.1.8 Asteroid Quality Redesign & Generalized Quality Mining** (Q1+Q5 milestone):
+Sanity numbers (60/min legendary, `--module-quality legendary`, no research, modules-off, fully-researched tech via `$TECH_ALL`). Refreshed 2026-07-07 after the **Pass-1 topological demand fix** (which corrected under-counted raw demand for any plan with a diamond dependency — an intermediate consumed by multiple parents, e.g. copper-cable in `processing-unit`; `iron-plate` is a linear chain and is unchanged):
 
 | target | planets | total machines | asteroid chunks/min | mined/min | fluid/min |
 |---|---|---|---|---|---|
-| `iron-plate` | — | ~709 | metallic 6 437 | — | — |
-| `processing-unit` | nauvis | ~22 203 | metallic 154 500 | coal 99 038 | petroleum-gas 2 400, sulfuric-acid 300 |
-| `artillery-shell` | nauvis,vulcanus | ~128 895 | carbonic 128 750, oxide 35 907 | coal 198 077, tungsten-ore 528 204 | lava 3 467 |
+| `iron-plate` | — | ~342 | metallic 2 861, oxide 286 | — | — |
+| `processing-unit` | nauvis | ~9 387 | metallic 60 401, oxide 5 298 | coal 44 017 | petroleum-gas 1 067, sulfuric-acid 200 |
+| `artillery-shell` | nauvis,vulcanus | ~129 903 | carbonic 128 750, oxide 46 398 | coal 198 077, tungsten-ore 528 204 | lava 13 244 |
 
-With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` is **~19.9 machines** (unchanged by the Pass-1 fix — the assembly-modules path already applied inherent prod in demand propagation). Modules-off is the conservative baseline (but inherent machine prod now correctly applies there too). Prod modules carry their −5/−10/−15%-per-slot speed cost (the planner models no speed modules/beacons to offset it).
+With `--assembly-modules --machine-quality legendary`, `processing-unit @ nauvis` is **~387 machines**. Modules-off is the conservative baseline (inherent machine prod — foundry/EM/biochamber +50% — applies in both). Prod modules carry their −5/−10/−15%-per-slot speed cost (the planner models no speed modules/beacons to offset it).
 
 These are sanity checks, not committed expectations. If a refactor moves them, investigate the cause rather than rubber-stamping.
 
@@ -557,7 +558,7 @@ MACHINE_INHERENT_PROD = {
 
 ## Tests
 
-`dev/test_quality_planner.py` — **389 tests**, 57 classes.
+`dev/test_quality_planner.py` — **392 tests**, 59 classes.
 
 | Class | Coverage |
 |---|---|
@@ -565,6 +566,7 @@ MACHINE_INHERENT_PROD = {
 | `TestAsteroidReprocessing` | 80 % retention math; metallic/carbonic/oxide yields; chunk → ore conversion |
 | `TestFluidTransparency` | Planner picks foundry casting over furnace where available |
 | `TestAssemblyPropagation` | Legendary inputs → legendary output |
+| `TestWalkerDemandConservation` | Pass-1 demand is mass-balanced: every produced item has made ≥ consumed. Regression guard for the topological-order fix — `processing-unit`'s molten-copper (copper-cable is a diamond) balances; qm2 chain balances; asteroid input scales linearly with rate |
 | `TestResearchProd` | Research bonus shifts per-tier prod; cap engages |
 | `TestFailFast` | Self-recycling intermediates / unreachable raws produce specific errors |
 | `TestEndToEnd` | Smoke targets (iron-plate, copper-plate, electronic-circuit) |
@@ -616,6 +618,7 @@ Targeted bands not committed expectations — the wiki-yield tests use a 5 % tol
 - **Oil-recipe selection picks `basic-oil-processing`** because it has fewer fluid byproducts (`_pick_recipe_fluid_preferred` picks lowest-complexity).
 - **`--prod-module-tier` defaults to 3.** No speed modules — speed doesn't reduce ingredient demand, and the planner sizes by throughput.
 - **Walker passes must use the SAME `eff_prod`.** `_assembly_prod_bonus` is called identically in both passes — if they diverge, demand propagation upstream and stage `inputs` rates will not match.
+- **Pass 1 propagates demand in TOPOLOGICAL order, not BFS pop order.** Pass 1a discovers the recipe DAG (recipe + walked-ingredient edges per item) without accumulating demand; Pass 1b runs a Kahn topological propagation so an item's demand is final (all consumers counted) before it is divided into cycles. A plain LIFO BFS under-counts the ingredients of any **diamond dependency** (intermediate shared by parents found at different depths) — the item's own stage is still sized right (Pass 2 uses final `demand`), but its raws below are undersized. If you ever refactor Pass 1, keep the discovery/propagation split or the bug returns silently (it only surfaces as a raw-supply deficit, invisible in the solid-intermediate balance). `TestWalkerDemandConservation` guards it.
 - **LDS shuffle saturation:** when `research_prod` saturates the +300 % cap, per-cycle return ratio `r → 1.0` and machine count diverges. Clamped to `r=0.999` (~1500 machines for 60/min). Mathematically correct in the limit; practically a tell that the planner should split into multiple parallel loops with smaller per-tier prod configs.
 - **Argparse % escaping.** Help strings containing `%` must escape as `%%` — argparse format-substitutes them otherwise (`--assembly-modules` and `--machine-quality` flags both have `%%`).
 - **`--tech` default is locked.** A bare CLI invocation now produces an empty `tech_state={}` and fails-fast on the recycler check. Library callers (incl. tests) MUST pass `tech_state` — there is no default. Use `qp.ALL_TECH_UNLOCKED` for the legacy "fully researched" baseline. This was a deliberate breaking change to make the user's research state explicit (V3 item 2).

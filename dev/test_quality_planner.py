@@ -222,6 +222,61 @@ class TestAssemblyPropagation(unittest.TestCase):
         self.assertIn("casting-iron-gear-wheel", recipes)
 
 
+class TestWalkerDemandConservation(unittest.TestCase):
+    """Pass-1 demand must be mass-balanced: every stage produces >= what the
+    chain consumes.  Guards the topological-order fix (a LIFO BFS under-counted
+    the ingredients of any diamond dependency — an intermediate shared by
+    parents discovered at different depths — silently undersizing raws)."""
+
+    def _conservation_deficits(self, out, eps=1e-3):
+        from collections import defaultdict
+        made = defaultdict(float)
+        consumed = defaultdict(float)
+        for s in out["stages"]:
+            p = s.get("product")
+            if p:
+                made[p] += s.get("rate_per_min", 0.0)
+            for k, v in (s.get("solid_inputs") or {}).items():
+                consumed[k] += v
+            for k, v in (s.get("fluid_inputs") or {}).items():
+                consumed[k] += v
+        # An item is under-produced if a stage makes it AND the chain consumes
+        # more than is made (raws/scrap-sourced items have made==0 and are sized
+        # separately, so only flag items with a producing stage).
+        return {
+            it: consumed[it] - made[it]
+            for it in made
+            if made[it] > 0 and consumed[it] - made[it] > eps
+        }
+
+    def test_processing_unit_molten_copper_balanced(self):
+        # The regression case: copper-cable (cast from molten-copper) is consumed
+        # by BOTH electronic-circuit and advanced-circuit, so its molten-copper
+        # demand was under-counted, undersizing the ore/asteroid supply ~9x.
+        out = qp.plan("processing-unit", 60, _data(), target_tier=4,
+                      planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                      module_quality="legendary")
+        self.assertEqual(self._conservation_deficits(out), {})
+
+    def test_quality_module_2_chain_balanced(self):
+        out = qp.plan("quality-module-2", 60, _data(), target_tier=2,
+                      planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                      module_quality="rare", quality_module_tier=2)
+        self.assertEqual(self._conservation_deficits(out), {})
+
+    def test_diamond_dependency_raw_scales_with_demand(self):
+        # Under the old bug a diamond's ingredient demand was under-propagated;
+        # doubling rate must exactly double the deepest raw (linear scaling).
+        a = qp.plan("processing-unit", 60, _data(), target_tier=4,
+                    planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                    module_quality="legendary")
+        b = qp.plan("processing-unit", 120, _data(), target_tier=4,
+                    planets=frozenset({"nauvis"}), tech_state=qp.ALL_TECH_UNLOCKED,
+                    module_quality="legendary")
+        for chunk, amt in a["asteroid_input"].items():
+            self.assertAlmostEqual(b["asteroid_input"][chunk], 2 * amt, delta=1.0)
+
+
 # ---------------------------------------------------------------------------
 # Research productivity
 # ---------------------------------------------------------------------------
@@ -1600,10 +1655,11 @@ class TestQualityScrapSeeding(unittest.TestCase):
         self.assertLess(scrap_big, scrap_ele)
 
     def test_faithfulness_check(self):
-        # C1/baseline had no miner quality modules modeled (equivalent to miner_quality_modules=False).
-        # We assert that setting miner_quality_modules=False produces the exact old baseline rate.
+        # miner_quality_modules=False reproduces the no-drill-seed baseline rate.
+        # (Refreshed after the Pass-1 topological demand fix, which corrected the
+        # previously under-counted plate demand — see TestWalkerDemandConservation.)
         no_mods = self._fulgora_qm2(miner_quality_modules=False)
-        self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 3775.72, delta=1e-1)
+        self.assertAlmostEqual(no_mods["scrap_input"]["scrap"], 9161.25, delta=1e-1)
 
 
 class TestScrapDisposalDropped(unittest.TestCase):
@@ -1701,8 +1757,10 @@ class TestScrapDisposalDropped(unittest.TestCase):
     def test_scrap_input_unaffected_by_dropping_disposal(self):
         # Dropping disposal recyclers must NOT change scrap input (yields are set
         # by the productive steps only).  Anchor the binding-leaf scrap rate.
+        # (Value reflects the Pass-1 topological demand fix; the disposal-drop
+        # itself leaves scrap input unchanged — see the yield-invariance test.)
         out = self._fulgora_qm2()
-        self.assertAlmostEqual(out["scrap_input"]["scrap"], 267698.91, delta=1.0)
+        self.assertAlmostEqual(out["scrap_input"]["scrap"], 573640.52, delta=1.0)
 
     def test_disposal_drop_cuts_recycler_count(self):
         # The productive-only stage is materially smaller than the old
