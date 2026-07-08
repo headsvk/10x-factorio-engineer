@@ -1969,6 +1969,13 @@ class TestFinalUpcycle(unittest.TestCase):
         self.assertAlmostEqual(
             sum(r["recycled_per_min"] for r in loop["tier_flows"]),
             loop["recycles_per_min"], delta=1e-9)
+        # Per-tier machine shares partition the stage's craft/recycler split.
+        self.assertAlmostEqual(
+            sum(r["craft_machines"] for r in loop["tier_flows"]),
+            loop["craft_machines"], delta=1e-9)
+        self.assertAlmostEqual(
+            sum(r["recycler_machines"] for r in loop["tier_flows"]),
+            loop["recycler_machines"], delta=1e-9)
         # The ingredient sub-factory + scrap array run (and render) at NORMAL.
         for s in out["stages"]:
             if s["role"] == "assembly":

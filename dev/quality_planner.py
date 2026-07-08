@@ -5959,6 +5959,16 @@ def plan_final_upcycle(
             "kept_per_min": items_t * sum(dc[t][target_tier:]),
             "recycled_per_min": items_t * sum(dc[t][s] for s in range(t, target_tier)),
         })
+        # Machine share per tier: craft/recycle times are tier-independent, so
+        # each tier's slice of the array is proportional to its flow.
+        row = tier_flows[-1]
+        row["craft_machines"] = (
+            craft_machines * crafts_t / total_crafts if total_crafts > 0 else 0.0
+        )
+        row["recycler_machines"] = (
+            rec_machines * row["recycled_per_min"] / subtarget_recycled
+            if subtarget_recycled > 0 else 0.0
+        )
         for s in range(target_tier, 5):
             contrib = items_t * dc[t][s]
             if contrib > 0.0:
@@ -7459,16 +7469,27 @@ def _final_upcycle_detail_lines(st: dict, machine_quality: str = "normal") -> li
             f"sub-{tgt_tier} items recycle into {st.get('set_retention', 0.25) * 100:.0f}% "
             f"of a set, quality re-rolled):"
         )
+        lines.append(
+            f"{ind}  (one array serves every tier — a machine crafts at the "
+            f"quality of the ingredient-set it consumes; per-tier machine "
+            f"shares in parens)"
+        )
+        machine_s = _humanize(st["machine"])
         for row in st["tier_flows"]:
             if row["crafts_per_min"] < 0.005 and row["kept_per_min"] < 0.005:
                 continue
+            cm_s = (
+                f" ({row['craft_machines']:.2f} × {machine_s})"
+                if row.get("craft_machines") is not None else ""
+            )
             rec_s = (
                 f", {row['recycled_per_min']:.2f}/min sub-{tgt_tier} to recycler"
+                f" ({row.get('recycler_machines', 0.0):.2f} × Recycler)"
                 if row["recycled_per_min"] >= 0.005
                 else "  (crafted ≥ target: all kept)"
             )
             lines.append(
-                f"{ind}  {row['tier']:<9} {row['crafts_per_min']:7.2f} crafts/min -> "
+                f"{ind}  {row['tier']:<9} {row['crafts_per_min']:7.2f} crafts/min{cm_s} -> "
                 f"keep {row['kept_per_min']:.2f}/min ≥{tgt_tier}{rec_s}"
             )
     # Outputs broken out per final tier (they sum to rate_per_min), then the
