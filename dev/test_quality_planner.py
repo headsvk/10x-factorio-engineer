@@ -1942,6 +1942,49 @@ class TestFinalUpcycle(unittest.TestCase):
         # Anchor the scrap (matches the hand model ~11.8k).
         self.assertAlmostEqual(out["scrap_input"]["scrap"], 11826.9, delta=5.0)
 
+    def test_stage_io_visibility(self):
+        out = self._plan()
+        loop = next(s for s in out["stages"] if s["role"] == "final-upcycle-loop")
+        # Fresh NORMAL ingredient-sets crossing into the loop = sets/min × recipe
+        # amounts (5 advanced-circuit + 5 processing-unit + 4 quality-module).
+        fs = loop["fresh_sets_per_min"]
+        self.assertAlmostEqual(
+            loop["fresh_set_inputs"]["advanced-circuit"], fs * 5, delta=1e-9)
+        self.assertAlmostEqual(
+            loop["fresh_set_inputs"]["quality-module"], fs * 4, delta=1e-9)
+        # Per-tier outputs (rare/epic/legendary) sum to the requested rate.
+        self.assertAlmostEqual(sum(loop["output_by_tier"].values()), 1.0, delta=1e-9)
+        self.assertNotIn("normal", loop["output_by_tier"])
+        self.assertNotIn("uncommon", loop["output_by_tier"])
+        # Tier flows conserve items: kept + recycled = crafts × made, per tier,
+        # and the per-tier rows sum to the stage's aggregate crafts/recycles.
+        for row in loop["tier_flows"]:
+            self.assertAlmostEqual(
+                row["kept_per_min"] + row["recycled_per_min"],
+                row["crafts_per_min"] * loop["made_per_craft"], delta=1e-9)
+        self.assertAlmostEqual(
+            sum(r["crafts_per_min"] for r in loop["tier_flows"]),
+            loop["crafts_per_min"], delta=1e-9)
+        self.assertAlmostEqual(
+            sum(r["recycled_per_min"] for r in loop["tier_flows"]),
+            loop["recycles_per_min"], delta=1e-9)
+        # The ingredient sub-factory + scrap array run (and render) at NORMAL.
+        for s in out["stages"]:
+            if s["role"] == "assembly":
+                self.assertTrue(s.get("normal_quality_chain"), s["recipe"])
+            if s["role"] == "scrap-quality-source":
+                self.assertEqual(s.get("output_tier"), "normal")
+
+    def test_format_human_loop_block(self):
+        text = qp.format_human(self._plan())
+        self.assertIn("loop flow by ingredient-set tier", text)
+        self.assertIn("-> Quality Module 2 (rare)", text)
+        self.assertIn("<- Processing Unit (normal)", text)
+        self.assertIn("modules: craft 5x quality-2-rare", text)
+        # The bare scrap array reports normal-quality plates, not the target tier.
+        self.assertIn("-> Copper Plate (normal)", text)
+        self.assertNotIn("-> Copper Plate (rare)", text)
+
     def test_roll_early_beats_roll_late_on_scrap(self):
         # The whole point of the comparison: rolling at the plates (default) needs
         # LESS scrap than rolling only at the finished module.

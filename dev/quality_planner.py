@@ -5875,8 +5875,11 @@ def plan_final_upcycle(
         forbid_ore_routes=forbid_ore_routes,
     )
     # Drop the item's own craft stage — the loop does that crafting, not a
-    # one-shot assembly stage.
+    # one-shot assembly stage.  The whole ingredient sub-factory runs at NORMAL
+    # quality; tag it so format_human renders honest tier tags.
     ing_stages = [s for s in ing_all if s.get("product") != item_key]
+    for s in ing_stages:
+        s["normal_quality_chain"] = True
     plate_demand = {
         k: raw[k] for k in scrap_terminals
         if raw.get(k, 0) > 0 and k not in fluids
@@ -5894,6 +5897,8 @@ def plan_final_upcycle(
     )
     scrap_per_min = float(src["scrap_per_min"]) if src else 0.0
     scrap_stages = [src["stage"]] if src else []
+    for s in scrap_stages:
+        s["output_tier"] = "normal"  # bare array, no quality rolling
 
     # Mining fleet for the scrap (no drill quality modules — normal scrap).
     miner_stages: list[dict] = []
@@ -5924,6 +5929,25 @@ def plan_final_upcycle(
     ) * fresh_sets
     craft_machines = total_crafts * loop["craft_time"] / (craft_speed * qm_speed_mult * craft_penalty * 60.0)
     rec_machines = subtarget_recycled * loop["recycle_time"] / (RECYCLER_SPEED * qm_speed_mult * rec_penalty * 60.0)
+    # Per-tier loop flows + quality-tagged I/O for rendering: fresh sets enter
+    # at normal, sub-target items re-roll through the recycler, target-or-better
+    # items leave the loop.
+    tier_flows: list[dict] = []
+    output_by_tier: dict[str, float] = {}
+    for t in range(5):
+        crafts_t = flow[t] * fresh_sets
+        items_t = crafts_t * made
+        tier_flows.append({
+            "tier": QUALITY_TIERS[t],
+            "crafts_per_min": crafts_t,
+            "kept_per_min": items_t * sum(dc[t][target_tier:]),
+            "recycled_per_min": items_t * sum(dc[t][s] for s in range(t, target_tier)),
+        })
+        for s in range(target_tier, 5):
+            if dc[t][s] > 0.0:
+                nm = QUALITY_TIERS[s]
+                output_by_tier[nm] = output_by_tier.get(nm, 0.0) + items_t * dc[t][s]
+    set_ing = loop["set_ingredients"]
     loop_stage = {
         "role": "final-upcycle-loop", "target": item_key, "recipe": f"{item_key}-upcycle-loop",
         "machine": craft_machine_key, "machine_count": craft_machines + rec_machines,
@@ -5933,6 +5957,15 @@ def plan_final_upcycle(
         "q_craft": loop["q_craft"], "q_rec": loop["q_rec"],
         "craft_slots": craft_slots,
         "quality_module_tier": quality_module_tier, "quality_module_quality": module_quality,
+        "set_ingredients": set_ing,
+        "fresh_set_inputs": {nm: fresh_sets * amt for nm, amt in set_ing.items()},
+        "tier_flows": tier_flows,
+        "output_by_tier": output_by_tier,
+        "made_per_craft": made,
+        "set_retention": loop["set_retention"],
+        "target_tier_name": QUALITY_TIERS[target_tier],
+        "craft_speed_penalty_pct": (1.0 - craft_penalty) * 100.0,
+        "recycler_speed_penalty_pct": (1.0 - rec_penalty) * 100.0,
     }
 
     all_stages = miner_stages + scrap_stages + ing_stages + [loop_stage]
@@ -5956,11 +5989,11 @@ def plan_final_upcycle(
         "module_quality": module_quality, "planets": sorted(planets_fs),
         "assembler_level": assembler_level, "research_levels": research_levels,
         "notes": [
-            "scrap-source plates are produced at NORMAL quality (the tier tags on "
-            "the [scrap] stage reflect the plan's target, not these plates).",
             f"final-upcycle: roll quality only at the {item_key} step "
-            f"(loop yield {v0:.4f} rare/{item_key}-set; {fresh_sets/rate:.1f} fresh normal sets per output). "
-            "Ingredients sourced at NORMAL from a bare scrap array.",
+            f"(loop yield {v0:.4f} {QUALITY_TIERS[target_tier]}-or-better {item_key} "
+            f"per fresh normal ingredient-set; {fresh_sets/rate:.1f} sets per output). "
+            "Ingredients sourced at NORMAL from a bare scrap array "
+            "(no drill quality modules; every scrap-output tier counts, no roll gating).",
         ],
     }
 
@@ -7359,10 +7392,77 @@ def _fmt_power(kw: float) -> str:
     return f"{kw / 1000.0:.2f} MW" if kw >= 1000.0 else f"{kw:.0f} kW"
 
 
+def _final_upcycle_detail_lines(st: dict) -> list[str]:
+    """Detail block for the ``--final-upcycle`` loop stage: split craft/recycler
+    build, module loadout, the per-tier loop flow table, and quality-tagged
+    inputs (fresh NORMAL ingredient-sets) / outputs (target-or-better items)."""
+    ind = " " * 17
+    lines: list[str] = []
+    cm, rm = float(st["craft_machines"]), float(st["recycler_machines"])
+    lines.append(
+        f"{ind}build: {math.ceil(cm - 1e-9)} × {_humanize(st['machine'])} "
+        f"(exact {cm:.2f}) + {math.ceil(rm - 1e-9)} × Recycler (exact {rm:.2f})"
+    )
+    qt = st.get("quality_module_tier", 3)
+    qq = st.get("quality_module_quality", "normal")
+    lines.append(
+        f"{ind}modules: craft {int(st.get('craft_slots', 0))}x quality-{qt}-{qq} "
+        f"(speed −{st.get('craft_speed_penalty_pct', 0.0):.0f}%), "
+        f"recycler {RECYCLER_SLOTS}x quality-{qt}-{qq} "
+        f"(speed −{st.get('recycler_speed_penalty_pct', 0.0):.0f}%)"
+    )
+    if st.get("power_kw"):
+        lines.append(f"{ind}power: {_fmt_power(st['power_kw'])}")
+    tgt_tier = st.get("target_tier_name", "legendary")
+    if st.get("tier_flows"):
+        set_desc = " + ".join(
+            f"{amt:g} {_humanize(nm)}"
+            for nm, amt in sorted(
+                st.get("set_ingredients", {}).items(), key=lambda x: -x[1]
+            )
+        )
+        lines.append(
+            f"{ind}loop flow by ingredient-set tier "
+            f"(1 set = {set_desc}; 1 craft -> {st.get('made_per_craft', 0.0):.2f} items; "
+            f"sub-{tgt_tier} items recycle into {st.get('set_retention', 0.25) * 100:.0f}% "
+            f"of a set, quality re-rolled):"
+        )
+        for row in st["tier_flows"]:
+            if row["crafts_per_min"] < 0.005 and row["kept_per_min"] < 0.005:
+                continue
+            rec_s = (
+                f", {row['recycled_per_min']:.2f}/min sub-{tgt_tier} to recycler"
+                if row["recycled_per_min"] >= 0.005
+                else "  (crafted ≥ target: all kept)"
+            )
+            lines.append(
+                f"{ind}  {row['tier']:<9} {row['crafts_per_min']:7.2f} crafts/min -> "
+                f"keep {row['kept_per_min']:.2f}/min ≥{tgt_tier}{rec_s}"
+            )
+    # Outputs broken out per final tier (they sum to rate_per_min), then the
+    # fresh normal ingredient-sets crossing into the loop.
+    for t_name, r in sorted(
+        (st.get("output_by_tier") or {}).items(),
+        key=lambda x: QUALITY_INDEX.get(x[0], 0),
+    ):
+        if r >= 0.005:
+            lines.append(f"{ind}-> {_humanize(st['target'])} ({t_name})  {r:.2f}/min")
+    for nm, r in sorted(
+        (st.get("fresh_set_inputs") or {}).items(), key=lambda x: -x[1]
+    ):
+        lines.append(f"{ind}<- {_humanize(nm)} (normal)  {r:.2f}/min")
+    return lines
+
+
 def _stage_detail_lines(st: dict, tier: str) -> list[str]:
     """cli.py-style per-stage detail block: buildable machine count, modules,
     power, and arrowed inputs/outputs.  Additive under each stage headline so
     the planner's human output reads like ``cli.py --format human``."""
+    if st["role"] == "final-upcycle-loop":
+        return _final_upcycle_detail_lines(st)
+    # A stage may pin its own output tier (e.g. the final-upcycle plan's bare
+    # scrap array runs at normal regardless of the plan's target tier).
+    tier = st.get("output_tier") or tier
     ind = " " * 17
     lines: list[str] = []
     mc = st.get("machine_count")
@@ -7571,7 +7671,7 @@ def format_human(out: dict) -> str:
             )
             L.append(
                 f"  [scrap]        {st['scrap_per_min']:.1f} scrap/min -> "
-                f"{tier} {covered} "
+                f"{st.get('output_tier') or tier} {covered} "
                 f"({st['machine_count']:.2f} recyclers, "
                 f"binding leaf {_humanize(st.get('binding_leaf', '?'))})"
             )
