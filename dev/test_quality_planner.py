@@ -6,6 +6,7 @@ transparency, fail-fast errors, and end-to-end regression.
 """
 
 import json
+import math
 import os
 import sys
 import unittest
@@ -1976,6 +1977,16 @@ class TestFinalUpcycle(unittest.TestCase):
         self.assertAlmostEqual(
             sum(r["recycler_machines"] for r in loop["tier_flows"]),
             loop["recycler_machines"], delta=1e-9)
+        # Buildable craft machines ceil PER SET TIER (each tier is a dedicated
+        # bank — mixed-quality feeds jam set-matching crafts), not the summed
+        # fraction: 2.78 + 0.32 + 0.04 -> 3+1+1 = 5, not ceil(3.14) = 4.
+        # Recyclers have no set matching: one shared bank, ceiled once.
+        self.assertEqual(
+            loop["craft_machines_buildable"],
+            sum(math.ceil(r["craft_machines"] - 1e-9)
+                for r in loop["tier_flows"] if r["craft_machines"] > 1e-9))
+        self.assertEqual(loop["craft_machines_buildable"], 5)
+        self.assertEqual(loop["recycler_machines_buildable"], 2)
         # The ingredient sub-factory + scrap array run (and render) at NORMAL.
         for s in out["stages"]:
             if s["role"] == "assembly":
@@ -1999,6 +2010,8 @@ class TestFinalUpcycle(unittest.TestCase):
         self.assertIn("machine quality: rare (+60% craft speed)", text)
         self.assertIn("× rare EM Plant", text)
         self.assertIn("× rare Recycler", text)
+        # Build count is the sum of per-tier ceils, not ceil of the sum.
+        self.assertIn("build: 5 × rare EM Plant (exact 3.14, one bank per set tier: 3+1+1)", text)
 
     def test_bare_scrap_array_has_no_recycler_quality_modules(self):
         # target_tier=0 sourcing has nothing to roll for: recyclers run bare —

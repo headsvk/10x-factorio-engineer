@@ -5974,11 +5974,25 @@ def plan_final_upcycle(
             if contrib > 0.0:
                 nm = QUALITY_TIERS[s]
                 output_by_tier[nm] = output_by_tier.get(nm, 0.0) + contrib
+    # Buildable craft machines ceil PER SET TIER, not on the summed fraction: a
+    # craft consumes one same-quality ingredient set, and mixed-quality feeds
+    # jam a shared bank (an ingredient slot holds one quality at a time), so
+    # each tier runs its own dedicated bank.  Recyclers take items one at a
+    # time (no set matching) — one shared bank, ceiled on the aggregate.
+    craft_machines_buildable = sum(
+        math.ceil(r["craft_machines"] - 1e-9)
+        for r in tier_flows if r["craft_machines"] > 1e-9
+    )
+    recycler_machines_buildable = (
+        math.ceil(rec_machines - 1e-9) if rec_machines > 1e-9 else 0
+    )
     set_ing = loop["set_ingredients"]
     loop_stage = {
         "role": "final-upcycle-loop", "target": item_key, "recipe": f"{item_key}-upcycle-loop",
         "machine": craft_machine_key, "machine_count": craft_machines + rec_machines,
         "craft_machines": craft_machines, "recycler_machines": rec_machines,
+        "craft_machines_buildable": craft_machines_buildable,
+        "recycler_machines_buildable": recycler_machines_buildable,
         "rate_per_min": rate, "crafts_per_min": total_crafts, "recycles_per_min": subtarget_recycled,
         "fresh_sets_per_min": fresh_sets, "v0": v0,
         "q_craft": loop["q_craft"], "q_rec": loop["q_rec"],
@@ -7440,10 +7454,21 @@ def _final_upcycle_detail_lines(st: dict, machine_quality: str = "normal") -> li
     lines: list[str] = []
     mq = st.get("machine_quality") or machine_quality
     cm, rm = float(st["craft_machines"]), float(st["recycler_machines"])
+    tier_builds = [
+        math.ceil(r["craft_machines"] - 1e-9)
+        for r in st.get("tier_flows", [])
+        if r.get("craft_machines", 0.0) > 1e-9
+    ]
+    cb = st.get("craft_machines_buildable") or (sum(tier_builds) or math.ceil(cm - 1e-9))
+    rb = st.get("recycler_machines_buildable") or math.ceil(rm - 1e-9)
+    per_tier_s = (
+        f", one bank per set tier: {'+'.join(str(b) for b in tier_builds)}"
+        if len(tier_builds) > 1 else ""
+    )
     lines.append(
-        f"{ind}build: {math.ceil(cm - 1e-9)} × {_machine_label(st['machine'], mq)} "
-        f"(exact {cm:.2f}) + {math.ceil(rm - 1e-9)} × "
-        f"{_machine_label('recycler', mq)} (exact {rm:.2f})"
+        f"{ind}build: {cb} × {_machine_label(st['machine'], mq)} "
+        f"(exact {cm:.2f}{per_tier_s}) + {rb} × "
+        f"{_machine_label('recycler', mq)} (exact {rm:.2f}, one shared bank)"
     )
     qt = st.get("quality_module_tier", 3)
     qq = st.get("quality_module_quality", "normal")
@@ -7470,16 +7495,17 @@ def _final_upcycle_detail_lines(st: dict, machine_quality: str = "normal") -> li
             f"of a set, quality re-rolled):"
         )
         lines.append(
-            f"{ind}  (one array serves every tier — a machine crafts at the "
-            f"quality of the ingredient-set it consumes; per-tier machine "
-            f"shares in parens)"
+            f"{ind}  (each tier needs its own craft bank — a craft consumes one "
+            f"same-quality set and mixed-quality feeds jam a shared bank; "
+            f"recyclers take items one at a time, so one bank serves all tiers)"
         )
         machine_s = _humanize(st["machine"])
         for row in st["tier_flows"]:
             if row["crafts_per_min"] < 0.005 and row["kept_per_min"] < 0.005:
                 continue
             cm_s = (
-                f" ({row['craft_machines']:.2f} × {machine_s})"
+                f" ({row['craft_machines']:.2f} × {machine_s}, "
+                f"build {math.ceil(row['craft_machines'] - 1e-9)})"
                 if row.get("craft_machines") is not None else ""
             )
             rec_s = (
