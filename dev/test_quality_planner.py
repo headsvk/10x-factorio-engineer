@@ -6,6 +6,7 @@ transparency, fail-fast errors, and end-to-end regression.
 """
 
 import json
+import math
 import os
 import sys
 import unittest
@@ -1941,6 +1942,94 @@ class TestFinalUpcycle(unittest.TestCase):
         self.assertNotIn("scrap-upcycle-loop", roles)
         # Anchor the scrap (matches the hand model ~11.8k).
         self.assertAlmostEqual(out["scrap_input"]["scrap"], 11826.9, delta=5.0)
+
+    def test_stage_io_visibility(self):
+        out = self._plan()
+        loop = next(s for s in out["stages"] if s["role"] == "final-upcycle-loop")
+        # Fresh NORMAL ingredient-sets crossing into the loop = sets/min × recipe
+        # amounts (5 advanced-circuit + 5 processing-unit + 4 quality-module).
+        fs = loop["fresh_sets_per_min"]
+        self.assertAlmostEqual(
+            loop["fresh_set_inputs"]["advanced-circuit"], fs * 5, delta=1e-9)
+        self.assertAlmostEqual(
+            loop["fresh_set_inputs"]["quality-module"], fs * 4, delta=1e-9)
+        # Rolls cap at the target tier (a rare plan never surfaces
+        # epic/legendary — quality research stops at the target), so the whole
+        # output lands in one rare bucket.
+        self.assertEqual(set(loop["output_by_tier"]), {"rare"})
+        self.assertAlmostEqual(sum(loop["output_by_tier"].values()), 1.0, delta=1e-9)
+        # Tier flows conserve items: kept + recycled = crafts × made, per tier,
+        # and the per-tier rows sum to the stage's aggregate crafts/recycles.
+        for row in loop["tier_flows"]:
+            self.assertAlmostEqual(
+                row["kept_per_min"] + row["recycled_per_min"],
+                row["crafts_per_min"] * loop["made_per_craft"], delta=1e-9)
+        self.assertAlmostEqual(
+            sum(r["crafts_per_min"] for r in loop["tier_flows"]),
+            loop["crafts_per_min"], delta=1e-9)
+        self.assertAlmostEqual(
+            sum(r["recycled_per_min"] for r in loop["tier_flows"]),
+            loop["recycles_per_min"], delta=1e-9)
+        # Per-tier machine shares partition the stage's craft/recycler split.
+        self.assertAlmostEqual(
+            sum(r["craft_machines"] for r in loop["tier_flows"]),
+            loop["craft_machines"], delta=1e-9)
+        self.assertAlmostEqual(
+            sum(r["recycler_machines"] for r in loop["tier_flows"]),
+            loop["recycler_machines"], delta=1e-9)
+        # Buildable craft machines ceil PER SET TIER (each tier is a dedicated
+        # bank — mixed-quality feeds jam set-matching crafts), not the summed
+        # fraction: 2.78 + 0.32 + 0.04 -> 3+1+1 = 5, not ceil(3.14) = 4.
+        # Recyclers have no set matching: one shared bank, ceiled once.
+        self.assertEqual(
+            loop["craft_machines_buildable"],
+            sum(math.ceil(r["craft_machines"] - 1e-9)
+                for r in loop["tier_flows"] if r["craft_machines"] > 1e-9))
+        self.assertEqual(loop["craft_machines_buildable"], 5)
+        self.assertEqual(loop["recycler_machines_buildable"], 2)
+        # The ingredient sub-factory + scrap array run (and render) at NORMAL.
+        for s in out["stages"]:
+            if s["role"] == "assembly":
+                self.assertTrue(s.get("normal_quality_chain"), s["recipe"])
+            if s["role"] == "scrap-quality-source":
+                self.assertEqual(s.get("output_tier"), "normal")
+
+    def test_format_human_loop_block(self):
+        text = qp.format_human(self._plan())
+        self.assertIn("loop flow by ingredient-set tier", text)
+        self.assertIn("-> Quality Module 2 (rare)", text)
+        self.assertIn("<- Processing Unit (normal)", text)
+        self.assertIn("modules: craft 5x quality-2-rare", text)
+        # The bare scrap array reports normal-quality plates, not the target tier.
+        self.assertIn("-> Copper Plate (normal)", text)
+        self.assertNotIn("-> Copper Plate (rare)", text)
+        # Rolls cap at the target tier — no epic/legendary output lines.
+        self.assertNotIn("(epic)", text)
+        self.assertNotIn("(legendary)", text)
+        # --machine-quality rare is visible: header bonus + tagged build lines.
+        self.assertIn("machine quality: rare (+60% craft speed)", text)
+        self.assertIn("× rare EM Plant", text)
+        self.assertIn("× rare Recycler", text)
+        # Build count is the sum of per-tier ceils, not ceil of the sum.
+        self.assertIn("build: 5 × rare EM Plant (exact 3.14, one bank per set tier: 3+1+1)", text)
+
+    def test_bare_scrap_array_has_no_recycler_quality_modules(self):
+        # target_tier=0 sourcing has nothing to roll for: recyclers run bare —
+        # no module speed penalty — so the array is 0.8x the moduled size.
+        out = self._plan()
+        scrap = next(s for s in out["stages"] if s["role"] == "scrap-quality-source")
+        self.assertAlmostEqual(scrap["recycler_speed_penalty_pct"], 0.0, delta=1e-9)
+        self.assertIn("no quality modules", scrap["recycler_modules_label"])
+        # The roll-early default (target_tier>0) keeps its quality loadout.
+        early = qp.plan(
+            "quality-module-2", 1, _data(), target_tier=qp.QUALITY_INDEX["rare"],
+            module_quality="rare", quality_module_tier=2, machine_quality="rare",
+            tech_state={"recycling": 1}, location="fulgora",
+        )
+        early_scrap = next(
+            s for s in early["stages"] if s["role"] == "scrap-quality-source")
+        self.assertGreater(early_scrap["recycler_speed_penalty_pct"], 0.0)
+        self.assertIn("quality-2-rare", early_scrap["recycler_modules_label"])
 
     def test_roll_early_beats_roll_late_on_scrap(self):
         # The whole point of the comparison: rolling at the plates (default) needs
