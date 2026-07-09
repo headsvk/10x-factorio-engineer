@@ -2674,19 +2674,25 @@ def compute_scrap_source(
                     
         craft_machines = 0.0
         recycler_machines = 0.0
-        
+        # Per-tier machine shares, kept for the finalize pass: craft banks
+        # can't share across quality tiers (see _annotate_stage_buildables),
+        # so buildable counts ceil per tier, not on these sums.
+        craft_machines_by_tier: dict[str, float] = {}
+        recycler_machines_by_tier: dict[str, float] = {}
+
         for s in range(target_tier):
             if total_flow[s] <= 0.0:
                 continue
             cfg = configs[s]
-            
+
             q_rec_slots = cfg["recycle_quality"]
             rec_speed_mult = _module_speed_mult(quality_slots=q_rec_slots)
             rec_count_s = (total_flow[s] * loop_recycler_time) / (
                 RECYCLER_SPEED * qm_speed_mult * rec_speed_mult * 60.0
             )
             recycler_machines += rec_count_s
-            
+            recycler_machines_by_tier[QUALITY_TIERS[s]] = rec_count_s
+
             if wrap_active:
                 cp_val = cfg.get("wrap_prod", 0)
                 cq_val = cfg.get("wrap_quality", 0)
@@ -2695,13 +2701,14 @@ def compute_scrap_source(
                 cp_val = cfg.get("craft_prod", 0)
                 cq_val = cfg.get("craft_quality", 0)
                 craft_speed = machine_speed
-                
+
             craft_speed_mult = _module_speed_mult(quality_slots=cq_val, prod_slots=cp_val)
             craft_count_s = (total_flow[s] * loop_craft_time) / (
                 craft_speed * qm_speed_mult * craft_speed_mult * 60.0
             )
             craft_machines += craft_count_s
-            
+            craft_machines_by_tier[QUALITY_TIERS[s]] = craft_count_s
+
         if craft_machines > 0.0 or recycler_machines > 0.0:
             up_stage = {
                 "role": "scrap-upcycle-loop",
@@ -2711,6 +2718,8 @@ def compute_scrap_source(
                 "machine_count": craft_machines + recycler_machines,
                 "craft_machines": craft_machines,
                 "recycler_machines": recycler_machines,
+                "craft_machines_by_tier": craft_machines_by_tier,
+                "recycler_machines_by_tier": recycler_machines_by_tier,
                 "container": wrap_route["container"] if wrap_active else None,
                 "container_machines": craft_machines if wrap_active else 0.0,
                 "rate_per_min": scrap_per_min * yields[leaf],
@@ -3149,6 +3158,193 @@ def _stage_power_kw(stage: dict, power_w: dict[str, int]) -> float:
         return _w("recycler") * float(stage.get("machine_count", 0)) / 1000.0
     # default: assembly-style stage
     return _w(stage.get("machine", "")) * float(stage.get("machine_count", 0)) / 1000.0
+
+
+# ---------------------------------------------------------------------------
+# Plan finalization — planner-side derivation of every display number
+# ---------------------------------------------------------------------------
+# The formatters (format_human & friends) must do no arithmetic of their own:
+# every number they print — buildable machine counts, per-tier bank splits,
+# I/O quality tags, ratios — is derived here, in the computation pipeline, and
+# propagated on the plan dict.  This keeps the construction guidance (ceiled
+# build counts) consistent with the plan totals, instead of each formatter
+# re-deriving (and diverging from) the planner's numbers.
+
+def _buildable(count: float) -> int:
+    """Fractional steady-state machine count -> integer machines to build."""
+    c = float(count)
+    return math.ceil(c - 1e-9) if c > 1e-9 else 0
+
+
+def _craft_leg(machine: str, exact: float, tier_builds: list[int] | None = None) -> dict:
+    leg = {"kind": "craft", "machine": machine, "exact": float(exact)}
+    if tier_builds is not None and len(tier_builds) > 1:
+        # One dedicated bank per quality tier: a craft consumes one
+        # same-quality ingredient set, and mixed-quality feeds jam a shared
+        # bank (an ingredient slot holds one quality at a time).
+        leg["build"] = sum(tier_builds)
+        leg["tier_builds"] = tier_builds
+    else:
+        leg["build"] = tier_builds[0] if tier_builds else _buildable(exact)
+    return leg
+
+
+def _recycler_leg(exact: float) -> dict:
+    # Recyclers take items one at a time (no set matching): one shared bank
+    # serves every tier, ceiled once on the aggregate.
+    return {
+        "kind": "recycler", "machine": "recycler", "exact": float(exact),
+        "build": _buildable(exact), "shared_bank": True,
+    }
+
+
+def _annotate_stage_buildables(st: dict) -> None:
+    """Attach integer build counts (``machines_buildable`` + ``build_legs``).
+
+    ``build_legs`` is the render-ready split the build line prints: one entry
+    per machine bank (craft / recycler / wrap), each with its exact fractional
+    count, its buildable ceil, and — where the stage carries per-tier machine
+    shares — the per-tier bank split.  ``machines_buildable`` sums the legs
+    (or ceils ``machine_count`` for single-machine stages).
+    """
+    role = st.get("role")
+    legs: list[dict] | None = None
+
+    def _tier_builds(counts) -> list[int]:
+        return [b for b in (_buildable(c) for c in counts) if b > 0]
+
+    if role == "final-upcycle-loop":
+        for row in st.get("tier_flows", []):
+            row["craft_machines_buildable"] = _buildable(row.get("craft_machines") or 0.0)
+        legs = [
+            _craft_leg(
+                st["machine"], st.get("craft_machines", 0.0),
+                _tier_builds(r.get("craft_machines") or 0.0 for r in st.get("tier_flows", [])),
+            ),
+            _recycler_leg(st.get("recycler_machines", 0.0)),
+        ]
+    elif role == "self-feed-target":
+        legs = [
+            _craft_leg(
+                st["machine"], st.get("craft_machines", 0.0),
+                _tier_builds(
+                    f.get("craft_machines", 0.0)
+                    for f in (st.get("per_tier_flows") or {}).values()
+                ),
+            ),
+            _recycler_leg(st.get("recycler_machines", 0.0)),
+        ]
+    elif role == "scrap-upcycle-loop":
+        by_tier = st.get("craft_machines_by_tier")
+        legs = [
+            _craft_leg(
+                st["machine"], st.get("craft_machines", 0.0),
+                _tier_builds(by_tier.values()) if by_tier else None,
+            ),
+            _recycler_leg(st.get("recycler_machines", 0.0)),
+        ]
+    elif role == "self-recycle-target":
+        # Craft bank runs at NORMAL only (fresh ingredients enter the loop
+        # there), so a single shared bank is exact.  The wrap-craft bank spans
+        # tiers, but the loop solver sizes it on the tier-0 config without a
+        # per-tier flow split — single ceil is the honest resolution we have.
+        legs = [_craft_leg(st["machine"], st.get("craft_machines", 0.0)),
+                _recycler_leg(st.get("recycler_machines", 0.0))]
+        if st.get("container") and st.get("container_machines", 0.0) > 1e-9:
+            legs.append({
+                "kind": "wrap", "machine": st["container"],
+                "exact": float(st["container_machines"]),
+                "build": _buildable(st["container_machines"]),
+            })
+    elif role == "cross-item-shuffle":
+        cast = float(st.get("cast_machines", st.get("foundry_machines", 0.0)))
+        legs = [_craft_leg(st.get("cast_machine", "foundry"), cast),
+                _recycler_leg(st.get("recycler_machines", 0.0))]
+    elif st.get("machine_count") is not None and st.get("machine"):
+        legs = [_craft_leg(st["machine"], float(st["machine_count"]))]
+
+    if legs is not None:
+        legs = [leg for leg in legs if leg["exact"] > 1e-9]
+        st["build_legs"] = legs
+        st["machines_buildable"] = sum(leg["build"] for leg in legs)
+        craft_total = sum(leg["build"] for leg in legs if leg["kind"] == "craft")
+        rec_total = sum(leg["build"] for leg in legs if leg["kind"] == "recycler")
+        if role in (
+            "final-upcycle-loop", "self-feed-target",
+            "scrap-upcycle-loop", "self-recycle-target",
+        ):
+            st["craft_machines_buildable"] = craft_total
+            st["recycler_machines_buildable"] = rec_total
+    else:
+        st["machines_buildable"] = _buildable(st.get("machine_count") or 0.0)
+
+
+def _annotate_stage_io(st: dict, plan_tier: str) -> None:
+    """Resolve the stage's display I/O — items, rates, and quality tier —
+    planner-side.  Factorio recipes are single-quality: a rare recipe consumes
+    rare inputs and yields a rare output (no mixing).  So assembly stages run
+    entirely at the target tier (or normal on a normal leg); the scrap /
+    crushing / loop stages emit the target tier; mined raw is a mix (see the
+    quality split); fluids are quality-transparent (no tier).
+    """
+    role = st.get("role")
+    # A stage may pin its own output tier (e.g. the final-upcycle plan's bare
+    # scrap array runs at normal regardless of the plan's target tier).
+    tier = st.get("output_tier") or plan_tier
+    if st.get("product"):
+        outs = {st["product"]: st.get("rate_per_min", 0.0)}
+    elif role == "mining" and st.get("item"):
+        outs = {st["item"]: st.get("rate_per_min", 0.0)}
+    elif st.get("outputs"):
+        outs = st["outputs"]
+    elif role == "scrap-quality-source" and st.get("covered"):
+        outs = st["covered"]
+    else:
+        outs = {}
+    if role == "assembly":
+        out_q = in_q = "normal" if st.get("normal_quality_chain") else tier
+    elif role == "mining":
+        out_q, in_q = "mixed", None
+    elif role == "fluid-chain":
+        out_q = in_q = None  # fluids have no quality
+    else:
+        out_q = in_q = tier
+    st["io_outputs"] = {k: float(v) for k, v in outs.items()}
+    st["io_inputs"] = {k: float(v) for k, v in (st.get("inputs") or {}).items()}
+    st["io_output_quality"] = out_q
+    st["io_input_quality"] = in_q
+
+
+def _finalize_plan_output(out: dict) -> dict:
+    """Post-pass every plan producer runs before returning: derive the display
+    numbers the formatters print (build counts, I/O quality, ratios, buildable
+    totals) so the formatters never compute — only render.  Idempotent, so
+    stages that flow from a sub-plan into an outer plan re-finalize cleanly.
+    """
+    plan_tier = (out.get("target") or {}).get("tier", "legendary")
+    for st in out.get("stages", []):
+        _annotate_stage_buildables(st)
+        _annotate_stage_io(st, plan_tier)
+        if st.get("role") == "final-upcycle-loop":
+            rate = float(st.get("rate_per_min") or 0.0)
+            st["sets_per_output"] = (
+                float(st.get("fresh_sets_per_min", 0.0)) / rate if rate > 0 else 0.0
+            )
+    out["total_machines_buildable"] = sum(
+        int(st.get("machines_buildable") or 0) for st in out.get("stages", [])
+    )
+    by_role = (out.get("summary") or {}).get("by_role") or {}
+    for bucket in by_role.values():
+        bucket["machines_buildable"] = 0
+    for st in out.get("stages", []):
+        bucket = by_role.get(st.get("role"))
+        if bucket is not None:
+            bucket["machines_buildable"] += int(st.get("machines_buildable") or 0)
+    mq = out.get("machine_quality", "normal")
+    out["machine_quality_speed_bonus_pct"] = (
+        float(cli.MACHINE_QUALITY_SPEED.get(mq, 0)) * 100.0
+    )
+    return out
 
 
 def _hot_spot_suggestions(
@@ -5194,7 +5390,7 @@ def _plan_self_recycle_target(
         planets=planets,
     ))
 
-    return {
+    return _finalize_plan_output({
         "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
         "asteroid_input": {},
         "mined_input": {},
@@ -5218,7 +5414,7 @@ def _plan_self_recycle_target(
         "research_levels": dict(research_levels),
         "planets": sorted(planets),
         "notes": notes,
-    }
+    })
 
 
 def choose_path_self_recycle(
@@ -5629,7 +5825,7 @@ def _plan_self_feed_target(
         planets=planets,
     ))
 
-    return {
+    return _finalize_plan_output({
         "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
         "asteroid_input": {},
         "mined_input": {},
@@ -5653,7 +5849,7 @@ def _plan_self_feed_target(
         "research_levels": dict(research_levels),
         "planets": sorted(planets),
         "notes": notes,
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -5974,25 +6170,13 @@ def plan_final_upcycle(
             if contrib > 0.0:
                 nm = QUALITY_TIERS[s]
                 output_by_tier[nm] = output_by_tier.get(nm, 0.0) + contrib
-    # Buildable craft machines ceil PER SET TIER, not on the summed fraction: a
-    # craft consumes one same-quality ingredient set, and mixed-quality feeds
-    # jam a shared bank (an ingredient slot holds one quality at a time), so
-    # each tier runs its own dedicated bank.  Recyclers take items one at a
-    # time (no set matching) — one shared bank, ceiled on the aggregate.
-    craft_machines_buildable = sum(
-        math.ceil(r["craft_machines"] - 1e-9)
-        for r in tier_flows if r["craft_machines"] > 1e-9
-    )
-    recycler_machines_buildable = (
-        math.ceil(rec_machines - 1e-9) if rec_machines > 1e-9 else 0
-    )
+    # Buildable (ceiled) machine counts — per set tier for the craft banks,
+    # one shared bank for the recyclers — are derived by _finalize_plan_output.
     set_ing = loop["set_ingredients"]
     loop_stage = {
         "role": "final-upcycle-loop", "target": item_key, "recipe": f"{item_key}-upcycle-loop",
         "machine": craft_machine_key, "machine_count": craft_machines + rec_machines,
         "craft_machines": craft_machines, "recycler_machines": rec_machines,
-        "craft_machines_buildable": craft_machines_buildable,
-        "recycler_machines_buildable": recycler_machines_buildable,
         "rate_per_min": rate, "crafts_per_min": total_crafts, "recycles_per_min": subtarget_recycled,
         "fresh_sets_per_min": fresh_sets, "v0": v0,
         "q_craft": loop["q_craft"], "q_rec": loop["q_rec"],
@@ -6020,7 +6204,7 @@ def plan_final_upcycle(
     for b in by_role.values():
         b["machines_pct"] = 100.0 * b["machines"] / total_machines if total_machines else 0.0
 
-    return {
+    return _finalize_plan_output({
         "target": {"item": item_key, "rate_per_min": rate, "tier": QUALITY_TIERS[target_tier]},
         "strategy": "final-upcycle",
         "scrap_input": {"scrap": scrap_per_min} if scrap_per_min > 0 else {},
@@ -6039,7 +6223,7 @@ def plan_final_upcycle(
             "(no quality modules in drills or recyclers — every output tier counts, "
             "there is nothing to roll for).",
         ],
-    }
+    })
 
 
 def plan(
@@ -7301,6 +7485,7 @@ def plan(
         "kept_tiers": kept_tier_output,
         "notes": notes,
     }
+    _finalize_plan_output(out)
     # Objective metric for this plan (roadmap Q8); also used by the shuffle /
     # driver cost gates below so --objective steers auto-selection.
     out["objective_value"] = _evaluate_objective(out, objective)
@@ -7446,30 +7631,41 @@ def _machine_label(machine: str, machine_quality: str | None) -> str:
     return name
 
 
+def _build_line(st: dict, machine_quality: str) -> str | None:
+    """Render a stage's ``build:`` line from the planner-derived ``build_legs``
+    (one entry per machine bank, with exact count, buildable ceil, and the
+    per-tier bank split where the stage carries one).  Pure rendering — the
+    numbers come from :func:`_annotate_stage_buildables`."""
+    legs = st.get("build_legs")
+    if not legs:
+        return None
+    mq = st.get("machine_quality") or machine_quality
+    parts = []
+    for leg in legs:
+        if leg.get("kind") == "wrap":
+            label = f"{_humanize(leg['machine'])} wrap-craft"
+        else:
+            label = _machine_label(leg["machine"], mq)
+        tb = leg.get("tier_builds")
+        if tb:
+            extra = f", one bank per set tier: {'+'.join(str(b) for b in tb)}"
+        elif leg.get("shared_bank"):
+            extra = ", one shared bank"
+        else:
+            extra = ""
+        parts.append(f"{leg['build']} × {label} (exact {leg['exact']:.2f}{extra})")
+    return "build: " + " + ".join(parts)
+
+
 def _final_upcycle_detail_lines(st: dict, machine_quality: str = "normal") -> list[str]:
     """Detail block for the ``--final-upcycle`` loop stage: split craft/recycler
     build, module loadout, the per-tier loop flow table, and quality-tagged
     inputs (fresh NORMAL ingredient-sets) / outputs (target-tier items)."""
     ind = " " * 17
     lines: list[str] = []
-    mq = st.get("machine_quality") or machine_quality
-    cm, rm = float(st["craft_machines"]), float(st["recycler_machines"])
-    tier_builds = [
-        math.ceil(r["craft_machines"] - 1e-9)
-        for r in st.get("tier_flows", [])
-        if r.get("craft_machines", 0.0) > 1e-9
-    ]
-    cb = st.get("craft_machines_buildable") or (sum(tier_builds) or math.ceil(cm - 1e-9))
-    rb = st.get("recycler_machines_buildable") or math.ceil(rm - 1e-9)
-    per_tier_s = (
-        f", one bank per set tier: {'+'.join(str(b) for b in tier_builds)}"
-        if len(tier_builds) > 1 else ""
-    )
-    lines.append(
-        f"{ind}build: {cb} × {_machine_label(st['machine'], mq)} "
-        f"(exact {cm:.2f}{per_tier_s}) + {rb} × "
-        f"{_machine_label('recycler', mq)} (exact {rm:.2f}, one shared bank)"
-    )
+    build_s = _build_line(st, machine_quality)
+    if build_s:
+        lines.append(f"{ind}{build_s}")
     qt = st.get("quality_module_tier", 3)
     qq = st.get("quality_module_quality", "normal")
     lines.append(
@@ -7505,7 +7701,7 @@ def _final_upcycle_detail_lines(st: dict, machine_quality: str = "normal") -> li
                 continue
             cm_s = (
                 f" ({row['craft_machines']:.2f} × {machine_s}, "
-                f"build {math.ceil(row['craft_machines'] - 1e-9)})"
+                f"build {row['craft_machines_buildable']})"
                 if row.get("craft_machines") is not None else ""
             )
             rec_s = (
@@ -7544,14 +7740,9 @@ def _stage_detail_lines(st: dict, tier: str, machine_quality: str = "normal") ->
     tier = st.get("output_tier") or tier
     ind = " " * 17
     lines: list[str] = []
-    mc = st.get("machine_count")
-    machine = st.get("machine")
-    if mc is not None and machine:
-        lines.append(
-            f"{ind}build: {math.ceil(float(mc) - 1e-9)} × "
-            f"{_machine_label(machine, st.get('machine_quality') or machine_quality)}  "
-            f"(exact {float(mc):.2f})"
-        )
+    build_s = _build_line(st, machine_quality)
+    if build_s:
+        lines.append(f"{ind}{build_s}")
     # Drill quality modules (mining stage) — otherwise invisible in the headline.
     if st.get("quality_slots"):
         pen = float(st.get("speed_penalty_pct", 0.0))
@@ -7630,33 +7821,15 @@ def _stage_detail_lines(st: dict, tier: str, machine_quality: str = "normal") ->
             if parts:
                 lines.append(f"{ind}  {_humanize(it)}: {parts}")
     # Outputs (-> primary/basket) then inputs (<- ingredients), cli-style.
-    outs: dict = {}
-    if st.get("product"):
-        outs = {st["product"]: st.get("rate_per_min", 0.0)}
-    elif st["role"] == "mining" and st.get("item"):
-        outs = {st["item"]: st.get("rate_per_min", 0.0)}
-    elif st.get("outputs"):
-        outs = st["outputs"]
-    elif st["role"] == "scrap-quality-source" and st.get("covered"):
-        outs = st["covered"]
-    # Quality tag for this stage's I/O.  Factorio recipes are single-quality: a
-    # rare recipe consumes rare inputs and yields a rare output (no mixing).  So
-    # assembly stages run entirely at the target tier (or normal on a normal
-    # leg); the scrap/crushing/loop stages emit the target tier; mined raw is a
-    # mix (see the quality split); fluids are quality-transparent.
-    if st["role"] == "assembly":
-        sq = "normal" if st.get("normal_quality_chain") else tier
-        out_tag = in_tag = f" ({sq})"
-    elif st["role"] == "mining":
-        out_tag, in_tag = "  (mixed — see split)", ""
-    elif st["role"] == "fluid-chain":
-        out_tag = in_tag = ""  # fluids have no quality
-    else:
-        out_tag = in_tag = f" ({tier})"
-    for k, v in sorted(outs.items(), key=lambda x: -float(x[1])):
+    # Items and quality tiers are resolved planner-side (_annotate_stage_io);
+    # this block only renders them.
+    out_q = st.get("io_output_quality")
+    out_tag = "  (mixed — see split)" if out_q == "mixed" else (f" ({out_q})" if out_q else "")
+    in_q = st.get("io_input_quality")
+    in_tag = f" ({in_q})" if in_q else ""
+    for k, v in sorted((st.get("io_outputs") or {}).items(), key=lambda x: -float(x[1])):
         lines.append(f"{ind}-> {_humanize(k)}{out_tag}  {float(v):.2f}/min")
-    ins = st.get("inputs") or {}
-    for k, v in sorted(ins.items(), key=lambda x: -float(x[1])):
+    for k, v in sorted((st.get("io_inputs") or {}).items(), key=lambda x: -float(x[1])):
         lines.append(f"{ind}<- {_humanize(k)}{in_tag}  {float(v):.2f}/min")
     return lines
 
@@ -7667,7 +7840,7 @@ def format_human(out: dict) -> str:
     tier = tgt.get("tier", "legendary")  # output quality tier (label only)
     L.append(f"Target: {tgt['rate_per_min']}/min of {tgt['item']} at tier {tier}")
     mq = out.get("machine_quality", "normal")
-    mq_bonus = float(cli.MACHINE_QUALITY_SPEED.get(mq, 0)) * 100.0
+    mq_bonus = float(out.get("machine_quality_speed_bonus_pct", 0.0))
     mq_s = f" (+{mq_bonus:.0f}% craft speed)" if mq_bonus else ""
     L.append(f"Module quality: {out.get('module_quality', 'legendary')}, "
              f"machine quality: {mq}{mq_s}, "
@@ -7815,7 +7988,7 @@ def format_human(out: dict) -> str:
             L.append(
                 f"                 yield: {st['v0']:.4f} {tier} {_humanize(st['target'])} "
                 f"per fresh normal ingredient-set  "
-                f"({st['fresh_sets_per_min']/st['rate_per_min']:.1f} sets per output)"
+                f"({st['sets_per_output']:.1f} sets per output)"
             )
         elif role == "self-feed-target":
             L.append(
@@ -7931,7 +8104,9 @@ def format_human(out: dict) -> str:
             L.append(f"                 modules: {mc}")
         L.extend(_stage_detail_lines(st, tier, out.get("machine_quality", "normal")))
     L.append("")
-    L.append(f"Total machines: {out['total_machine_count']:.2f}")
+    total_build = out.get("total_machines_buildable")
+    total_build_s = f"  (build {int(total_build)})" if total_build is not None else ""
+    L.append(f"Total machines: {out['total_machine_count']:.2f}{total_build_s}")
     if "total_power_mw" in out:
         pwr_mw = float(out["total_power_mw"])
         if pwr_mw >= 1000.0:
@@ -7948,16 +8123,20 @@ def format_human(out: dict) -> str:
         items = sorted(
             by_role.items(), key=lambda kv: kv[1].get("machines", 0.0), reverse=True,
         )
-        L.append(f"  {'Role':<28} {'Stages':>6}  {'Machines':>10} {'%':>6}  {'Power':>10} {'%':>6}")
+        L.append(
+            f"  {'Role':<28} {'Stages':>6}  {'Machines':>10} {'Build':>6} {'%':>6}  "
+            f"{'Power':>10} {'%':>6}"
+        )
         for role, b in items:
             stages_n = int(b.get("stage_count", 0))
             mc = float(b.get("machines", 0.0))
+            mb = int(b.get("machines_buildable", 0))
             mp = float(b.get("machines_pct", 0.0))
             pk = float(b.get("power_kw", 0.0))
             pp = float(b.get("power_pct", 0.0))
             pwr_label = f"{pk / 1000.0:.2f}MW" if pk >= 1000 else f"{pk:.1f}kW"
             L.append(
-                f"  {role:<28} {stages_n:>6}  {mc:>10.2f} {mp:>5.1f}%  "
+                f"  {role:<28} {stages_n:>6}  {mc:>10.2f} {mb:>6d} {mp:>5.1f}%  "
                 f"{pwr_label:>10} {pp:>5.1f}%"
             )
     if out.get("notes"):
@@ -8305,6 +8484,7 @@ def _combine_demand_plans(sub_plans: list[dict], objective: str) -> dict:
     stays meaningful for multi-tier demand.
     """
     total_machines = sum(float(sp["plan"].get("total_machine_count", 0.0)) for sp in sub_plans)
+    total_buildable = sum(int(sp["plan"].get("total_machines_buildable", 0)) for sp in sub_plans)
     total_power = sum(float(sp["plan"].get("total_power_mw", 0.0)) for sp in sub_plans)
     combined_raw: dict[str, float] = defaultdict(float)
     for sp in sub_plans:
@@ -8318,12 +8498,14 @@ def _combine_demand_plans(sub_plans: list[dict], objective: str) -> dict:
                 "tier": sp["tier"],
                 "rate_per_min": sp["rate_per_min"],
                 "total_machine_count": float(sp["plan"].get("total_machine_count", 0.0)),
+                "total_machines_buildable": int(sp["plan"].get("total_machines_buildable", 0)),
                 "total_power_mw": float(sp["plan"].get("total_power_mw", 0.0)),
                 "plan": sp["plan"],
             }
             for sp in sub_plans
         ],
         "total_machine_count": total_machines,
+        "total_machines_buildable": total_buildable,
         "total_power_mw": total_power,
         "combined_normal_raw_input": dict(combined_raw),
         "objective": objective,
@@ -8346,7 +8528,9 @@ def format_demand_human(out: dict) -> str:
         L.append(format_human(d["plan"]))
         L.append("")
     L.append("#" * 70)
-    L.append(f"COMBINED total machines: {out['total_machine_count']:.2f}")
+    cb = out.get("total_machines_buildable")
+    cb_s = f"  (build {int(cb)})" if cb is not None else ""
+    L.append(f"COMBINED total machines: {out['total_machine_count']:.2f}{cb_s}")
     L.append(f"COMBINED total power: {out['total_power_mw']:.2f} MW")
     if out.get("combined_normal_raw_input"):
         raws = ", ".join(

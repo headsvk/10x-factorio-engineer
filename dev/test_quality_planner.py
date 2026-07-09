@@ -5023,5 +5023,126 @@ class TestFullStepsHumanFormat(unittest.TestCase):
             sum(mining["quality_split"].values()), mining["rate_per_min"], delta=1e-6)
 
 
+class TestPlanFinalize(unittest.TestCase):
+    """_finalize_plan_output: the planner derives every display number — build
+    counts (per-tier bank ceils), build_legs, I/O quality tags, buildable
+    totals — and the formatters only render.  The buildable total must equal
+    the sum of the per-stage build counts the output shows."""
+
+    @classmethod
+    def _cached(cls, key, fn):
+        cache = getattr(cls, "_plans", None)
+        if cache is None:
+            cache = cls._plans = {}
+        if key not in cache:
+            cache[key] = fn()
+        return cache[key]
+
+    def _fulgora_acc(self):
+        # Exercises scrap-upcycle-loop ([upcycle]) stages.
+        return self._cached("acc", lambda: qp.plan(
+            "accumulator", 10, _data(),
+            target_tier=qp.QUALITY_INDEX["rare"], module_quality="rare",
+            quality_module_tier=2, location="fulgora", assembly_modules=True,
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        ))
+
+    def _self_feed(self):
+        return self._cached("egg", lambda: qp.plan(
+            "pentapod-egg", 60, _data(),
+            planets=["gleba"], tech_state=qp.ALL_TECH_UNLOCKED,
+        ))
+
+    def _self_recycle(self):
+        return self._cached("holmium", lambda: qp.plan(
+            "holmium-plate", 10, _data(),
+            location="fulgora", module_quality="rare", quality_module_tier=3,
+            tech_state=qp.ALL_TECH_UNLOCKED,
+        ))
+
+    def test_total_buildable_is_sum_of_stage_builds(self):
+        for out in (self._fulgora_acc(), self._self_feed(), self._self_recycle()):
+            self.assertEqual(
+                out["total_machines_buildable"],
+                sum(s["machines_buildable"] for s in out["stages"]))
+            self.assertGreaterEqual(
+                out["total_machines_buildable"], out["total_machine_count"])
+
+    def test_stage_build_matches_build_legs(self):
+        # machines_buildable is exactly what the build: line prints (leg sum).
+        for s in self._fulgora_acc()["stages"]:
+            if s.get("build_legs"):
+                self.assertEqual(
+                    s["machines_buildable"],
+                    sum(leg["build"] for leg in s["build_legs"]))
+
+    def test_upcycle_loop_craft_banks_ceil_per_tier(self):
+        # [upcycle] craft legs run one dedicated bank per quality tier (mixed
+        # feeds jam set-matching crafts) — buildable is the sum of per-tier
+        # ceils, not ceil of the summed fraction.  Recyclers share one bank.
+        out = self._fulgora_acc()
+        loops = [s for s in out["stages"] if s["role"] == "scrap-upcycle-loop"]
+        self.assertTrue(loops)
+        for s in loops:
+            by_tier = s["craft_machines_by_tier"]
+            self.assertAlmostEqual(
+                sum(by_tier.values()), s["craft_machines"], delta=1e-9)
+            self.assertEqual(
+                s["craft_machines_buildable"],
+                sum(math.ceil(v - 1e-9) for v in by_tier.values() if v > 1e-9))
+            self.assertEqual(
+                s["recycler_machines_buildable"],
+                math.ceil(s["recycler_machines"] - 1e-9))
+            self.assertEqual(
+                s["machines_buildable"],
+                s["craft_machines_buildable"] + s["recycler_machines_buildable"])
+
+    def test_self_feed_craft_banks_ceil_per_tier(self):
+        out = self._self_feed()
+        s = next(x for x in out["stages"] if x["role"] == "self-feed-target")
+        per_tier = [
+            f["craft_machines"] for f in s["per_tier_flows"].values()
+            if f["craft_machines"] > 1e-9
+        ]
+        self.assertEqual(
+            s["craft_machines_buildable"],
+            sum(math.ceil(v - 1e-9) for v in per_tier))
+        self.assertEqual(
+            s["recycler_machines_buildable"],
+            math.ceil(s["recycler_machines"] - 1e-9))
+
+    def test_self_recycle_wrap_leg_in_build(self):
+        out = self._self_recycle()
+        s = next(x for x in out["stages"] if x["role"] == "self-recycle-target")
+        kinds = {leg["kind"] for leg in s["build_legs"]}
+        self.assertIn("craft", kinds)
+        self.assertIn("recycler", kinds)
+        if s.get("container_machines", 0.0) > 1e-9:
+            self.assertIn("wrap", kinds)
+        self.assertEqual(
+            s["machines_buildable"],
+            sum(leg["build"] for leg in s["build_legs"]))
+
+    def test_human_total_line_shows_buildable(self):
+        out = self._fulgora_acc()
+        text = qp.format_human(out)
+        self.assertIn(
+            f"Total machines: {out['total_machine_count']:.2f}"
+            f"  (build {out['total_machines_buildable']})", text)
+
+    def test_stage_io_is_planner_derived(self):
+        # The formatter renders io_* fields verbatim; the planner resolves the
+        # items and the quality tier (normal chain vs target tier vs mixed).
+        out = self._fulgora_acc()
+        for s in out["stages"]:
+            self.assertIn("io_outputs", s)
+            self.assertIn("io_output_quality", s)
+        mining = next(s for s in out["stages"] if s["role"] == "mining")
+        self.assertEqual(mining["io_output_quality"], "mixed")
+        assembly = next(s for s in out["stages"] if s["role"] == "assembly")
+        expected = "normal" if assembly.get("normal_quality_chain") else "rare"
+        self.assertEqual(assembly["io_output_quality"], expected)
+
+
 if __name__ == "__main__":
     unittest.main()
