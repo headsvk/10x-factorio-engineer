@@ -60,6 +60,22 @@ This file covers combat and defense in Factorio, including turret types, enemy m
 
 **Stomper acid:** Stompers deal acid damage in an area around them. Energy shields absorb this; physical armor does not. Tesla turrets' slow effect reduces the duration of stomper contact.
 
+### Quality on Turrets and Ammo
+**Wiki:** https://wiki.factorio.com/Quality
+
+Quality effects are **per tier-level and additive**, with legendary counting as 5 levels:
+- **Turret range +10% per level** → +50% at legendary. Range compounds with damage because
+  a longer-reaching turret gets more shots off before anything closes.
+- **Ammo damage +30% per level** → ×2.5 at legendary. This applies to the *ammo*, so
+  upgrading magazines helps every turret firing them without touching the turrets.
+- **Weapon range +10% per level** for handheld weapons; **+5% fork chance per level** on the
+  tesla turret and tesla gun ammo.
+- Everything also gains **+30% health per level**, which is what lets quality walls and
+  turrets survive demolisher and stomper hits.
+
+Priority when quality is scarce: **ammo first** (one recipe upgrades the whole defence line),
+then turrets, then walls.
+
 ### Evolution Is Per-Planet (Space Age)
 **Wiki:** https://wiki.factorio.com/Enemies
 
@@ -108,6 +124,15 @@ neighbourhood.
 - No biter expansion — only fixed patrol routes, so aggressive expansion
   is safer than Nauvis once paths are mapped
 - Demolishers release a **smoke cloud** that slows the player AND **damages nearby construction/logistic bots** — avoid using bots during Demolisher fights
+- ☠️ **That smoke also disables mech armor flight and forces you to land — even over lava.**
+  Flying in over a lava lake to engage a demolisher is a death sentence, not a shortcut. Mech
+  armor otherwise auto-flies whenever you walk into any obstacle (cliffs, trees, buildings,
+  water, lava, ammonia, slowing terrain), which makes it easy to forget you are relying on it.
+- **Spidertron is the safer approach vehicle here:** unlike the car and tank, its speed is
+  unaffected by terrain, and its four rocket launchers fire in chain mode with auto-targeting
+  that works **even with no passenger aboard** — you can send it in remotely. Note its
+  ingredients span two planets in Space Age (raw fish + uranium-235 from Nauvis, carbon fiber
+  from Gleba), so plan the build before you need it.
 
 ### Gleba (Pentapods)
 **Wiki:** https://wiki.factorio.com/Enemies (Pentapod section — Stomper info is on the Enemies page, no separate Stomper article)

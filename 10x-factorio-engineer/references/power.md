@@ -37,6 +37,15 @@ is involved. The ratio changes dramatically per planet.**
   import fuel for heating towers
 - Quality affects both output and storage — higher quality accumulators store
   more but the ratio still shifts; always upgrade accumulators before panels
+- **Why accumulators first, quantified:** quality gives panels **+30% output per
+  tier-level** but accumulators **+100% (+5 MJ) capacity per tier-level**. At legendary
+  (5 levels) that's ×2.5 output versus ×6 storage, so the acc/panel ratio falls sharply
+  as quality rises — upgrading storage is over twice as effective per item.
+- **Steam chain scales too, but not efficiently:** boilers, steam engines, steam turbines
+  and nuclear reactors all gain **+30% output rate per tier-level** — and their fuel
+  consumption *and* pollution rise at exactly the same rate. Quality steam is denser per
+  tile, never cheaper per joule. Accumulators are the exception: quality raises both their
+  output and their input rate.
 - Universal layout tip: a 2.117 acc/panel ratio works on all planets at all
   quality combinations but is very wasteful — only use if you want one
   blueprint for everything
@@ -206,6 +215,14 @@ Generators per reactor = 2 × (1 + neighbor_count)
   efficiency due to losing neighbor bonuses. Normal quality reactors with
   more neighbors out-perform legendary isolated reactors on fuel per MWh.
   Quality is worth it only when space is constrained (e.g. space platforms)
+- **The neighbour bonus is free power — coolant draw does not scale with it.** Each linked
+  operating reactor adds **+100%** to the energy potential of the plasma, but consumption stays
+  at 4 cold fluoroketone/s (× quality) regardless. Two adjacent reactors consume exactly what
+  two isolated ones do while producing far more, so adjacency costs nothing in coolant or
+  cryogenic plants. This is *why* the point above holds: never build isolated reactors.
+- Unlike every other generator, **plasma temperature is variable** and set by the neighbour
+  bonus — 1,000,000 °C with no bonus, scaling up as links are added. Power output follows the
+  plasma heat, not the fuel rate.
 
 **Fusion vs Nuclear:**
 - Fusion is strictly more power-dense and fuel-efficient at scale
@@ -223,6 +240,13 @@ Generators per reactor = 2 × (1 + neighbor_count)
 |---|---|---|---|---|
 | Lightning rod | On arrival | 15 tiles | 20% normal → 50% legendary | Cheap (steel + copper + brick) |
 | Lightning collector | After EM science | 25 tiles | 40% normal → 100% legendary | Expensive (holmium + batteries) |
+
+**Quality raises reach as well as efficiency** — both by **+30% per tier-level**, so at
+legendary (5 levels) each is ×2.5: the rod's radius goes 15 → **37.5 tiles** and the
+collector's 25 → **62.5 tiles**. The efficiency column above is the same rule applied to
+20% and 40%. Because coverage scales with the *square* of radius, a legendary rod protects
+~6× the area of a normal one — quality reduces rod *count* far faster than it raises
+per-rod output, so upgrade housings before adding more rods.
 
 Both buildings cannot be crafted on any planet other than Fulgora (other planets lack the required magnetic field strength).
 

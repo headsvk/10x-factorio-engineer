@@ -161,7 +161,10 @@ Use productivity modules to amplify holmium plate output. Handles `electronics`,
 | Yumako | 1 hour | Harvested from yumako trees |
 | Jellynut | 1 hour | Harvested from jellystem |
 | Bioflux | 2 hours | Most shelf-stable biological item |
-| Pentapod egg | 15 minutes | ⚠️ Spoiled eggs hatch into enemies |
+| Raw fish | 2h 5m 50s | 7550 s — a nod to developer V453000 |
+| Agricultural science pack | 1 hour | Freshness cuts science value; ship fast |
+| Captive biter spawner | 30 minutes | ⚠️ Spoils into a **Behemoth biter** — never buffer these |
+| Pentapod egg | 15 minutes | ⚠️ Spoils into a premature wriggler |
 | Nutrients | 5 minutes | Very short — keep flow moving |
 | Yumako mash | 3 minutes | Process yumako quickly after crushing |
 | Jelly | 4 minutes | Process jellynut quickly after crushing |
@@ -174,8 +177,48 @@ Use productivity modules to amplify holmium plate output. Handles `electronics`,
 - **Machine trash slots:** any machine handling spoilable items gains internal trash slots. If an input or output stack spoils, items move to trash slots — the machine can stall if trash slots fill. Any output inserter can take from trash slots; use filter inserters to route spoilage separately from products.
 - **Biter/pentapod egg spoiling is dangerous:** spoiled biter eggs spawn big biters; spoiled pentapod eggs spawn wrigglers. Never let these items sit in open storage.
 
+**Where freshness comes from (Wiki: Spoilage_mechanics):**
+- **Harvested and extracted items start at 100%** — yumako, jellynut, and eggs pulled from a
+  captive spawner. Recycler outputs too: if a non-spoilable item recycles into a spoilable
+  one, that output is 100% fresh.
+- **Catalytic recipes reset freshness.** Recipes that consume and produce the same item —
+  iron/copper bacteria cultivation is the canonical case — do **not** transfer freshness to
+  the catalytic product; those outputs are always 100% fresh. Bacteria loops therefore never
+  degrade over time, however long they run.
+- **Recipe-set freshness:** where no spoilable input is involved, the recipe fixes the
+  output's freshness. Nutrients made from spoilage come out at **50%**, not 100%.
+- **Higher quality lengthens spoil time** for most spoilables — not just science packs.
+- **Fuel freshness is irrelevant.** A biochamber burning nearly-spoiled nutrients produces
+  output just as fresh as one burning new ones, as long as nutrients aren't also a recipe
+  *ingredient*. Don't build a fresh-fuel supply chain; feed the loop your oldest nutrients.
+- **Once a craft starts, its inputs are safe** — consumed items can't spoil mid-cycle.
+- **Hand-crafting is timed from when the craft was queued**, so bulk-queuing short-lived
+  items can yield straight spoilage at the end of the queue.
+
+**Failure modes that are easy to miss:**
+- **Trash slots stop working when a machine's output is full.** In that state spoiled inputs
+  and fuel stay where they are, blocking further insertion until the outputs drain. A backed-up
+  Gleba machine doesn't just idle — it jams.
+- **Lab pass-through doesn't carry spoilage.** Science packs hand off lab-to-lab, but spoilage
+  does not, so **every lab needs its own inserter** to clear spoilage or it eventually stalls.
+- **Inserter filters can be bypassed.** If an item spoils *after* pickup, the inserter delivers
+  it anyway — it won't put it back even when the spoiled type violates the filter. Downstream
+  must tolerate stray spoilage.
+- An inserter holding an item that spoils **immediately turns and inserts**, overriding the
+  stack-inserter rule about waiting for a full hand. This is deliberate anti-jam behaviour.
+- Ag-pack freshness works by **consumption speed**: a 50%-fresh pack is consumed twice as
+  fast for the same science, which is *why* it yields half the science per pack.
+
+**Spoilage as a production recipe (Little's law):** a buffer holding *n* items with spoil time
+*t* yields spoil products at an average rate of **n/t**. A steel chest of 48 stacks × 50
+normal-quality copper bacteria (1-minute spoil time) produces ~**2400 copper ore/min** with no
+machines at all. This inverts the usual advice — for bacteria→ore conversion, a *deliberately
+large buffer* IS the factory. The rate is an average and assumes spoiled items are removed and
+replaced with fresh ones immediately.
+
 Design rule: process items before they spoil. Yumako/jellynut buffers (1 hour) are fine;
-nutrients/mash/jelly buffers (3–5 min) are dangerous. Build short loops, not long belts.
+nutrients/mash/jelly buffers (3–5 min) are dangerous. Build short loops, not long belts —
+*except* where spoilage is the intended output, per Little's law above.
 
 **Agricultural tower mechanics (sizing a farm):**
 - The tower is **3×3 tiles**; its working area is divided into **3×3-tile sectors** and

@@ -92,14 +92,56 @@ These benchmark results are the basis for most UPS advice in the community.
 ### Beacons
 **Wiki:** https://wiki.factorio.com/Beacon
 
-- **What beacons do:** Transmit module effects to nearby machines (non-burner only). Each machine inside the beacon's area receives the module effects, but at reduced **distribution effectivity** (50% for normal quality beacons).
+- **What beacons do:** Transmit module effects to nearby machines (non-burner only). Each machine inside the beacon's area receives the module effects, scaled by the beacon's **distribution effectivity** (see below — it is 1.5 at normal quality, *not* a 50% reduction).
+- **Only machines with module slots benefit** — a laser turret gets nothing. Beacons are also excluded from their own effects: modules in a beacon never reduce that beacon's power draw.
 - **Coverage area:** 9×9 tiles centered on the beacon. Any machine with module slots whose footprint overlaps this area is affected.
 - **Distribution effectivity:** normal quality = 1.5 (not 0.5 — the tooltip shows the effectivity, not the penalty). Two speed-3 modules in a beacon at normal quality apply +50% × 2 × 1.5 = +150% total speed (vs. +100% if placed in the machine directly). The CLAUDE.md formula: `beacon_speed = BEACON_EFFECTIVITY[quality] × sqrt(count) × 2 × SPEED_MODULE_BONUS[tier] × MODULE_QUALITY_MULT[module_quality]`.
-- **Productivity modules cannot go in beacons** — only speed modules and efficiency modules are permitted. This is a hard game rule.
+- **Productivity and quality modules cannot go in beacons** — only speed and efficiency modules are permitted. This is a hard game rule.
 - **Standard layout for assembler-3:** offset rows of assembler-3s and beacons so each machine is covered by **8 beacons** (each with 2 speed-3 modules). This gives maximum speed boost in the most common array layout.
 - **Diminishing returns:** the transmission strength per beacon decreases as more beacons overlap the same machine. Surrounding machines around beacons (not beacons around machines) is more efficient. The wiki's multi-row array math gives optimum row count for large production blocks.
 - **Don't over-beacon without productivity:** beacon speed increases machine rate, which increases raw material consumption proportionally. Only beacon machines that also run productivity modules (in the machine itself) — otherwise you're just spending more resources faster.
 - **Space Age quality stacking:** beacon housing quality raises distribution effectivity (1.5→1.7→1.9→2.1→2.5 for normal→legendary). Machine quality raises crafting speed (+30%/+60%/+90%/+150%). Both stack multiplicatively with module bonuses.
+
+**Beacon array sizing (the numbers that decide a block's shape):**
+
+Theoretical maximum beacons around a *single isolated* building, by footprint:
+
+| Building footprint | Max beacons | Combined effect vs 1 beacon |
+|---|---|---|
+| 2×2 – 4×4 | 12 | 3.46× |
+| 5×5 – 7×7 | 16 | 4.00× |
+| 8×8 – 10×10 | 20 | 4.47× |
+
+But **isolated buildings are the wrong design.** In row arrays the per-building maximum
+drops (3×3 rows reach 8 beacons = 2.83×, 5×5 rows reach 10 = 3.16×) while the beacons
+*needed* collapse:
+- A single row of 3×3 machines flanked by a double row of beacons needs `2n + 6` beacons
+  for n machines — averaging `2 + 6/n`, tending to **2 beacons per machine** instead of 8.
+  That's a ~75% reduction in beacon count for a ~30% reduction in effect.
+- **Multi-row arrays** share beacons between adjacent machine rows: total is
+  `B(r,c) = (r+1)(c+3)` for r rows × c columns of 3×3 machines, tending to **1 beacon per
+  machine** as the array grows. Optimal row count for n machines:
+  `r = -0.5 + sqrt(n/3 + 0.25)`; arrays satisfying `c = 3r` are optimal.
+
+**Alignment is worth 25% for free.** Offsetting a row of 3×3 machines by one tile relative
+to the beacon rows changes coverage from **6 beacons to 8 beacons per machine** — same
+building count, same beacon count. The general rule, by machine width mod 3:
+- **Divisible by 3** (e.g. 3×3): optimal when machine sides do *not* align with beacon sides.
+- **mod 3 == 1** (e.g. 4 wide): any offset is optimal.
+- **mod 3 == 2** (e.g. 5 wide): align machine centres with beacon centres — this requires
+  leaving a one-tile gap between machines.
+
+**Two constraints that bite in practice:**
+- Beacon-to-machine gap can never exceed **2 tiles**, so dense arrays leave almost no room
+  for belts. Large beaconed blocks usually have to be fed by bots or underground weaving.
+- Beacons draw **480 kW each and never idle** — they consume full power even when every
+  machine they cover is halted. On a block that gates on demand, wire a power switch to cut
+  the beacon row, or the idle draw dominates.
+- **Beacon quality cuts power by −16.67% (1/6) per tier-level**, and legendary is 5
+  tier-levels: **480 kW → 400 → 320 → 240 → 80 kW** for normal → legendary. A legendary
+  beacon costs **one sixth** the power of a normal one *and* transmits 2.5/1.5 = 1.67× the
+  effect. In a beacon-heavy megabase this is usually the single largest power saving
+  available — upgrade beacon housings before adding generation capacity.
 
 ### Infinite Research Breakpoints
 **Wiki:** https://wiki.factorio.com/Technologies (§ Infinite research breakpoints)
@@ -119,3 +161,10 @@ Foundry, biochamber, and electromagnetic plant each have a **built-in 50% produc
 | Rocket fuel productivity | Level 10: Cryogenic plants with legendary prod modules hit 300% cap. Level 15: Biochambers with legendary prod modules hit 300% cap. Level 25: Biochambers hit 300% cap with no modules. Level 30: Cryogenic plants hit 300% cap with no modules. |
 | Rocket part productivity | Level 20: Rocket silos with legendary prod modules hit 300% cap. Level 30: Rocket silos hit 300% cap with no modules. |
 | Mining productivity | Level 50: Big mining drills mining scrap saturate **one side** of a turbo belt. Level 110: Big mining drills saturate an **entire** turbo belt. |
+
+**Drill quality extends patch life, and it compounds.** Quality reduces resource drain on
+miners and pumpjacks by **−16.67% (1/6) per tier-level** — ×5 at legendary — and that
+reduction is **multiplicative with productivity**, not additive. So it doesn't get swamped by
+high mining-prod research the way a flat bonus would; the two stack into a patch that lasts
+dramatically longer at the same output rate. When a rich patch is the constraint rather than
+throughput, upgrading drill quality beats adding drills.

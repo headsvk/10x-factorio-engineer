@@ -23,6 +23,10 @@ a safe environment to learn the mechanics before committing to travel.
 - Maximum platform size: **200 tiles north** from the center of the hub.
 - If the **hub is destroyed**, the entire platform and all contents are permanently lost. The hub cannot be removed.
 - **Player travel:** a player traveling to a platform occupies the entire rocket — no inventory items allowed except equipped armor/weapons. Ship everything else separately.
+- **Foundation must be one connected area** — no detached islands and no holes. Plan expansions outward from the existing shape; you cannot pre-place a distant section and bridge to it later.
+- A new platform starts as a **10×10 foundation with the hub at its centre**, surrounded by empty space; nothing can be built on empty space, so expansion is the first job.
+- Players aboard a platform are **locked inside the hub and cannot walk around** — you operate entirely through remote view until dropping to a surface.
+- ⚠️ **Spoiled eggs hatch on platforms.** Biter and pentapod eggs that spoil in the hub or on a belt spawn enemies exactly as they would on the ground, and those enemies neither suffocate nor take environmental damage — they simply attack the platform. Egg freight needs the same spoilage discipline in orbit as on Gleba.
 
 ### Shape Matters — Go Narrow
 Platform width determines drag. Narrower platforms move significantly
@@ -117,6 +121,14 @@ higher quality collectors have more arms, solar panels need less space,
 gun turrets have more range (more time to shoot before impact), chemical
 plants produce fuel faster, and all entities have more health to tank hits.
 If you have quality components anywhere in your game, use them here first.
+
+**Asteroid collector, per tier-level** (so ×5 at legendary): **+1 arm**, +5% arm speed,
+**+2 collection area** in both dimensions, +5 storage — at the cost of +10% active power
+per arm and +10% drain. The extra arms and area are what make quality collectors
+disproportionately strong: a legendary collector gains **5 arms** and a 10-tile-larger
+catch area, turning collection from the platform's bottleneck into a solved problem.
+Solar panels gain +30% output per level and accumulators +100% capacity per level, which
+matters on the outer-planet routes where panel area is the binding constraint.
 
 ### Interplanetary Logistics
 - **Orbital drops are free** — space science packs dropped from orbit cost

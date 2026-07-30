@@ -190,6 +190,9 @@ Inserters, belts, splitters (2.0.67+), chests, train stops, mining drills, pumpj
   - **Anything**: condition is true if it holds for AT LEAST ONE signal (existential).
   - **Each**: applies condition per-signal; outputs each matching signal.
 - Right-hand side of a comparison can be a signal (not just a constant) — when using Everything/Anything, the comparison signal is implicitly excluded from checking itself.
+- **AND binds tighter than OR.** With multiple conditions, each adjacent pair gets an AND/OR toggle and AND takes precedence — `A OR B AND C` evaluates as `A OR (B AND C)`. There are no parentheses, so order your conditions to match the grouping you want rather than assuming left-to-right.
+- Each output also has an **"else" branch** that fires when the conditions are *not* satisfied, so one decider can cover both cases without a second inverted combinator.
+- Per-input wire selection: each condition and each output can specify which wire colours to read; **if both red and green are selected, their values are summed** before the comparison.
 
 **Selector combinator (Space Age, 2.0.7+):**
 Six operating modes:

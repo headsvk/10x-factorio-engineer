@@ -27,6 +27,38 @@ module's quality tier (same MODULE_QUALITY_MULT as other modules: ×1.3 uncommon
 
 **Quality tiers:** normal (0) → uncommon (1) → rare (2) → epic (3) → legendary (**5**). Note: legendary is a 2-tier jump over epic — quality attributes scale with tier strength, so legendary items have 2.5× the bonus of uncommon (not 1.25×).
 
+**The universal rule (Wiki: Quality):** every quality effect is **per tier-level and
+additive**. A legendary item gets 5 × the per-level effect. Worked example from the wiki: a
+productivity module 3 (base +10%) at legendary grants **+25%** — 10% × (1 + 5 × 0.30) = 25%.
+This one rule generates the whole `MODULE_QUALITY_MULT` table (1 / 1.3 / 1.6 / 1.9 / **2.5**),
+so you can derive any quality effect from its normal-tier value rather than looking it up.
+
+**Effects worth knowing beyond crafting speed** (all per tier-level, so ×5 at legendary):
+
+| Effect | Per level | At legendary |
+|---|---|---|
+| Beacon power consumption | **−16.67%** | 480 kW → **80 kW** |
+| Miner / pumpjack resource drain | **−16.67%**, *multiplicative with productivity* | patch lasts ~6× longer |
+| Solar panel output | +30% | ×2.5 |
+| Accumulator capacity | +100% (+5 MJ) | ×6 |
+| Boiler / steam engine / turbine / reactor output | +30% | ×2.5 |
+| Lightning rod & collector reach + efficiency | +30% | ×2.5 |
+| Turret and weapon range | +10% | +50% |
+| Ammo damage | +30% | ×2.5 |
+| Chest inventory | +30% (rounded down) | ×2.5 |
+| Consumable durability (repair packs, science packs) | +100% | ×6 |
+
+Two traps in that table: **steam-chain output gains raise consumption *and* pollution at the
+same rate** (quality boilers are denser, not more efficient), and the miner drain reduction is
+*multiplicative* with productivity rather than additive — so it compounds with mining-prod
+research instead of being swamped by it.
+
+**Rounding:** positive module effects from quality are rounded **down** — to the nearest 0.1%
+for quality modules, and the nearest 1% for all other module types. `cli.py` computes these as
+exact `Fraction`s without rounding, so its module bonuses can read a hair high versus in-game.
+The gap is far below any planning threshold, but it's the reason for tiny discrepancies against
+FactorioLab or in-game tooltips.
+
 **Unlock requirements:**
 - Uncommon + Rare: Quality module research (needs production science)
 - Epic: Epic quality research (needs utility + space science + agricultural science from Gleba)

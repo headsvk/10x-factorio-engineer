@@ -107,6 +107,42 @@ an icon matching the cargo — enabling a single generic train to self-route to 
 4. CTRL + hover on tracks in map view highlights the planned path — follow it until it disappears
    to locate the break or signal error.
 
+### Why a train picked that route — pathfinding penalties
+
+**Wiki:** https://wiki.factorio.com/Railway/Train_path_finding
+
+Trains run A* over rail *segments*, scoring each candidate path and taking the lowest total.
+Base cost is simply segment length, then penalties dominate:
+
+| Situation in a block on the path | Penalty |
+|---|---|
+| Path routes **through a train stop** | **+2000** |
+| Manually controlled train parked, **no passenger** | **+7000** |
+| Automatic train with no schedule | +7000 |
+| Manually controlled train parked, with passenger | +2000 |
+| Rail signal forced red by circuit network | +1000 |
+| Train stopped at a stop with no other valid stops in schedule | +1000 |
+| Train with no path | +1000 |
+| Train stopped at a train stop | +500 |
+| Train arriving at a stop or signal | +100 |
+| Train waiting at a signal | +100, +0.1 per tick already waited |
+| Block occupied by a train | +2 × block length ÷ blocks-from-start |
+
+What this means in practice:
+- **Never run a mainline through a station.** The +2000 for passing through a stop is larger
+  than most detours, so through-station routing distorts the whole network — but it also means
+  trains reliably prefer bypass tracks, so building them works.
+- **A parked manual train without a passenger is a 7000-point wall.** Leaving a personal train
+  on a shared line is the most common cause of "my network suddenly reroutes everything."
+  Park on a siding, not the main.
+- Occupied-block penalties are **divided by distance from the train**, so congestion far ahead
+  barely affects routing — trains do not plan around traffic they haven't reached. Don't expect
+  self-balancing across long routes; use stackers and train limits instead.
+- **Circuit-red signals cost 1000, not infinity** — a red signal discourages a route rather
+  than forbidding it, which makes circuit-controlled signals a soft routing tool.
+- Waiting trains accrue +0.1/tick, so a long-blocked path gradually becomes unattractive and
+  the train eventually looks elsewhere. Repathing at chain signals is re-checked every 5 s.
+
 ### Train Limits & Circuit Dispatch
 **Wiki:** https://wiki.factorio.com/Circuit_network_cookbook
 
