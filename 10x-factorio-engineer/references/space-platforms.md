@@ -52,6 +52,9 @@ Three types: **metallic** (→ iron ore), **carbonic** (→ carbon),
   productivity modules but greatly improve efficiency
 - Dump unwanted items overboard with inserters pointing off the edge — this
   is the intended mechanic, not a trick
+- **Quality modules do nothing in reprocessing recipes** (the "space casino" nerf,
+  FFF-442). Put quality modules in the **crushers** — that's where the roll happens — and
+  upcycle the resulting ore in a recycler loop. See `quality.md`.
 
 ### Thruster Fuel Efficiency
 - Normal quality thrusters consume **120 fluid/second each** at full thrust
@@ -64,6 +67,36 @@ Three types: **metallic** (→ iron ore), **carbonic** (→ carbon),
 - For Aquilo: solar panels output very little that far from the sun.
   Nuclear power is viable on platforms (requires ice → water loop). Fusion
   is the endgame solution. Accumulators can work if charged near inner planets
+
+### Asteroid Sizes and the Split Chain
+Destroying an asteroid does not remove it from the fight — it **splits into three of
+the next size down**, so ammo demand cascades:
+
+| Size | Spawns | On destruction | HP (normal / promethium) | Key resistances |
+|------|--------|----------------|--------------------------|-----------------|
+| Huge | Beyond Aquilo | → **3 big** | 5000 / 10000 | Laser 99%, Physical **3000**/10% |
+| Big | Beyond Fulgora and Gleba | → **3 medium** | 2000 / 4000 | Laser 95%, Physical **2000**/10% |
+| Medium | In space, and orbit of every planet except Nauvis | → **3 small** | 400 / 800 | Laser 90%, Physical 10% |
+| Small | Never spawns naturally (only from splits) | → **2 chunks** | 100 / 200 | Laser 20% |
+| Chunk | Only type in Nauvis orbit | collectable resource | no health | harmless |
+
+**Promethium asteroids have double the health** of the metallic/carbonic/oxide variants
+of the same size — budget roughly 2× the firepower for promethium runs.
+
+Planning consequences:
+- One huge asteroid ultimately yields **3 → 9 → 27 bodies and 54 chunks** if killed by
+  splitting all the way down. Budget ammo for the whole cascade, not the first hit.
+- The physical numbers are **flat reduction**, not percentages: big absorbs 2000 and huge
+  3000 damage *per hit* before the 10% multiplier applies. Any weapon whose per-shot
+  damage is below that flat value does literally nothing. This is why gun turrets are
+  ineffective from big upward (rocket turrets are usually better), and why huge asteroids
+  require a **railgun turret** — killing one with small arms isn't slow, it's impossible.
+- Laser resistance climbs 20% → 90% → 95% → 99%, so lasers are the wrong answer at every
+  size above small.
+- Damage scales too: small chips the platform, medium can destroy several foundation
+  tiles, big passes straight through destroying everything in its path, and huge will
+  end the platform outright if nothing can kill it.
+- This is why Nauvis orbit is the safe starting ground — only small chunks appear there.
 
 ### Defense During Travel
 - Traveling to a new planet sends the platform through a **thick asteroid
@@ -96,6 +129,17 @@ If you have quality components anywhere in your game, use them here first.
   are pending
 - Create dedicated platforms per route — don't use the same platform as
   both a cargo hauler and a science producer
+
+**Landing pad unloading bay (new building):** solves the long-standing problem that
+inserters cannot pull from a cargo bay. The unloading bay *can* be interacted with by
+inserters, and it unloads from **all connected cargo bays plus the original landing pad** —
+so one bay drains the whole landing-pad complex.
+- **4×5 tiles**, so a single row of inserters unloads straight into a waiting cargo wagon.
+  This makes rocket-arrival → train the natural planetside pattern; no belt weaving between
+  cargo bays.
+- **Planetside only** — it cannot be placed on space platforms.
+- Must be placed **within 59 tiles of the landing pad**, which constrains where the receiving
+  rail stop can sit. Plan the landing-pad block with the unloading bay and stop together.
 
 ### First Platform Checklist
 1. Build in Nauvis orbit first (safe, chunk-only environment)

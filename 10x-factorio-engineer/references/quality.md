@@ -2,6 +2,12 @@
 
 This file covers quality mechanics in Factorio Space Age, including quality modules, upcycling loops, and when quality is worth pursuing.
 
+**Mod structure note:** the recycler no longer ships inside the Quality mod — it lives in
+its own **Recycler** mod, which is a dependency of both Quality and Space Age. Quality
+itself is *recommended but optional* for Space Age. So recycling is available in every
+configuration, but quality tiers can be switched off; don't assume a Space Age save has
+quality enabled. See `planets.md` for the full dependency graph.
+
 ---
 
 ## Quality Mechanics
@@ -45,6 +51,24 @@ modules, beacons, key machines). Do not run quality loops on bulk intermediates.
 **Machine quality:** Higher-quality machines craft faster (+30%/+60%/+90%/+150%
 speed for uncommon/rare/epic/legendary). Upgrading machines before modules often
 gives better throughput returns. The CLI `--machine-quality` flag models this.
+
+### Asteroid quality sourcing — the "space casino" nerf
+
+**Reprocessing recipes no longer accept quality modules.** Asteroid *reprocessing*
+(chunk → other chunk types) used to take quality modules, which let a platform launder
+ordinary chunks up to legendary and then produce legendary raw materials from them. The
+devs named this the **"space casino"** in FFF-442 and removed it deliberately: *"it is too
+strong to leave it alone."* The term is dev/community slang — no wiki page uses it, so
+searching the wiki for "casino" finds nothing.
+
+What still works for space-sourced quality:
+- **The quality roll happens at crushing**, not reprocessing — quality modules in
+  *crushers* still produce higher-tier ore/carbon/ice.
+- **Upcycle the ore in a recycler loop** afterwards, the same way as any other item.
+
+So the route is *crushing quality roll → recycler upcycle*, and any plan that assumes
+module-driven reprocessing gains is out of date. `dev/quality_planner.py` already models
+the post-nerf behaviour; if its numbers disagree with an older guide, the planner is right.
 
 ### Quality upcycling loop design (from Tutorial:Quality_upcycling_math)
 **Wiki:** https://wiki.factorio.com/Tutorial:Quality_upcycling_math

@@ -139,7 +139,11 @@ blueprint. The cheat sheet commonly shows this layout.
 
 **Standard build block:** 1 offshore pump → 20 boilers → 40 steam engines → **36 MW** per block.
 - Offshore pump: 1200 water/s. Each boiler consumes 6 water/s → 200 boilers max per pump. In practice build 20-boiler segments; one pump covers 10 such segments.
-- Coal: each boiler burns coal at ~0.45 coal/s (4 MJ/coal ÷ 1.8 MW thermal output × efficiency). A full 20-boiler block needs ~9 coal/s — one yellow belt (~13.3/s) comfortably feeds 20 boilers.
+- Coal: each boiler burns coal at ~0.45 coal/s — one piece every ~2.2 s (4 MJ/coal ÷ 1.8 MW thermal). A full 20-boiler block needs ~9 coal/s.
+- **Belt sizing:** one full yellow belt of coal (**15 coal/s**) supplies **60 MW**, feeding ~33 boilers — so a single yellow belt covers a 20-boiler block with room to spare, and 1.5 blocks at saturation.
+- Fuel density scales consumption inversely: **wood burns twice as fast** as coal, **solid fuel 3× slower**. Swapping a coal line for solid fuel cuts belt pressure by two thirds.
+- **Energy buffering:** a single stack of coal holds **200 MJ** versus **750 MJ** for a full steam storage tank — but per tile of build, chests of fuel are the highest-density energy buffer available. Store fuel, not steam, when the goal is reserve capacity.
+- Inserters can *remove* fuel from boilers as well as insert it, so a chain of boilers can be fed by passing coal down the line rather than belting to each one.
 
 **When to build it:**
 - Place steam power at game start — it's available before any tech research.
@@ -189,6 +193,13 @@ Generators per reactor = 2 × (1 + neighbor_count)
   to a cryogenic plant to cool back to fluoroketone (cold) and recirculate.
   If hot fluoroketone backs up, generators stop producing power
 - Each reactor consumes at most **4 cold fluoroketone/second**. Rule of thumb: **1 cryogenic plant per reactor** is sufficient to keep the coolant loop flowing (no modules).
+- The generator's hot-fluoroketone output is **exactly equal** to the plasma it consumes, so
+  the loop is conserved end-to-end — sizing the cryogenic plants to reactor throughput is
+  the whole problem; there is no leakage to compensate for.
+- **The hot → cold recipe cannot take productivity modules.** Don't plan on prod modules
+  shrinking the cryogenic-plant count in a fusion loop; speed and quality are the only
+  levers. (Unrelated recipes that merely *use* fluoroketone as a coolant return only half
+  as much hot fluoroketone as they consume — those do need make-up supply.)
 - Do not build more generators than the ratio supports — excess generators
   deplete stored plasma and cause others to show "no fluid input"
 - Higher quality reactors give more power per tile but worse fuel

@@ -33,7 +33,12 @@ dev/
   my-factory.json           # Dev factory state for local testing
   test_cli.py               # unittest suite (281 tests, stdlib only)
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
-  test_quality_planner.py   # unittest suite (367 tests) for quality_planner
+  test_quality_planner.py   # unittest suite (411 tests) for quality_planner
+  wiki/
+    crawl.py                # Wiki crawler — `crawl` (full, resume-safe) and `update` (RecentChanges re-crawl)
+    triage_changes.py       # Reduces changes.diff to real content changes (strips renderer noise, labels table columns)
+    urls.json               # 646 curated English gameplay wiki page titles
+    pages/                  # Crawled corpus (gitignored — regenerate with crawl.py)
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage
     research.md             # Field research doc for claude.ai artifact APIs
@@ -179,7 +184,7 @@ python -m unittest dev.test_cli -v
 python -m unittest dev.test_quality_planner -v
 ```
 
-281 CLI tests + 367 quality-planner tests, stdlib only.
+281 CLI tests + 411 quality-planner tests, stdlib only.
 
 ### Legendary Production Planner
 

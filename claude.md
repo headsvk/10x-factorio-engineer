@@ -47,17 +47,33 @@ in `10x-factorio-engineer/references/` are loaded on demand per topic.
 | Any `.py` file is created or edited | Run `get_errors` on the file afterwards and fix all Pylance errors before finishing. Prefer `assert x is not None` over `assertIsNotNone(x)` when the result is used afterward — Pylance uses the former as a type-narrowing guard but not the latter. |
 | Before making a commit | Review `README.md` and update it to reflect any changes made (test counts, new features, changed behaviour, etc.). |
 | Before spawning a subagent to implement CLI or dashboard changes | Include in the subagent prompt: (1) an instruction to read and follow all maintenance rules in `CLAUDE.md` before finishing, and (2) an explicit end-of-task checklist derived from those rules — e.g. "grep SKILL.md for every new JSON field added to cli.py output and confirm each appears in both the example block and the field table in §2". Subagents do not automatically load `CLAUDE.md`. |
-| Every 30 days | Run the wiki maintenance workflow (see below) to update the split reference files in `10x-factorio-engineer/references/`. The MediaWiki RecentChanges API only goes back 30 days — running less frequently means changes fall out of the window undetected. |
+| Twice monthly (1st + 15th) | The `factorio-wiki-maintenance` scheduled routine runs the wiki maintenance workflow (see below) to update the split reference files in `10x-factorio-engineer/references/`. Nothing to do by hand unless it reports a blocker — but if the last `wiki update complete` line in `dev/wiki/findings.md` is more than ~20 days old, the routine isn't firing; investigate rather than waiting. |
 
 The goal is that `claude.md` always accurately describes the codebase.
 
 ---
 
-## Strategy Reference Maintenance (Every 30 Days)
+## Strategy Reference Maintenance (Twice Monthly)
 
 The split reference files in `10x-factorio-engineer/references/` embed facts crawled from the
-Factorio wiki, and `dev/wiki/` holds the full per-page corpus (417 pages, gitignored).
-The wiki is actively updated — run this workflow monthly to pick up changes.
+Factorio wiki, and `dev/wiki/` holds the full per-page corpus (646 pages, gitignored).
+The wiki is actively updated, so this workflow re-crawls what changed and refreshes the
+embedded facts.
+
+**Driven by a scheduled routine, not by hand.** `factorio-wiki-maintenance` (prompt at
+`~/.claude/scheduled-tasks/factorio-wiki-maintenance/SKILL.md`, visible under **Routines**
+in the Claude desktop app) fires on the 1st and 15th at 09:00 local and executes the
+workflow below. Deliberately tighter than monthly: the RecentChanges API only reaches back
+**30 days**, so a monthly cadence that slips even slightly loses edits permanently — the
+2026-06-10 → 2026-07-30 gap lost the 2026-06-10 → 06-30 window exactly this way.
+
+Credentials come from `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`, resolved by
+`crawl.py`'s `load_credentials()` from the environment or `.env` / `.env.local` / `~/.env`.
+They live in `~/.env` (outside the repo, read at runtime so no app restart is needed). The
+token needs exactly one Cloudflare permission: **Account → Browser Rendering → Edit**.
+
+The last run is recorded as a `wiki update complete` line in `dev/wiki/findings.md` — that
+line is how the routine decides whether it's due, so it must be appended on every run.
 
 ### Workflow
 
@@ -69,7 +85,7 @@ This returns all English main-namespace pages edited in the last 30 days. Filter
 translations (`/zh`, `/ru`, `/de`, etc.) and non-article pages (`Special:`, `File:`, etc.).
 
 **Step 2 — Cross-reference against our crawled page list:**
-Our 417-page list is in `dev/wiki/urls.json`. Check which recently-changed wiki pages
+Our 646-page list is in `dev/wiki/urls.json`. Check which recently-changed wiki pages
 appear in that list — those are the ones to re-crawl.
 
 Also check which split reference files embed facts from those changed pages — if any of those changed,
@@ -89,8 +105,28 @@ Credentials come from env vars `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`.
 > MediaWiki RecentChanges API (Step 1) to determine what actually changed.
 
 **Step 4 — Update the relevant split reference file(s) for changed embedded pages:**
-Compare newly crawled content against what's embedded in the split reference files in `10x-factorio-engineer/references/`.
+
+First reduce the diff — **do not read `changes.diff` directly**:
+```
+python dev/wiki/triage_changes.py --top 20
+```
+The raw diff is mostly renderer noise (link resolution, heading markers, TOC renumbering
+change between crawls, so nearly every page shows as modified). `triage_changes.py` strips
+those axes and ranks pages by surviving prose changes. Use `--pages NAME` to drill into one
+page and `--context N` to see more lines.
+
+Then compare the surviving changes against what's embedded in the split reference files in `10x-factorio-engineer/references/`.
 Update any facts that changed. Focus on **mechanics, strategic constraints, and planning guidance** — not raw stats or recipe ingredients (the CLI provides those on demand). Prioritise: spoilage timers, planet-specific constraints, combat mechanics, circuit patterns, and infrastructure ratios (solar/nuclear/fusion) that the CLI doesn't model.
+
+> **Table columns are preserved and labelled.** `triage_changes.py` keeps the `|` cell
+> delimiters and prints a `[columns] …` header line above changed table rows, recovered
+> from the crawled page. This exists because the first version flattened the pipes: the
+> asteroid table's two health columns (`metallic/carbonic/oxide` vs `promethium`) read as
+> a single run of numbers and nearly put wrong HP values into the references on
+> 2026-07-30. Still spot-check any figure that will be quoted verbatim against
+> `dev/wiki/pages/<Page>.md` — headers are recovered heuristically (first-cell match, then
+> walk back to the `|---|` separator) and can come back empty for nested or malformed
+> tables, in which case no `[columns]` line is printed and the numbers are unlabelled.
 
 **Step 5 — Also check for new high-value pages:**
 Filter the full RecentChanges list for pages not yet in `dev/wiki/urls.json` but relevant
@@ -102,7 +138,9 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 - `render: false` crawls won't follow links between unrelated pages — crawl each target URL directly
 - `dev/wiki/findings.md` tracks crawl history (gitignored, local only)
 - Cloudflare free tier (Quick Actions `/markdown` endpoint): 1 request/10 s, no daily cap — use `--workers 1`
-- `dev/wiki/pages/` is gitignored — regenerate with `python dev/wiki/crawl.py crawl` (~70 min at 1 req/10 s)
+- `dev/wiki/pages/` is gitignored — regenerate with `python dev/wiki/crawl.py crawl` (~2 h for 646 pages at 1 req/12 s; resume-safe, so it can be interrupted and restarted)
+- `crawl.py update` appends its own `wiki update complete` line to `findings.md` — don't add a second one by hand
+- Leftover files in `dev/wiki/pages/.staging/` mean a previous crawl aborted before promoting them. Check their dates against the live copies: on 2026-07-30 seven files staged on 06-10 were newer than the April-era copies in `pages/`, so they were promoted rather than discarded.
 
 ---
 
@@ -124,11 +162,12 @@ and run `python dev/wiki/crawl.py crawl` to fetch them.
 | `dev/update_research.py` | Applies a research-level change to a factory state and re-runs only the affected lines (`python dev/update_research.py TECH=LEVEL ... [--state PATH] [--dry-run] [--list]`; default state = `dev/my-factory.json`). Use this instead of hand-editing `research_levels` + manually re-running lines — it reconstructs each line's CLI command from its `cli_args` + shared top-level config, re-solves the affected lines, and rewrites their `cli_result` (LF output). Mining-prod re-runs miner lines; recipe-prod re-runs lines whose steps touch a boosted recipe; lab-only techs (`research-productivity` / `lab-research-speed`) update the field but trigger no re-run. See the **research-level updates** workflow note below. |
 | `dev/test_cli.py` | `unittest` suite (281 tests, stdlib only) — dev only |
 | `dev/quality_planner.py` | Legendary production planner — separate stdlib-only tool implementing the full quality roadmap (Q1–Q9, see `dev/quality-roadmap.md`). Post-2.1.8 asteroid sourcing = crushing quality roll + ore recycler upcycle (reprocessing no longer accepts quality modules); DP/LP quality-loop solvers, cross-item shuffles, Gleba spoilage-timing warnings (Q3), quality-module placement optimizer (Q4), mixed-tier `--demand`/`--keep-tiers` (Q6), `--beacons` (Q7), `--objective` (Q8), and `--preset` shortcuts (Q9). `--location fulgora` switches to scrap-only sourcing (no asteroid platform; metals terminate at scrap-reachable plates via `forbid_ore_routes`) |
-| `dev/test_quality_planner.py` | `unittest` suite (381 tests) for quality_planner |
+| `dev/test_quality_planner.py` | `unittest` suite (411 tests) for quality_planner |
 | `dev/quality_planner.md` | Living spec — current capabilities, architecture, gotchas, and roadmap (consolidates the former v1 / v2 specs) |
-| `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (monthly maintenance via RecentChanges API); 30 workers, 9 req/sec rate limiter |
-| `dev/wiki/urls.json` | Curated list of 417 English gameplay wiki page titles to crawl |
-| `dev/wiki/` | Per-page wiki corpus (417 `.md` files); **gitignored** — regenerate with `python dev/wiki/crawl.py crawl` (~15 min) |
+| `dev/wiki/crawl.py` | Two subcommands: `crawl` (full crawl, resume-safe) and `update` (twice-monthly maintenance via RecentChanges API). Use `--workers 1` — the Cloudflare free tier allows 1 request per 10 s (`REQUEST_INTERVAL = 12` for headroom). Credentials via `load_credentials()`: env vars, else `.env` / `.env.local` / `~/.env`; the token needs **Account → Browser Rendering → Edit** |
+| `dev/wiki/triage_changes.py` | Reduces `dev/wiki/changes.diff` to reviewable content. **Always use this instead of reading the raw diff** — the renderer resolves links, headings and tables differently between crawls, so the raw diff reports ~every page as changed (2026-07-30: 82/82 pages, 9.4 MB). Strips link targets, image embeds, bare URLs, heading/bullet markers, TOC renumbering, nav-template blobs and footers, then ranks pages by surviving prose changes. **Preserves `\|` cell delimiters** and prints a `[columns] …` header line above changed table rows (recovered from `dev/wiki/pages/<Page>.md`) so multi-column stat tables stay unambiguous. Flags: `--top N`, `--context N`, `--pages NAME,NAME`, `--quiet`, `--diff PATH`, `--pages-dir PATH` |
+| `dev/wiki/urls.json` | Curated list of 646 English gameplay wiki page titles to crawl |
+| `dev/wiki/` | Per-page wiki corpus (646 `.md` files); **gitignored** — regenerate with `python dev/wiki/crawl.py crawl` (~2 h at 1 req/12 s) |
 | `dev/artifact-api/test.html` | claude.ai runtime API test suite — paste as `application/vnd.ant.html` to verify `window.claude` / `window.storage` / localStorage after platform updates |
 | `dev/artifact-api/research.md` | Field research doc for the claude.ai artifact runtime API; compare against test suite output to diagnose breakage |
 
@@ -667,7 +706,7 @@ python -m unittest dev.test_cli -v
 
 | `TestVanillaEmptyQualityTables` | Regression: the vanilla dataset has no quality modules, so the derived quality tables are empty — speed modules (machine or beacon) and stray quality specs must not KeyError; they contribute zero quality chance/penalty on vanilla |
 
-### `dev/test_quality_planner.py` (381 tests)
+### `dev/test_quality_planner.py` (411 tests)
 
 Covers the V1+V2 legendary planner in `dev/quality_planner.py`, plus the V3-partial LDS-shuffle wiring:
 

@@ -60,6 +60,34 @@ This file covers combat and defense in Factorio, including turret types, enemy m
 
 **Stomper acid:** Stompers deal acid damage in an area around them. Energy shields absorb this; physical armor does not. Tesla turrets' slow effect reduces the duration of stomper contact.
 
+### Evolution Is Per-Planet (Space Age)
+**Wiki:** https://wiki.factorio.com/Enemies
+
+In Space Age the evolution factor is calculated **independently for each planet's
+surface** — there is no single global evolution number. What counts as "pollution" in
+that calculation also changes per planet:
+
+| Planet | Pollution variable driving evolution |
+|--------|--------------------------------------|
+| Nauvis | Standard industrial pollution emissions |
+| Gleba | **Spore production** |
+
+The consequence that matters for planning: **industrial machinery brought from Nauvis
+(assemblers, furnaces, etc.) emits neither pollution nor spores when operated on Gleba.**
+Only agricultural tower spore output feeds Gleba's evolution. So on Gleba you can scale
+manufacturing freely without accelerating enemy evolution — it is *farm size*, not
+factory size, that arms the pentapods against you. Keep agricultural towers to the
+minimum footprint that meets demand and evolution stays slow no matter how big the base
+gets.
+
+Type `/evolution` in the in-game console to see the exact per-surface breakdown of time,
+pollution/spore and nest-destruction contributions.
+
+Nest-proximity note: expansion score per chunk is 1.0 when no player structures or
+spawners sit within 3 chunks (taxi-cab distance), degrading to a floor of 0.002 as nearby
+structures accumulate — so dense building genuinely deters expansion in its immediate
+neighbourhood.
+
 ### Nauvis (Biters)
 **Wiki:** https://wiki.factorio.com/Enemies
 **Key points:**

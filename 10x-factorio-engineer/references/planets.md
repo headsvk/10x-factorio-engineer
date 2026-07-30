@@ -10,7 +10,19 @@ This file covers Space Age planet strategies and the science packs unlocked by e
 **Wiki:** https://wiki.factorio.com/Space_Age
 **What Space Age adds:** 4 new planets, space platforms, 5 new science packs, 22 new buildings, 5 new weapons, 2 new enemy types, 30 new intermediate products, 8 hours of original music. End goal: build a space platform capable of reaching the solar system edge (not just launching a rocket).
 
-Space Age is actually three mods bundled together: Space Age (planets/platforms), Quality (item quality tiers + recycler), and Elevated Rails. Quality and Elevated Rails can be enabled separately without Space Age.
+Space Age is actually **four** mods bundled together: Space Age (planets/platforms),
+**Recycler** (the recycler machine + recycling recipes), Quality (item quality tiers),
+and Elevated Rails. The recycler used to ship inside the Quality mod but is now its own
+mod, which changes the dependency graph:
+- **Recycler and Elevated Rails are dependencies of Space Age** — but either can be
+  enabled on its own without Space Age.
+- **Quality is recommended but optional for Space Age** — it is no longer required.
+- Recycler is a dependency for playing with *either* Quality or Space Age, so recycling
+  is available in any configuration that has quality.
+
+Practical consequence: a Space Age save can run without quality tiers, but never without
+the recycler — so recycling-based routes (Fulgora scrap, upcycling loops) are always
+available, while quality-module strategies are opt-in.
 
 **Recommended planet order (community consensus):**
 1. Vulcanus — easiest, great for bootstrapping production
@@ -165,6 +177,24 @@ Use productivity modules to amplify holmium plate output. Handles `electronics`,
 Design rule: process items before they spoil. Yumako/jellynut buffers (1 hour) are fine;
 nutrients/mash/jelly buffers (3–5 min) are dangerous. Build short loops, not long belts.
 
+**Agricultural tower mechanics (sizing a farm):**
+- The tower is **3×3 tiles**; its working area is divided into **3×3-tile sectors** and
+  reaches **7×7 sectors** around itself. One tree is planted per sector, in the sector's
+  middle — so a fully utilised tower supports up to 49 planting sectors.
+- A sector is only planted if it is **completely filled with viable soil** for the seed
+  loaded, and is **empty of any object or ghost** — even something that wouldn't
+  physically block the tree (a stray belt, a pole, an unbuilt ghost) silently costs you
+  that sector. Keep the tower's footprint clear of everything, including blueprint ghosts.
+- Maturity: **5 minutes** for yumako and jellystem, **10 minutes** for Nauvis trees grown
+  from tree seeds. That delay, not the harvest rate, sets the floor on farm size.
+- **No module slots, and no benefit from mining productivity research** — agricultural
+  towers are the one resource source you cannot buy throughput on. Scaling means more
+  towers and more land.
+- Seed economy: each processed fruit has a **2% chance** to return its seed, so ~50 fruits
+  per seed on average, and a tree yields roughly one replacement seed in expectation. This
+  is an *expectation with no floor* — a run of bad luck can consume many trees' worth of
+  fruit and return nothing, so keep a seed buffer before expanding.
+
 **Biochamber stats:**
 - Crafting speed: **2** (normal quality), up to 5 at legendary
 - Module slots: **4**
@@ -231,6 +261,11 @@ as fuel; the cycle is self-sustaining once primed.
   resistances, and ignore terrain features including walls
 - Spores from agricultural activity attract pentapods — the larger your
   farm, the bigger the spore cloud, the harder the attacks
+- Only **agricultural towers** emit spores. Machinery imported from Nauvis
+  (assemblers, furnaces) produces neither pollution nor spores on Gleba, and
+  Gleba's evolution factor is driven by spore output alone — so manufacturing
+  scale is free, farm scale is not. See `combat-defense.md` for the per-planet
+  evolution mechanic.
 - Egg rafts (spawners) sit in shallow marshland near your harvest areas —
   exactly where you need to build
 - Pentapod eggs that spoil inside your factory hatch into enemies —

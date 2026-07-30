@@ -22,6 +22,24 @@ ramps. Supports are required every **16 straight tiles**. Players cannot walk on
 Buildings too tall for elevated rail: big electric pole, roboport, oil refinery, rocket silo,
 cargo landing pad, agricultural tower, cargo bay, lightning rod/collector.
 
+### Locomotive quality and fuel (2.1.10+)
+
+**Wiki:** https://wiki.factorio.com/Locomotive
+
+Since **2.1.10**, locomotive quality improves both **max speed** and **acceleration** —
+it is no longer just a survivability stat. On wood/coal the max-speed ladder runs
+259 → 267 → 275 → 283 → **298 km/h** from normal to legendary (~+15%), and acceleration
+scales alongside it. The gain applies on top of whatever fuel you burn, so quality
+locomotives and better fuel compound.
+
+Planning implications:
+- Upcycling locomotives is a genuine throughput upgrade on long hauls, not a cosmetic one
+  — worth doing before adding track or more trains to a saturated line.
+- **Trains throttle their burn rate once they reach max speed**, so the fuel duration
+  quoted for any fuel is a *minimum*. Real-world fuel life on long straight runs is
+  longer than the table suggests, which makes refuelling intervals easier than they look
+  on paper.
+
 ### Signals and deadlock prevention
 
 - Signals split the network into **blocks** — only one train per block at a time.
