@@ -130,6 +130,15 @@ catch area, turning collection from the platform's bottleneck into a solved prob
 Solar panels gain +30% output per level and accumulators +100% capacity per level, which
 matters on the outer-planet routes where panel area is the binding constraint.
 
+**The starter pack's quality sets the hub's quality.** Launching a higher-quality space
+platform starter pack produces a correspondingly higher-quality **space platform hub** —
+so hub quality is decided at launch and is not something you retrofit later. The
+**foundation is always normal quality regardless**, because tiles are not affected by
+quality at all. Every platform starts with the hub plus 46 foundation (10 in the hub's
+inventory, 36 placed as a ring around it). Planning consequence: if you intend a platform
+to be a long-lived hauler, spend the quality on the starter pack up front rather than
+building a normal platform and hoping to upgrade the hub in orbit.
+
 ### Interplanetary Logistics
 - **Orbital drops are free** — space science packs dropped from orbit cost
   nothing to deliver. Set up a dedicated Nauvis-orbit platform just for

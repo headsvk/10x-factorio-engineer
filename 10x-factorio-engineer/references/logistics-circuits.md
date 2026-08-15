@@ -166,6 +166,31 @@ Inserters, belts, splitters (2.0.67+), chests, train stops, mining drills, pumpj
 
 **Signals:** Each signal is a named integer channel — any item, fluid, or virtual signal. Virtual signals include numbers, letters, arrows, planet icons, and 177–241 total options (241 in Space Age). Three special logic signals (Everything, Anything, Each) apply bulk operations.
 
+### Wireless circuit signals via radar
+
+Radars carry circuit signals without wires, and have **two modes of operation**:
+
+- **Surface mode** — the radar shares a circuit connection with every *other* Surface-mode
+  radar on the same surface. Anything sent into one is emitted by all the others, so each
+  surface effectively has two surface-wide radar networks (one red, one green). Behaviour
+  since 2.0.7.
+- **Universe mode (2.1.7+)** — the radar connects to every other radar **on the same
+  channel anywhere in the universe**, i.e. across surfaces. This is the supported way to
+  pass circuit signals between planets and platforms; before 2.1.7 there was no
+  cross-surface circuit link at all.
+
+**Planning notes:**
+- Universe mode is channel-scoped, so run separate channels per logical feed rather than
+  dumping every planet's signals onto one — cross-surface networks sum like any other.
+- A radar **loses its circuit connection when it loses power**, so an interplanetary
+  control loop inherits the reliability of the remote outpost's power. On Fulgora, that
+  means the link drops with the accumulator bank; design the receiving side to treat
+  "signal absent" as unknown rather than as zero.
+- Radars have **no GUI**, so the received signal can only be read from a connected entity
+  such as an electric pole.
+- Typical uses: an outpost reporting buffer levels home, a platform signalling that it is
+  waiting on resupply, or a planet requesting a launch when a local stock runs low.
+
 ### Combinators
 **Wiki:** https://wiki.factorio.com/Arithmetic_combinator and https://wiki.factorio.com/Decider_combinator
 **Constant combinator:**

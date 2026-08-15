@@ -76,9 +76,17 @@ in the recycler can upgrade products further. The loop is:
 3. Recycler with quality modules → recycled outputs can roll higher tier
 4. Loop until legendary fraction accumulates
 
-**Key constraint:** This is item/output intensive — design with buffers. Recyclers output 25% of the input item's ingredient value, so the loop is intentionally lossy. Note: recycling time is based on crafting time only, **not** on the recipe's output count — iron gears (1 output per 0.5s craft) and iron sticks (2 outputs per 0.5s craft) have the same recycling time even though sticks have twice the per-second throughput.
+**Key constraint:** This is item/output intensive — design with buffers. Recyclers output 25% of the input item's ingredient value, so the loop is intentionally lossy.
 Only run quality loops for high-value items where legendary stats matter (equipment,
 modules, beacons, key machines). Do not run quality loops on bulk intermediates.
+
+**⚠️ Recycling time now scales with output count (changed in 2.1.13).** Recipe generation
+scales recycle time with the item result count, so **things generally recycle much faster**
+than they used to — concrete, for example, recycles about **10× faster**. The older rule
+that recycling time depended on crafting time *alone* (making a 1-output and a 2-output
+0.5 s recipe recycle at the same rate) is obsolete. Practical consequence: recycler counts
+in upcycling loops are lower than pre-2.1.13 blueprints and forum ratios assume — re-derive
+them rather than reusing an old ratio, especially for high-output-count recipes.
 
 **Machine quality:** Higher-quality machines craft faster (+30%/+60%/+90%/+150%
 speed for uncommon/rare/epic/legendary). Upgrading machines before modules often

@@ -9,6 +9,34 @@ cosmetic axes — link targets, image embeds, bare URLs, heading/bullet markers,
 table-of-contents renumbering, nav-template blobs and page footers — and prints
 only the surviving prose differences, ranked by volume.
 
+Renderer drift
+--------------
+The Cloudflare renderer's output format is not stable across time, and a format
+shift defeats the filters above wholesale: on 2026-08-15 it began emitting YAML
+frontmatter, a duplicated "Space Age" expansion badge, the table of contents as
+list items, doubled icon alt text in nav templates, nested `<table>` HTML inside
+stat cells, and different backslash-escaping of punctuation — and the run
+reported 111 of 111 pages as substantively changed. All six are normalised now.
+
+Two things this cannot paper over, both of which need a full re-crawl
+(`crawl.py crawl` against an emptied `pages/`) to resolve:
+
+* Recipe lines are rendered with link labels resolved in the newer format
+  (`Time 4 + Electronic circuit 10 → Locomotive 1`) and as bare numbers in the
+  older one (`4+10 → 1`). There is no normalisation that reconciles the two.
+* While `pages/` holds a MIX of formats, every mixed-format page diffs dirty on
+  its first re-crawl regardless. Normalise the corpus rather than trusting the
+  ranking during a transition.
+
+If a future run again reports nearly every page as changed, suspect renderer
+drift before wiki activity, and cross-check against the MediaWiki RecentChanges
+API's own byte-delta and edit-comment metadata — that signal bypasses the
+renderer entirely and is what the 2026-08-15 run fell back to.
+
+Known tradeoff: collapsing the renderer's doubled icon labels also collapses
+genuine doubled words ("had had" -> "had"). It is applied to both sides of the
+diff, so the only edit it can hide is one whose sole change is a doubled word.
+
 Usage:
     python dev/wiki/triage_changes.py [--diff PATH] [--top N] [--context N]
                                       [--pages NAME,NAME] [--quiet]
@@ -31,14 +59,40 @@ from collections import OrderedDict
 DEFAULT_DIFF = "dev/wiki/changes.diff"
 DEFAULT_PAGES = "dev/wiki/pages"
 
-IMG = re.compile(r"!\[[^\]]*\]\([^)]*\)")
-LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+IMG = re.compile(r"!\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)")
+# One level of nested parens is allowed in the target, because wiki URLs routinely
+# carry them ("Logistics_(research)"). Without that the match stops at the inner
+# ")" and leaves residue like: Logistics> "Logistics (research)
+LINK = re.compile(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)")
 URL = re.compile(r"https?://\S+")
+# The renderer is inconsistent about backslash-escaping punctuation between versions
+# ("\-h" vs "-h", "2\." vs "2.", "P\[N\]" vs "P\[N]").
+ESCAPE = re.compile(r"\\(?=[^\w\s])")
+SPACE_BEFORE_PUNCT = re.compile(r"\s+([,.;:!?)\]])")
+# The newer renderer emits an icon's alt text AND the link label for the same entity,
+# so every entry in a nav/infobox template doubles ("Pistol Pistol", "Space Age Space
+# Age"). Collapsing an immediately-repeated 1-4 word phrase makes both renderings agree.
+DUP_PHRASE = re.compile(r"\b((?:\w[\w'-]*)(?:\s+\w[\w'-]*){0,3})\s+\1\b")
 WS = re.compile(r"\s+")
-TOC = re.compile(r"^\*?\s*\d+(\.\d+)*\s+\S")     # "* 3 Tips", "* 1.2 Foo"
+TOC = re.compile(r"^\*?\s*\d+(\.\d+)*\s+\S")     # "* 3 Tips", "* 1.2 Foo", "- 2.1 Biters"
 RULE = re.compile(r"^[-=_*\s|]+$")               # horizontal rules, table separators
-LEADIN = re.compile(r"^[#>*\s]+")                # heading / bullet markers
+# Heading / bullet markers. A leading "-" counts only when followed by whitespace,
+# i.e. an actual bullet: stripping it unconditionally also ate the sign off negative
+# figures ("-16.67% resource drain" -> "16.67% ..."), which is exactly the kind of
+# misreading the [columns] header recovery exists to prevent.
+LEADIN = re.compile(r"^(?:[#>*\s]|-(?=\s))+")
 FILE_HDR = re.compile(r"^--- a/(.*)\.md$")
+
+# --- Renderer-format artifacts (see "Renderer drift" in the module docstring) ---
+# The Space Age badge: an icon image plus the literal words "Space Age", wrapped as one
+# link. Purely chrome, and the renderer emits it in places it previously omitted, so it
+# has to go BEFORE IMG/LINK unwrapping — matching the icon URL keeps prose uses of the
+# phrase "Space Age" intact.
+BADGE = re.compile(r"\[!\[\]\([^)]*Space_age_icon[^)]*\)\s*Space Age\]\([^)]*\)")
+# Stat cells arrive as nested HTML tables (`<table><tr><td>…`) rather than flattened text.
+HTML_TAG = re.compile(r"<[^>]+>")
+# YAML frontmatter block the renderer now prepends to every page.
+FRONTMATTER = re.compile(r'^(?:title:|meta:|"og:title":)')
 
 # Footer / chrome text that every page carries and that changes on its own schedule.
 BOILERPLATE = (
@@ -48,11 +102,16 @@ BOILERPLATE = (
     "content is available under", "retrieved from", "categories:",
     "hidden categor", "discussion [t]",
 )
+# NB: entries are matched as substrings anywhere in the line, so a phrase that can
+# occur in real prose must not be added here. "mod portal" was tried for the old
+# header banner and reverted — it also swallows "...distributed on the mod portal".
 
 
 def is_noise(s: str) -> bool:
     """True if a normalised line carries no reviewable content."""
     if not s or RULE.match(s):
+        return True
+    if FRONTMATTER.match(s):
         return True
     low = s.lower()
     if any(b in low for b in BOILERPLATE):
@@ -74,13 +133,27 @@ def normalize(line: str, *, strip_marker: bool = True) -> str:
     numbers and invites transcribing the wrong figure into a reference file.
     """
     s = line[1:] if strip_marker else line
+    s = BADGE.sub(" ", s)               # expansion badge, before the link unwrapping
     s = IMG.sub("", s)
     s = LINK.sub(r"\1", s)              # [text](url) -> text
     s = URL.sub("", s)
-    s = s.replace("**", "").replace("_", "")
+    s = HTML_TAG.sub(" ", s)            # flatten nested <table> stat cells
+    s = ESCAPE.sub("", s)
+    s = s.replace("**", "").replace("*", "").replace("_", "")
     s = LEADIN.sub("", s)
     s = s.replace('")', " ")            # residue left by stripped link titles
     s = WS.sub(" ", s).strip()
+    # Removing an inline badge or image leaves a gap in front of the following
+    # punctuation ("Gleba , there are"), which would otherwise diff against the
+    # same sentence rendered without the badge.
+    s = SPACE_BEFORE_PUNCT.sub(r"\1", s)
+    # Applied repeatedly: one pass leaves the odd survivor in a long nav row, since
+    # overlapping repeats cannot all match in a single scan.
+    for _ in range(3):
+        collapsed = DUP_PHRASE.sub(r"\1", s)
+        if collapsed == s:
+            break
+        s = collapsed
     # Collapse the padding wiki tables use, but keep the delimiters themselves.
     if "|" in s:
         s = " | ".join(c.strip() for c in s.split("|")).strip()
