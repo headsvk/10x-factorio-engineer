@@ -60,6 +60,51 @@ RC_API = (
 )
 LANG_PATTERN = re.compile(r"/[a-z]{2}(-[a-z]{2})?$")
 
+# Translated pages are not always suffixed. The Korean translation effort visible in the
+# 2026-09-01 RecentChanges created ~100 articles under bare Hangul titles, none of which
+# LANG_PATTERN catches. The English wiki's own article titles are
+# Latin-script by definition, so a title carrying CJK / Hangul / Cyrillic / Arabic / Hebrew /
+# Thai characters is a translation. Matching on those script blocks rather than on "not ASCII"
+# keeps accented or symbol-bearing English titles (e.g. a degree sign in a stat page) tracked.
+NON_LATIN_PATTERN = re.compile(
+    "["
+    "\u3040-\u30ff"    # hiragana + katakana
+    "\u3400-\u4dbf"    # CJK extension A
+    "\u4e00-\u9fff"    # CJK unified ideographs
+    "\uac00-\ud7af"    # hangul syllables
+    "\u1100-\u11ff"    # hangul jamo
+    "\u0400-\u04ff"    # cyrillic
+    "\u0590-\u05ff"    # hebrew
+    "\u0600-\u06ff"    # arabic
+    "\u0e00-\u0e7f"    # thai
+    "]"
+)
+
+# Pages that legitimately change often but never carry gameplay facts worth embedding in
+# 10x-factorio-engineer/references/. Kept as a code filter rather than a prose "skip these"
+# instruction so successive maintenance runs classify them identically.
+META_PATTERNS = (
+    re.compile(r"^Version history"),
+    re.compile(r"^Roadmap"),
+    re.compile(r"^News$"),
+    re.compile(r"^Data\.raw"),
+    re.compile(r"^Mod portal API$"),
+    re.compile(r"^Main Page"),
+    re.compile(r"^Factorio:"),
+)
+
+
+def classify_untracked(title: str) -> str:
+    """Bucket an untracked RecentChanges title: 'translation', 'meta', or 'candidate'.
+
+    Only 'candidate' titles need a human decision about adding them to urls.json.
+    """
+    if LANG_PATTERN.search(title) or NON_LATIN_PATTERN.search(title):
+        return "translation"
+    if any(pat.match(title) for pat in META_PATTERNS):
+        return "meta"
+    return "candidate"
+
 
 # ---------------------------------------------------------------------------
 # Credentials
@@ -498,7 +543,7 @@ def cmd_update(args):
                 data = json.loads(resp.read())
             for rc in data["query"]["recentchanges"]:
                 title = rc["title"]
-                if LANG_PATTERN.search(title):
+                if LANG_PATTERN.search(title) or NON_LATIN_PATTERN.search(title):
                     continue
                 if ":" in title and not title.startswith("Tutorial:"):
                     continue
@@ -512,9 +557,21 @@ def cmd_update(args):
         print(f"Wiki pages changed: {len(changed)}  |  In our list: {len(to_update)}  |  Not in our list: {len(new_pages)}")
 
         if args.show_new and new_pages:
-            print(f"\nNew pages not in urls.json ({len(new_pages)}) — review and add to urls.json if relevant:")
+            buckets: dict[str, list[str]] = {"candidate": [], "meta": [], "translation": []}
             for title in new_pages:
-                print(f"  {title}")
+                buckets[classify_untracked(title)].append(title)
+            if buckets["candidate"]:
+                print()
+                print(f"Untracked candidates ({len(buckets['candidate'])}) "
+                      "- review and add to urls.json if player-relevant:")
+                for title in buckets["candidate"]:
+                    print(f"  {title}")
+            else:
+                print()
+                print("Untracked candidates: none.")
+            for label in ("meta", "translation"):
+                if buckets[label]:
+                    print(f"  [{len(buckets[label])} {label} page(s) filtered - no action needed]")
             print()
 
         if not to_update:
@@ -545,6 +602,108 @@ def cmd_update(args):
 
 
 # ---------------------------------------------------------------------------
+# newpages: read-only check for untracked pages
+# ---------------------------------------------------------------------------
+
+def resolve_redirects(titles: list[str]) -> dict[str, str]:
+    """Map each title to its redirect target (or to itself if it is not a redirect).
+
+    Title-based filtering cannot see redirects, and the wiki accumulates them: the
+    2026-09-01 run turned up "Construction bot" -> "Construction robot", which looks like
+    a new page but carries no content we do not already track. MediaWiki resolves up to
+    50 titles per request.
+
+    Note this does not catch every alias. A {{delete}} banner sitting above a #REDIRECT
+    stops MediaWiki treating the page as a redirect at all, so it still surfaces as a
+    candidate -- "Power production/Dealing with priorities" (really Electric system#
+    Network_priorities) did exactly that. Skipping deletion candidates stays a human call.
+    """
+    resolved = {t: t for t in titles}
+    for i in range(0, len(titles), 50):
+        chunk = titles[i:i + 50]
+        url = ("https://wiki.factorio.com/api.php?action=query&format=json&redirects&titles="
+               + urllib.request.quote("|".join(chunk), safe=""))
+        req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except Exception as exc:                      # network hiccup: report unresolved
+            print(f"  [warn] redirect resolution failed for {len(chunk)} title(s): {exc}")
+            continue
+        for r in data.get("query", {}).get("redirects", []):
+            resolved[r["from"]] = r["to"]
+    return resolved
+
+
+def cmd_newpages(args):
+    """Report RecentChanges titles that are not yet in urls.json, grouped by kind.
+
+    Read-only: touches no files, so it is safe to run after `update` has already
+    written changes.diff (which `update --dry-run` would truncate).
+    """
+    with open(URLS_FILE, encoding="utf-8") as f:
+        our_pages = set(json.load(f))
+
+    print(f"Querying MediaWiki RecentChanges (last {args.days} days)...")
+    url = RC_API.format(days=args.days)
+    changed = set()
+    while True:
+        req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        for rc in data["query"]["recentchanges"]:
+            title = rc["title"]
+            if ":" in title and not title.startswith("Tutorial:"):
+                continue
+            changed.add(title)
+        if "continue" not in data:
+            break
+        url = RC_API.format(days=args.days) + "&rccontinue=" + urllib.request.quote(
+            data["continue"]["rccontinue"])
+
+    buckets: dict[str, list[str]] = {"candidate": [], "meta": [], "translation": []}
+    for title in sorted(changed - our_pages):
+        buckets[classify_untracked(title)].append(title)
+
+    # A title-based filter cannot tell a new article from a redirect into one we already
+    # crawl, so resolve the survivors and drop those that land on a tracked page.
+    redirects: list[str] = []
+    if buckets["candidate"]:
+        targets = resolve_redirects(buckets["candidate"])
+        kept = []
+        for title in buckets["candidate"]:
+            target = targets[title]
+            if target != title and target in our_pages:
+                redirects.append(f"{title} -> {target}")
+            else:
+                kept.append(title)
+        buckets["candidate"] = kept
+
+    print(f"Changed: {len(changed)}  |  Already tracked: {len(changed & our_pages)}  "
+          f"|  Untracked: {sum(len(v) for v in buckets.values()) + len(redirects)}")
+    if buckets["candidate"]:
+        print()
+        print(f"Untracked candidates ({len(buckets['candidate'])}) "
+              "- review and add to urls.json if player-relevant:")
+        for title in buckets["candidate"]:
+            print(f"  {title}")
+    else:
+        print()
+        print("Untracked candidates: none.")
+    if redirects:
+        print(f"  [{len(redirects)} redirect(s) into already-tracked pages - no action needed]")
+        if args.show_filtered:
+            for line in redirects:
+                print(f"      {line}")
+    for label in ("meta", "translation"):
+        if buckets[label]:
+            print(f"  [{len(buckets[label])} {label} page(s) filtered - no action needed]")
+            if args.show_filtered:
+                for title in buckets[label]:
+                    print(f"      {title}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -571,8 +730,16 @@ def main():
     p_update.add_argument("--show-new", action="store_true",
                           help="Print English pages in RecentChanges not yet in urls.json")
 
+    # newpages subcommand
+    p_new = sub.add_parser("newpages",
+                           help="Report untracked RecentChanges pages (read-only)")
+    p_new.add_argument("--days", type=int, default=30,
+                       help="Days of RecentChanges to check (max 30)")
+    p_new.add_argument("--show-filtered", action="store_true",
+                       help="Also list the meta and translation pages that were filtered out")
+
     args = parser.parse_args()
-    {"crawl": cmd_crawl, "update": cmd_update}[args.command](args)
+    {"crawl": cmd_crawl, "update": cmd_update, "newpages": cmd_newpages}[args.command](args)
 
 
 if __name__ == "__main__":

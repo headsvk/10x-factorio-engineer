@@ -39,6 +39,14 @@ Planning implications:
   quoted for any fuel is a *minimum*. Real-world fuel life on long straight runs is
   longer than the table suggests, which makes refuelling intervals easier than they look
   on paper.
+- **Quality locomotives are more fuel-efficient, not less.** A locomotive always burns at
+  its listed energy-consumption rate — a flat **600 kW**, identical in vanilla and Space
+  Age — so the extra acceleration power that quality grants is *free*: the same fuel buys
+  more accelerating force. Combined with the throttling above, a quality loco spends less
+  of the trip accelerating and more of it coasting at max speed, so it travels further per
+  unit of fuel. The effect is marginal on light trains and **large on trains heavy enough
+  to accelerate badly** — which is exactly where you would otherwise be tempted to add a
+  second locomotive. Quality fuel stacks with this for the same reason.
 
 ### Signals and deadlock prevention
 

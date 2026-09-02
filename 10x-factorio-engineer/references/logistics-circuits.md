@@ -164,6 +164,14 @@ The circuit network lets entities communicate via integer signals. Two wire colo
 **What entities can connect:**
 Inserters, belts, splitters (2.0.67+), chests, train stops, mining drills, pumpjacks, pumps, offshore pumps, lamps, power switches, storage tanks, roboports, turrets, assembling machines, chemical plants, oil refineries, centrifuges, furnaces (2.0.35+), radars, agricultural towers, programmable speakers, and combinators.
 
+**Land mines are circuit-connectable too** (both circuit and logistic networks). Their
+only control behavior is **"Enable if"**, and it *triggers detonation* when the
+condition is met. The catch worth knowing before wiring one: setting that behavior
+**disables proximity-based triggering entirely** — a wired mine stops being a tripwire
+and becomes a remote demolition charge that fires only on your signal. Wire a field
+only when you actually want command detonation (e.g. blowing a breach closed on a
+wall-integrity signal); leave the rest unwired. See `combat-defense.md`.
+
 **Signals:** Each signal is a named integer channel — any item, fluid, or virtual signal. Virtual signals include numbers, letters, arrows, planet icons, and 177–241 total options (241 in Space Age). Three special logic signals (Everything, Anything, Each) apply bulk operations.
 
 ### Wireless circuit signals via radar

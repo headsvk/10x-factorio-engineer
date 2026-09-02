@@ -47,6 +47,7 @@ so you can derive any quality effect from its normal-tier value rather than look
 | Ammo damage | +30% | ×2.5 |
 | Chest inventory | +30% (rounded down) | ×2.5 |
 | Consumable durability (repair packs, science packs) | +100% | ×6 |
+| Spoil time (most spoilable items) | +30% | ×2.5 |
 
 Two traps in that table: **steam-chain output gains raise consumption *and* pollution at the
 same rate** (quality boilers are denser, not more efficient), and the miner drain reduction is

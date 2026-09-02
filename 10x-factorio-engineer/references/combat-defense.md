@@ -1,4 +1,4 @@
-<!-- TOPICS: combat, defense, turrets, gun turret, laser turret, flamethrower turret, rocket turret, tesla turret, railgun turret, artillery, artillery turret, turret creep, biters, biter, spitters, worms, demolishers, pentapods, wrigglers, strafers, stompers, damage types, resistances, walls, nest clearing, perimeter defense -->
+<!-- TOPICS: combat, defense, turrets, gun turret, laser turret, flamethrower turret, rocket turret, tesla turret, railgun turret, artillery, artillery turret, turret creep, biters, biter, spitters, worms, demolishers, pentapods, wrigglers, strafers, stompers, damage types, resistances, walls, nest clearing, perimeter defense, land mines, land mine, minefield, evolution factor -->
 
 This file covers combat and defense in Factorio, including turret types, enemy mechanics, and turret creep strategies.
 
@@ -99,6 +99,26 @@ gets.
 Type `/evolution` in the in-game console to see the exact per-surface breakdown of time,
 pollution/spore and nest-destruction contributions.
 
+**What each evolution milestone actually costs (Wiki: Enemies).** The wiki's appearance
+table now quotes each threshold in *three* interchangeable currencies, which is what makes
+it usable for planning — any one of them alone reaches the same evolution:
+
+| Evolution | Pollution | Hours (time alone) | Nests destroyed | First appearance |
+|---|---|---|---|---|
+| 20% | 278k | 17.4 | 125 | Medium biter |
+| 25% | 370k | 23.1 | 167 | Small spitter |
+| 40% | 741k | 46.3 | 334 | Medium spitter |
+| 50% | 1.111M | 69.4 | 500 | Big biter, big spitter |
+| 70% | 2.592M | 162.0 | 1167 | — |
+| 90% | 10M | 625.0 | 4500 | Behemoth biter, behemoth spitter |
+
+Two planning consequences. **Evolution rises on its own** — roughly 17 hours of wall-clock
+play reaches medium biters and ~69 hours reaches big biters even in a spotless factory, so
+"keep pollution low" delays the ladder, it does not stop it. And **clearing nests is
+expensive evolution-wise**: 500 destroyed nests alone reaches 50%. Aggressive early
+expansion buys territory at the price of a harder enemy, which is the argument for
+artillery-clearing *after* the defence line is built rather than before.
+
 Nest-proximity note: expansion score per chunk is 1.0 when no player structures or
 spawners sit within 3 chunks (taxi-cab distance), degrading to a floor of 0.002 as nearby
 structures accumulate — so dense building genuinely deters expansion in its immediate
@@ -121,6 +141,11 @@ neighbourhood.
 - Railgun is very effective against Demolishers, especially fired along their body length
 - Walls are useful here unlike Gleba — Demolishers don't ignore them
 - Rocket turrets essential for medium and large Demolishers
+- **Massed gun turrets loaded with piercing rounds are a common demolisher-killing
+  method** — cheap and available long before railguns. Piercing rounds carry 8 base
+  damage per shot against the firearm magazine's 5, and that margin is what lets a
+  gun-turret wall stay relevant into big-biter and demolisher territory once damage
+  upgrades are in. Budget the ammo feed, not the turret count.
 - No biter expansion — only fixed patrol routes, so aggressive expansion
   is safer than Nauvis once paths are mapped
 - Demolishers release a **smoke cloud** that slows the player AND **damages nearby construction/logistic bots** — avoid using bots during Demolisher fights
@@ -190,6 +215,47 @@ Certain infinite research levels provide notable efficiency jumps — useful pla
 | Railgun shooting speed (Space Age) | Level 10: Railgun turrets reach maximum effective firing rate (0.845 shots/sec, once per 71 ticks). Researching past level 10 has no practical effect on turrets. |
 | Artillery shell damage (Space Age) | Level 9: Artillery shells defeat Nauvis spawners and behemoth worms in one hit — greatly conserves shells. |
 | Refined flammables | Level 9: Flamethrower turrets require 90% less crude oil to destroy Behemoth Biters — greatly conserves fuel. Level 16: 95% less crude oil required. |
+
+### Land Mines (rewritten on the wiki, 2026-08)
+**Wiki:** https://wiki.factorio.com/Land_mine
+
+Land mines are the **only passive defense in Factorio**: enemies damaged by a mine do not
+aggro. That makes a minefield a genuine attrition layer in front of a wall rather than
+another thing that pulls a wave onto you — but the passivity is easy to lose, because
+enemies *do* aggro on a mine they can still see (see arming, below).
+
+**Placement is unusually permissive:**
+- Placeable on both natural terrain and artificial tiles, **including concrete** — so a
+  minefield can go under the paved approach to a wall, not just on bare ground.
+- They **do not obstruct players, vehicles, or projectiles**. Mines can therefore be laid
+  *inside* a turret line's field of fire without blocking it, and you can drive over your
+  own field.
+- Placement is free-form (no tile-grid snap), so hand-placed fields are ragged. Use a
+  **blueprint** when you want a regular lattice.
+
+**Arming window is the tactical catch:** a freshly placed mine is inert for **2 seconds**
+while it buries itself, and during that window it counts as a military structure —
+enemies attack it on sight. Mines must be laid *before* a wave arrives; laying them into
+an incoming attack just feeds the biters free kills. Once armed, mines become untargetable
+and are ignored entirely.
+
+**Destruction and friendly fire:**
+- Armed mines still die to **area-of-effect damage** — a spitter's acid, and equally your
+  own grenades, flamethrower turrets, rocket turrets, and railgun turrets. **Do not overlap
+  a minefield with flamethrower turret coverage**; the turret will clear your own field.
+- Since **2.0.48**, an armed mine that is destroyed by damage detonates (unarmed ones do
+  not) — so a field hit by splash damage chain-reacts rather than being silently wasted.
+- Mines leave **ghosts**, so a construction-bot network rebuilds a spent field
+  automatically. A minefield inside roboport coverage is effectively self-maintaining and
+  is the main reason to keep one as permanent infrastructure rather than a one-off.
+
+**Space platform caveat:** since 2.0.24, a mine detonating on a space platform **damages
+the platform tiles** around it. Mines are not a free asteroid-defense layer up there.
+
+**Circuit control:** mines can be wired to circuit and logistic networks with an
+**"Enable if"** condition that triggers detonation on command. Note the trade-off —
+using that control behavior **disables proximity triggering entirely**, so a wired mine
+is a remote demolition charge, not a smarter tripwire. See `logistics-circuits.md`.
 
 ### Turret Creep
 **Community reference:** **Michael Hendriks** (YouTube) — "Ultimate Deathworld" series is the definitive guide to optimised early-to-mid-game combat; the most thorough Factorio combat strategy content available. **Trupen** (YouTube) — concise, fast-paced turret pushing and combat mechanic tutorials.
