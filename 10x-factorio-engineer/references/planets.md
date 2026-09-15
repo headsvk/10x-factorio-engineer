@@ -113,6 +113,23 @@ full throughput is always better than throttling.
 
 The key constraint: **if any output backs up, all recycling stops.** Every item the recycler produces must have a drain, or belts fill and the whole line halts. Design every output with a consumer or a sink.
 
+**Full-loop equilibrium (Wiki: Scrap).** If you recursively recycle every output and its
+outputs in turn, the loop settles into a stable distribution of 18 products. Two numbers
+matter for layout:
+- **Belt volume roughly doubles.** 1 belt of primary output (straight off scrap recycling)
+  generates **1.142 belts** of secondary/tertiary/... output — about 2.14 belts of total
+  material to route, not 1. Size the downstream bus for that, not for the primary belt.
+- **Recycler time is dominated by three items.** Steel plate (**25.8%**), concrete
+  (**16.1%**) and iron plate (**16.0%**) together consume **~58% of recycler time** while
+  being only ~23% of the items. The high-count items are cheap to process by comparison —
+  iron gear wheels are 15.6% of items but 2.7% of time, copper cable 12.5% for 2.2%.
+  So most of a full-loop recycler bank exists to chew steel, concrete and iron plate:
+  dropping those three from the loop (void or sink them instead) frees the majority of
+  recycler capacity. This is why steel gets a dedicated fast-trash route below.
+
+Note that some products recycle into themselves, and not every output is uniquely obtained
+from scrap — both matter when closing loops in a logistic setup.
+
 **Useful item chains from scrap outputs:**
 - Iron gear wheels → recycle for iron plates (most abundant output, reliable iron source)
 - Processing units → recycle for electronic circuits (best source of green circuits on Fulgora)

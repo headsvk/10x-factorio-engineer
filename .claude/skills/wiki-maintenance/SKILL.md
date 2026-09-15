@@ -6,16 +6,20 @@ description: Twice-monthly Factorio wiki re-crawl and strategy-reference refresh
 # Strategy Reference Maintenance (Twice Monthly)
 
 The split reference files in `10x-factorio-engineer/references/` embed facts crawled from the
-Factorio wiki, and `dev/wiki/` holds the full per-page corpus (646 pages, gitignored).
+Factorio wiki, and `dev/wiki/` holds the full per-page corpus (647 pages, gitignored).
 The wiki is actively updated, so this workflow re-crawls what changed and refreshes the
 embedded facts.
 
 **Driven by a scheduled routine, not by hand.** `factorio-wiki-maintenance` (prompt at
 `~/.claude/scheduled-tasks/factorio-wiki-maintenance/SKILL.md`, visible under **Routines**
 in the Claude desktop app) fires on the 1st and 15th at 09:00 local and executes the
-workflow below. Deliberately tighter than monthly: the RecentChanges API only reaches back
-**30 days**, so a monthly cadence that slips even slightly loses edits permanently — the
-2026-06-10 → 2026-07-30 gap lost the 2026-06-10 → 06-30 window exactly this way.
+workflow below. Deliberately tighter than monthly, to keep each diff small enough to triage.
+
+> **Retention is ~90 days, not 30 — corrected 2026-09-15.** This file previously claimed a
+> 30-day API limit and blamed the 2026-06-10 → 07-30 gap on it. Measured: the RecentChanges
+> feed reaches back ~89 days (`$wgRCMaxAge`), so that gap did **not** lose edits, and a single
+> slipped run is recoverable. The cadence stays twice-monthly anyway — a 90-day diff is far
+> harder to triage than a 16-day one — but treat a late run as a bigger diff, not lost data.
 
 Credentials come from `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`, resolved by
 `crawl.py`'s `load_credentials()` from the environment or `.env` / `.env.local` / `~/.env`.
@@ -31,11 +35,11 @@ line is how the routine decides whether it's due, so it must be appended on ever
 ```
 https://wiki.factorio.com/api.php?action=query&list=recentchanges&rcnamespace=0&rclimit=500&rcdays=30&rctype=edit|new&format=json
 ```
-This returns all English main-namespace pages edited in the last 30 days. Filter out
+This returns all English main-namespace pages edited since `rcend`. Filter out
 translations (`/zh`, `/ru`, `/de`, etc.) and non-article pages (`Special:`, `File:`, etc.).
 
 **Step 2 — Cross-reference against our crawled page list:**
-Our 646-page list is in `dev/wiki/urls.json`. Check which recently-changed wiki pages
+Our 647-page list is in `dev/wiki/urls.json`. Check which recently-changed wiki pages
 appear in that list — those are the ones to re-crawl.
 
 Also check which split reference files embed facts from those changed pages — if any of those changed,
@@ -43,11 +47,30 @@ update the embedded summaries too (Step 4).
 
 **Step 3 — Re-crawl changed pages using `dev/wiki/crawl.py`:**
 ```bash
-python dev/wiki/crawl.py update [--days 30] [--dry-run]
+python dev/wiki/crawl.py update [--days N] [--dry-run]
 ```
 This automates Steps 1–3: queries RecentChanges, cross-references against
 `dev/wiki/urls.json`, deletes stale files, and re-crawls via Cloudflare.
+
 Credentials come from env vars `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`.
+
+**Size `--days` from the last run, not at a flat 30:** `min(30, days_since_last_run + 2)`,
+where the last run's date is the final `wiki update complete` line in `dev/wiki/findings.md`.
+On the intended cadence that is `--days 16`. A flat 30 re-covers ~16 days the previous run
+already crawled — on 2026-09-15 it queued 110 pages when only ~20 tracked pages had changed
+since the last run, ~18 minutes of redundant wall-clock (no token or quota cost; the free
+tier has no daily cap). Never go below `days_since_last_run`: the window must reach back to
+the last run, or the gap is simply never inspected. `--days` has no effect
+when `dev/wiki/update_queue.json` exists — that run resumes the saved queue without
+re-querying.
+
+> **`rcdays` is a trap (found 2026-09-15).** `crawl.py` used to build its query with
+> `&rcdays={days}`, but `rcdays` is a Special:RecentChanges **UI** parameter, not an API one.
+> The API accepted it silently and ignored it, so `--days` bounded nothing and every run
+> queried the full ~90-day retention — `rcdays=1`, `7` and `30` returned byte-identical
+> result sets. It now uses `rcend` (a real parameter taking an ISO timestamp), so `--days`
+> finally means what it says. If a run's page count looks far larger than the cadence should
+> produce, re-check that the bound is actually being applied.
 
 > **Note:** Do NOT use Cloudflare's `modifiedSince` parameter for this — tested and confirmed
 > that the Factorio wiki does not serve `Last-Modified` headers that Cloudflare can use.
@@ -88,14 +111,14 @@ Update any facts that changed. Focus on **mechanics, strategic constraints, and 
 > **Fallback signal:** the MediaWiki RecentChanges API returns its own byte delta and edit
 > comment per revision, which bypasses the renderer completely. Add
 > `&rcprop=title|timestamp|comment|sizes|user` to the Step 1 query, drop revisions older
-> than the last run's date (the 30-day window overlaps work already done), and rank pages
+> than the last run's date (the window overlaps work already done), and rank pages
 > by `newlen - oldlen`. On 2026-08-15 that reduced 86 flagged pages to 25 genuinely edited
 > ones, of which only 3 touched an embedded fact.
 >
 > **Keep the corpus single-format.** A `pages/` directory holding a mix of renderer
 > formats diffs dirty on every page's first re-crawl regardless of filtering. After any
 > confirmed drift, normalise it once: delete `dev/wiki/pages/*.md` and run
-> `python dev/wiki/crawl.py crawl --workers 1` (~2 h for 646 pages, resume-safe).
+> `python dev/wiki/crawl.py crawl --workers 1` (~2 h for 647 pages, resume-safe).
 
 **Step 5 — Also check for new high-value pages:**
 ```bash
@@ -125,10 +148,10 @@ also stops MediaWiki reporting it as a redirect, so it surfaces as a candidate),
 subpage whose parent is already tracked usually adds nothing.
 
 ### Notes
-- The 30-day window is a hard limit of the MediaWiki API — do not skip months
+- RecentChanges retains ~90 days (`RC_RETENTION_DAYS` in `crawl.py`); `--days` above that is capped
 - `render: false` crawls won't follow links between unrelated pages — crawl each target URL directly
 - `dev/wiki/findings.md` tracks crawl history (gitignored, local only)
 - Cloudflare free tier (Quick Actions `/markdown` endpoint): 1 request/10 s, no daily cap — use `--workers 1`
-- `dev/wiki/pages/` is gitignored — regenerate with `python dev/wiki/crawl.py crawl` (~2 h for 646 pages at 1 req/12 s; resume-safe, so it can be interrupted and restarted)
+- `dev/wiki/pages/` is gitignored — regenerate with `python dev/wiki/crawl.py crawl` (~2 h for 647 pages at 1 req/12 s; resume-safe, so it can be interrupted and restarted)
 - `crawl.py update` appends its own `wiki update complete` line to `findings.md` — don't add a second one by hand
 - Leftover files in `dev/wiki/pages/.staging/` mean a previous crawl aborted before promoting them. Check their dates against the live copies: on 2026-07-30 seven files staged on 06-10 were newer than the April-era copies in `pages/`, so they were promoted rather than discarded.

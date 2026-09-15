@@ -202,7 +202,10 @@ Radars carry circuit signals without wires, and have **two modes of operation**:
 ### Combinators
 **Wiki:** https://wiki.factorio.com/Arithmetic_combinator and https://wiki.factorio.com/Decider_combinator
 **Constant combinator:**
-- Emits up to 20 fixed signals continuously. Acts as an on/off switch (right-click → enable/disable).
+- Emits fixed signals continuously. Acts as an on/off switch (right-click → enable/disable).
+- **No signal-count cap.** The old 20-slot limit is gone — 2.0 replaced the fixed slot grid with
+  sections, so one combinator can broadcast as many channels as needed. Don't design around a
+  20-signal ceiling or chain extra combinators to work past it.
 - Cannot distinguish which wire color it outputs to — use two constant combinators if you need red vs green separation.
 - Two slots with the same signal channel sum their values.
 
@@ -227,8 +230,9 @@ Radars carry circuit signals without wires, and have **two modes of operation**:
 - Each output also has an **"else" branch** that fires when the conditions are *not* satisfied, so one decider can cover both cases without a second inverted combinator.
 - Per-input wire selection: each condition and each output can specify which wire colours to read; **if both red and green are selected, their values are summed** before the comparison.
 
-**Selector combinator (Space Age, 2.0.7+):**
-Six operating modes:
+**Selector combinator (2.0.7+):**
+Eight modes with Space Age, five in the base game (rocket capacity, quality filter and quality
+transfer are Space Age-only):
 - **Select input** — sorts input signals by value and outputs one: sort descending (highest), sort ascending (lowest non-zero), or by index position.
 - **Count inputs** — outputs the count of unique non-zero input signals on a chosen output channel.
 - **Random input** — passes through a random input signal every N game ticks (default: every tick).
@@ -236,6 +240,13 @@ Six operating modes:
 - **Rocket capacity** — outputs how many of each item fit in one rocket cargo section. Useful for automating rocket launches: trigger when buffer holds exactly one rocket's worth. Does not output fluids, virtual signals, or items too heavy for a rocket (atomic bomb, rocket silo).
 - **Quality filter** (Space Age) — passes through only signals whose item quality meets a condition (greater than, less than, equal to, etc. a chosen quality tier). The key tool for quality recycling loops: filter legendary items to keep, route lower tiers back to the recycler.
 - **Quality transfer** (Space Age) — attaches a specific quality grade to a target signal, either directly or by copying the quality from another input signal. Used for quality-aware routing and sorting.
+- **Time** (2.1.7+) — outputs three clock signals, each on a configurable channel: **Game tick**
+  (default `T`, counts up every tick from world creation), **Day tick** (default `D`, counts up
+  every tick and resets at day length), and **Day length** (default `L`, the current planet's day
+  in ticks — 25,000 on Nauvis). Day length is per-planet, so a circuit reading `D`/`L` adapts to
+  whichever surface it sits on rather than needing a hard-coded constant. Useful for
+  time-of-day-gated behaviour (solar/accumulator scheduling, timed interrupts) without building a
+  counter out of a feedback loop.
 
 ### Common Circuit Patterns
 **Wiki:** https://wiki.factorio.com/Circuit_network_cookbook

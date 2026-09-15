@@ -34,8 +34,14 @@ faster. This also means fewer asteroids to deal with, which reduces ammo
 consumption — all efficiency factors compound starting with platform shape.
 - Build **long north-south, not wide east-west**
 - Thrusters are always south — design the platform to be a tall rectangle
-- 5 thrusters start hitting diminishing speed returns; adding width to fit
-  more thrusters costs more than it gains
+- **Optimal thruster count = as many as fit without widening the platform.** Drag
+  depends strongly on platform **width in tiles** and only weakly on mass, so widening
+  the platform to fit another thruster adds drag that cancels the extra thrust — at a
+  fixed fuelling rate it makes the platform *slower*. Each thruster is 4 tiles wide, so
+  a 32-tile-wide platform tops out at 8. Stacking thrusters vertically along the same
+  south edge does not widen the platform and so does not pay this penalty.
+- Thrust has diminishing returns in thrusters or fuel **alone**; scaling both together
+  is what gives linear gains
 
 ### Asteroid Processing
 Three types: **metallic** (→ iron ore), **carbonic** (→ carbon),
@@ -61,13 +67,24 @@ Three types: **metallic** (→ iron ore), **carbonic** (→ carbon),
   upcycle the resulting ore in a recycler loop. See `quality.md`.
 
 ### Thruster Fuel Efficiency
-- Normal quality thrusters consume **120 fluid/second each** at full thrust
-- Thrusters are more fuel-efficient at lower fill levels (30–40% internal
-  fuel = best efficiency). Full tanks = faster but disproportionately more
-  consumption. For early platforms with limited asteroid processing, throttle
-  with pumps on a circuit
-- For Gleba runs (spoiling science packs): run full throttle, speed matters
-  more than fuel efficiency
+- A normal-quality thruster burns up to **120 units/s of thruster fuel AND 120 units/s
+  of oxidizer** — 240 units/s of fluid total per thruster at full reserves. Scales with
+  quality (legendary: 300 + 300).
+- **Efficiency is highest at the LOWEST fill and falls monotonically as reserves fill** —
+  100% efficiency at ≤10% fill, 86% at 30%, 72% at 50%, 51% at 80%+. There is no
+  mid-range sweet spot; a fuller tank is always less efficient per unit of thrust.
+- **Thrust caps at ~75% fill.** From 75% to 100% reserve the thruster produces the same
+  100% relative thrust, so topping reserves past that buys no speed at all — and going
+  from 75% to 80% raises consumption from 186% to 200% for zero thrust gain. Keeping
+  reserves below ~75% is free.
+- **Throttle band: 15–25% fill** is the practical target when a trip must run on
+  pre-stored fuel. Total fuel per trip generally falls as throttle drops (better
+  efficiency more than pays for the longer flight), so the true minimum is usually the
+  lowest throttle; on wide low-thrust or very heavy platforms the slowest speed is *so*
+  slow that a shallow optimum appears around 15–25% instead. Throttle with pumps on a
+  circuit.
+- For Gleba runs (spoiling science packs): speed matters more than fuel efficiency, so
+  run reserves up — but there is still no reason to exceed ~75–80% fill.
 - For Aquilo: solar panels output very little that far from the sun.
   Nuclear power is viable on platforms (requires ice → water loop). Fusion
   is the endgame solution. Accumulators can work if charged near inner planets

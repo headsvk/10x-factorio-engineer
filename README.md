@@ -37,7 +37,7 @@ dev/
   wiki/
     crawl.py                # Wiki crawler — `crawl` (full, resume-safe), `update` (RecentChanges re-crawl), `newpages` (report untracked pages)
     triage_changes.py       # Reduces changes.diff to real content changes (strips renderer noise, labels table columns)
-    urls.json               # 646 curated English gameplay wiki page titles
+    urls.json               # 647 curated English gameplay wiki page titles
     pages/                  # Crawled corpus (gitignored — regenerate with crawl.py)
   artifact-api/
     test.html               # claude.ai runtime API test suite — paste as vnd.ant.html to verify window.claude/storage

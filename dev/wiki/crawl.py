@@ -29,6 +29,7 @@ import sys
 import time
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -51,13 +52,27 @@ MIN_CONTENT_BYTES = 300   # files smaller than this are flagged as stubs
 REQUEST_INTERVAL  = 12    # seconds; Cloudflare free tier Quick Actions: 1 request per 10 s (12 s gives headroom)
 QUEUE_FILE        = "dev/wiki/update_queue.json"  # resume queue for multi-day update runs
 STAGING_DIR       = "dev/wiki/pages/.staging"      # new crawls land here; diffed then promoted
+RC_RETENTION_DAYS = 90    # measured 2026-09-15: RecentChanges reaches back ~89 days ($wgRCMaxAge)
 
+# NOTE: `rcdays` is NOT an API parameter -- it belongs to the Special:RecentChanges UI.
+# The API accepts it silently and ignores it, so every query was unbounded and returned
+# the wiki's whole RecentChanges retention (measured 2026-09-15: back to 2026-06-18, i.e.
+# ~90 days / $wgRCMaxAge, not the 30 days this workflow assumed). Verified by querying
+# rcdays=1, 7 and 30 and getting byte-identical result sets. Use `rcend`, which is real:
+# it takes an ISO timestamp and bounds the walk to revisions at or after it.
 RC_API = (
     "https://wiki.factorio.com/api.php"
     "?action=query&list=recentchanges"
     "&rcnamespace=0&rclimit=500&rctype=edit|new&format=json"
-    "&rcdays={days}"
+    "&rcend={rcend}"
 )
+
+
+def _rcend(days: int) -> str:
+    """ISO timestamp `days` before now, for the RC_API `rcend` bound."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+
+
 LANG_PATTERN = re.compile(r"/[a-z]{2}(-[a-z]{2})?$")
 
 # Translated pages are not always suffixed. The Korean translation effort visible in the
@@ -190,6 +205,9 @@ def _request(method: str, url: str, token: str, payload: dict | None = None) -> 
                     raise QuotaExhaustedError("Cloudflare 429 — rate limit exceeded after retry") from exc
                 continue
             raise
+    # Unreachable: the loop either returns, continues once, or raises. Present so the
+    # declared -> dict return type holds on every path.
+    raise RuntimeError(f"_request exhausted its retries without returning: {url}")
 
 
 def crawl_page(wiki_title: str, account_id: str, token: str) -> str | None:
@@ -517,9 +535,9 @@ def cmd_crawl(args):
 
 
 def cmd_update(args):
-    if args.days > 30:
-        print("WARNING: MediaWiki API only goes back 30 days — capping at 30.")
-        args.days = 30
+    if args.days > RC_RETENTION_DAYS:
+        print(f"WARNING: RecentChanges retains ~{RC_RETENTION_DAYS} days — capping at {RC_RETENTION_DAYS}.")
+        args.days = RC_RETENTION_DAYS
 
     # Resume from a saved queue if one exists (e.g. yesterday's partial run).
     if os.path.exists(QUEUE_FILE):
@@ -535,7 +553,7 @@ def cmd_update(args):
 
         queried_date = time.strftime("%Y-%m-%d")
         print(f"Querying MediaWiki RecentChanges (last {args.days} days)...")
-        url = RC_API.format(days=args.days)
+        url = RC_API.format(rcend=_rcend(args.days))
         changed = set()
         while True:
             req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
@@ -550,7 +568,7 @@ def cmd_update(args):
                 changed.add(title)
             if "continue" not in data:
                 break
-            url = RC_API.format(days=args.days) + "&rccontinue=" + urllib.request.quote(data["continue"]["rccontinue"])
+            url = RC_API.format(rcend=_rcend(args.days)) + "&rccontinue=" + urllib.parse.quote(data["continue"]["rccontinue"])
 
         to_update = sorted(our_pages & changed)
         new_pages = sorted(changed - our_pages)
@@ -622,7 +640,7 @@ def resolve_redirects(titles: list[str]) -> dict[str, str]:
     for i in range(0, len(titles), 50):
         chunk = titles[i:i + 50]
         url = ("https://wiki.factorio.com/api.php?action=query&format=json&redirects&titles="
-               + urllib.request.quote("|".join(chunk), safe=""))
+               + urllib.parse.quote("|".join(chunk), safe=""))
         req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -645,7 +663,7 @@ def cmd_newpages(args):
         our_pages = set(json.load(f))
 
     print(f"Querying MediaWiki RecentChanges (last {args.days} days)...")
-    url = RC_API.format(days=args.days)
+    url = RC_API.format(rcend=_rcend(args.days))
     changed = set()
     while True:
         req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
@@ -658,7 +676,7 @@ def cmd_newpages(args):
             changed.add(title)
         if "continue" not in data:
             break
-        url = RC_API.format(days=args.days) + "&rccontinue=" + urllib.request.quote(
+        url = RC_API.format(rcend=_rcend(args.days)) + "&rccontinue=" + urllib.parse.quote(
             data["continue"]["rccontinue"])
 
     buckets: dict[str, list[str]] = {"candidate": [], "meta": [], "translation": []}
@@ -723,7 +741,7 @@ def main():
     # update subcommand
     p_update = sub.add_parser("update", help="Re-crawl pages changed recently")
     p_update.add_argument("--days", type=int, default=30,
-                          help="Days of RecentChanges to check (max 30)")
+                          help=f"Days of RecentChanges to check (max {RC_RETENTION_DAYS}); size it from the last run")
     p_update.add_argument("--workers", type=int, default=1,
                           help="Concurrent crawlers (default 1; free tier: 1 req/10s)")
     p_update.add_argument("--dry-run", action="store_true")
@@ -734,7 +752,7 @@ def main():
     p_new = sub.add_parser("newpages",
                            help="Report untracked RecentChanges pages (read-only)")
     p_new.add_argument("--days", type=int, default=30,
-                       help="Days of RecentChanges to check (max 30)")
+                       help=f"Days of RecentChanges to check (max {RC_RETENTION_DAYS}); size it from the last run")
     p_new.add_argument("--show-filtered", action="store_true",
                        help="Also list the meta and translation pages that were filtered out")
 
