@@ -34,7 +34,8 @@ This file covers combat and defense in Factorio, including turret types, enemy m
 - Limited 72° firing arc but can be placed in 8 directions. Does massive damage to everything in its line of fire — including your own buildings, so aim carefully
 - Extremely effective against Demolishers, especially when fired down their bodies — shells can hit multiple segments at once
 - Primary use: space platforms (asteroid defense); can be shipped to any planet for ground defense
-- Railgun turret firing speed is animation-locked at a cap of **0.845 shots/second** (once per 71 ticks). This cap is reached at **Railgun shooting speed level 10** — researching further has no effect on the turret. The hand-held railgun does not share this cap. This is intentional design, not a bug.
+- **No firing-speed cap since 2.1.7.** Before 2.1.7 the turret's animation locked it at 0.845 shots/second (once per 71 ticks), reached at Railgun shooting speed level 10, so further levels did nothing for turrets. 2.1.7 fixed turret shooting speed being limited by animations — every level of Railgun shooting speed research now raises turret fire rate. Older guides advising "stop at level 10" are out of date.
+- 2.1.7 also fixed railgun turrets strongly preferring higher-health asteroids over closer ones, so on platforms they now engage the nearest threat first.
 
 ---
 
@@ -212,7 +213,7 @@ Certain infinite research levels provide notable efficiency jumps — useful pla
 | Stronger explosives | Level 2: Grenades destroy trees in one hit. Level 7 (Space Age): Rockets one-shot medium asteroids. Level 12 (Space Age): Rockets two-shot large asteroids. Level 16 (Space Age): Explosive rockets two-shot large asteroids with direct damage. |
 | Laser weapons damage (Space Age) | Level 11: Laser turrets destroy small asteroids in one damage cycle. |
 | Railgun damage (Space Age) | Level 2: Railgun turrets destroy all asteroid sizes in one shot — conserves ammo significantly. |
-| Railgun shooting speed (Space Age) | Level 10: Railgun turrets reach maximum effective firing rate (0.845 shots/sec, once per 71 ticks). Researching past level 10 has no practical effect on turrets. |
+| Railgun shooting speed (Space Age) | No breakpoint since 2.1.7: the old level-10 turret cap (0.845 shots/sec, animation-locked) was removed, so every level keeps raising turret fire rate. |
 | Artillery shell damage (Space Age) | Level 9: Artillery shells defeat Nauvis spawners and behemoth worms in one hit — greatly conserves shells. |
 | Refined flammables | Level 9: Flamethrower turrets require 90% less crude oil to destroy Behemoth Biters — greatly conserves fuel. Level 16: 95% less crude oil required. |
 

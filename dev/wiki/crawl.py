@@ -7,9 +7,19 @@ Commands:
         Skips pages already written (resume-safe).
 
     python dev/wiki/crawl.py update  [--days N] [--workers N] [--dry-run] [--show-new]
-        Monthly maintenance: query MediaWiki RecentChanges, re-crawl changed pages.
+        Twice-monthly maintenance: query MediaWiki RecentChanges, re-crawl changed pages.
         Automatically cross-references against dev/wiki/urls.json.
+        --days defaults to (days since the last `wiki update complete` in findings.md) + 2,
+        capped at the ~90-day RecentChanges retention.
+        Also writes dev/wiki/edit_summary.json (per-page byte deltas + edit comments).
         --show-new prints English pages that changed but aren't in urls.json yet.
+
+    python dev/wiki/crawl.py changes [--live] [--days N] [--top N]
+        Read-only: print the wiki's own edit metadata for tracked pages, ranked by churn.
+        Reads edit_summary.json from the last update; --live queries RecentChanges now.
+
+    python dev/wiki/crawl.py newpages [--days N] [--show-filtered]
+        Read-only: RecentChanges titles not yet in urls.json (same --days default).
 
 Credentials: env vars CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN
              (also checks .env, .env.local, ~/.env)
@@ -22,6 +32,7 @@ response). Free tier: 1 request per 10 seconds — no daily job cap.
 """
 
 import argparse
+import io
 import json
 import os
 import re
@@ -64,6 +75,7 @@ RC_API = (
     "https://wiki.factorio.com/api.php"
     "?action=query&list=recentchanges"
     "&rcnamespace=0&rclimit=500&rctype=edit|new&format=json"
+    "&rcprop=title|timestamp|comment|sizes"
     "&rcend={rcend}"
 )
 
@@ -71,6 +83,107 @@ RC_API = (
 def _rcend(days: int) -> str:
     """ISO timestamp `days` before now, for the RC_API `rcend` bound."""
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+
+
+def fetch_recent_changes(days: int) -> list[dict]:
+    """Every main-namespace RecentChanges revision of the last `days` days, paginated.
+
+    Each entry carries title, timestamp, comment, oldlen and newlen (see RC_API rcprop).
+    """
+    base = RC_API.format(rcend=_rcend(days))
+    url = base
+    out: list[dict] = []
+    while True:
+        req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        out.extend(data["query"]["recentchanges"])
+        if "continue" not in data:
+            return out
+        url = base + "&rccontinue=" + urllib.parse.quote(data["continue"]["rccontinue"])
+
+
+# Per-page edit metadata straight from the wiki (byte deltas + edit comments). It bypasses
+# the Cloudflare renderer entirely, so it is the trustworthy "what actually changed" signal:
+# on 2026-10-01 the edit comments alone ("Railgun shooting speed no longer capped") pointed
+# at every page that touched a reference fact before triage had even run. `update` writes
+# it next to changes.diff; triage_changes.py reads it to annotate pages and detect drift.
+EDIT_SUMMARY_FILE = "dev/wiki/edit_summary.json"
+
+
+def summarise_edits(rcs: list[dict], titles: set[str]) -> dict[str, dict]:
+    """Aggregate RecentChanges revisions per tracked title.
+
+    Keyed by filename stem (title_to_filename without .md) so it lines up with the
+    page names in changes.diff. `net` is the summed byte delta; `churn` sums absolute
+    deltas, so an edit + revert pair still registers as activity.
+    """
+    summary: dict[str, dict] = {}
+    for rc in rcs:
+        title = rc["title"]
+        if title not in titles:
+            continue
+        delta = rc.get("newlen", 0) - rc.get("oldlen", 0)
+        key = title_to_filename(title)[:-3]
+        s = summary.setdefault(key, {"title": title, "edits": 0, "net": 0, "churn": 0, "comments": []})
+        s["edits"] += 1
+        s["net"] += delta
+        s["churn"] += abs(delta)
+        comment = (rc.get("comment") or "").strip()
+        if comment:
+            s["comments"].append(f"{rc.get('timestamp', '')[:10]} {comment}")
+    return summary
+
+
+def print_edit_summary(summary: dict[str, dict], top: int = 0) -> None:
+    """Pages ranked by byte churn, each with its (up to 4) edit comments."""
+    ranked = sorted(summary.values(), key=lambda s: -s["churn"])
+    if top:
+        ranked = ranked[:top]
+    for s in ranked:
+        print(f"  {s['net']:+7d} B  {s['edits']:>2} edit(s)  {s['title']}")
+        for c in s["comments"][:4]:
+            print(f"               {c[:110]}")
+
+
+LAST_RUN_PATTERN = re.compile(r"^- (\d{4}-\d{2}-\d{2}): wiki update complete")
+
+
+def default_days() -> tuple[int, str | None]:
+    """RecentChanges window sized from the last recorded run: min(retention, N + 2).
+
+    N = days since the last `wiki update complete` line in findings.md; the +2 is overlap
+    margin for pages edited after that run's query. Falls back to 30 with no record.
+
+    Lines dated today are skipped: `update` appends today's line before the workflow runs
+    `newpages`, which must still cover the whole cycle back to the PREVIOUS run, not 2 days.
+    """
+    today = time.strftime("%Y-%m-%d")
+    last = None
+    try:
+        with open(FINDINGS_FILE, encoding="utf-8") as f:
+            for line in f:
+                m = LAST_RUN_PATTERN.match(line)
+                if m and m.group(1) < today:
+                    last = m.group(1)
+    except OSError:
+        pass
+    if last is None:
+        return 30, None
+    elapsed = int((time.time() - time.mktime(time.strptime(last, "%Y-%m-%d"))) // 86400)
+    return min(RC_RETENTION_DAYS, elapsed + 2), last
+
+
+def resolve_days(args) -> int:
+    """Fill in args.days (from findings.md if not given), cap it at retention, return it."""
+    if args.days is None:
+        args.days, last = default_days()
+        source = f"last run {last}" if last else "no recorded run"
+        print(f"--days not given: using {args.days} ({source}, +2 overlap)")
+    if args.days > RC_RETENTION_DAYS:
+        print(f"WARNING: RecentChanges retains ~{RC_RETENTION_DAYS} days — capping at {RC_RETENTION_DAYS}.")
+        args.days = RC_RETENTION_DAYS
+    return args.days
 
 
 LANG_PATTERN = re.compile(r"/[a-z]{2}(-[a-z]{2})?$")
@@ -535,10 +648,6 @@ def cmd_crawl(args):
 
 
 def cmd_update(args):
-    if args.days > RC_RETENTION_DAYS:
-        print(f"WARNING: RecentChanges retains ~{RC_RETENTION_DAYS} days — capping at {RC_RETENTION_DAYS}.")
-        args.days = RC_RETENTION_DAYS
-
     # Resume from a saved queue if one exists (e.g. yesterday's partial run).
     if os.path.exists(QUEUE_FILE):
         with open(QUEUE_FILE, encoding="utf-8") as f:
@@ -548,27 +657,21 @@ def cmd_update(args):
         print(f"Resuming from saved queue (queried {queried_date}): {len(to_update)} page(s) remaining")
     else:
         # Fresh run — query MediaWiki RecentChanges.
+        resolve_days(args)
         with open(URLS_FILE, encoding="utf-8") as f:
             our_pages = set(json.load(f))
 
         queried_date = time.strftime("%Y-%m-%d")
         print(f"Querying MediaWiki RecentChanges (last {args.days} days)...")
-        url = RC_API.format(rcend=_rcend(args.days))
+        rcs = fetch_recent_changes(args.days)
         changed = set()
-        while True:
-            req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read())
-            for rc in data["query"]["recentchanges"]:
-                title = rc["title"]
-                if LANG_PATTERN.search(title) or NON_LATIN_PATTERN.search(title):
-                    continue
-                if ":" in title and not title.startswith("Tutorial:"):
-                    continue
-                changed.add(title)
-            if "continue" not in data:
-                break
-            url = RC_API.format(rcend=_rcend(args.days)) + "&rccontinue=" + urllib.parse.quote(data["continue"]["rccontinue"])
+        for rc in rcs:
+            title = rc["title"]
+            if LANG_PATTERN.search(title) or NON_LATIN_PATTERN.search(title):
+                continue
+            if ":" in title and not title.startswith("Tutorial:"):
+                continue
+            changed.add(title)
 
         to_update = sorted(our_pages & changed)
         new_pages = sorted(changed - our_pages)
@@ -602,6 +705,14 @@ def cmd_update(args):
         print(f"Saved queue of {len(to_update)} pages -> {QUEUE_FILE}")
         # Reset diff file so it covers exactly this update cycle.
         open(DIFF_FILE, "w", encoding="utf-8").close()
+        # Wiki-side edit metadata for the same cycle (survives a resumed queue untouched).
+        summary = summarise_edits(rcs, set(to_update))
+        with open(EDIT_SUMMARY_FILE, "w", encoding="utf-8") as f:
+            json.dump({"queried": queried_date, "days": args.days, "pages": summary},
+                      f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        print(f"Saved wiki edit summary (byte deltas + edit comments) -> {EDIT_SUMMARY_FILE}")
+        print("  read it with: python dev/wiki/crawl.py changes")
 
     print("\nPages to re-crawl:")
     for title in to_update:
@@ -659,25 +770,17 @@ def cmd_newpages(args):
     Read-only: touches no files, so it is safe to run after `update` has already
     written changes.diff (which `update --dry-run` would truncate).
     """
+    resolve_days(args)
     with open(URLS_FILE, encoding="utf-8") as f:
         our_pages = set(json.load(f))
 
     print(f"Querying MediaWiki RecentChanges (last {args.days} days)...")
-    url = RC_API.format(rcend=_rcend(args.days))
     changed = set()
-    while True:
-        req = urllib.request.Request(url, headers={"User-Agent": "factorio-wiki-updater/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-        for rc in data["query"]["recentchanges"]:
-            title = rc["title"]
-            if ":" in title and not title.startswith("Tutorial:"):
-                continue
-            changed.add(title)
-        if "continue" not in data:
-            break
-        url = RC_API.format(rcend=_rcend(args.days)) + "&rccontinue=" + urllib.parse.quote(
-            data["continue"]["rccontinue"])
+    for rc in fetch_recent_changes(args.days):
+        title = rc["title"]
+        if ":" in title and not title.startswith("Tutorial:"):
+            continue
+        changed.add(title)
 
     buckets: dict[str, list[str]] = {"candidate": [], "meta": [], "translation": []}
     for title in sorted(changed - our_pages):
@@ -721,6 +824,32 @@ def cmd_newpages(args):
                     print(f"      {title}")
 
 
+def cmd_changes(args):
+    """Print the wiki's own edit metadata (byte deltas + comments) for tracked pages.
+
+    Read-only. By default shows the summary `update` saved for the current cycle;
+    --live re-queries RecentChanges instead (useful before deciding to run `update`).
+    """
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    live = args.live or args.days is not None   # an explicit window only makes sense live
+    if live or not os.path.exists(EDIT_SUMMARY_FILE):
+        if not live:
+            print(f"No {EDIT_SUMMARY_FILE} yet - querying live.")
+        days = resolve_days(args)
+        with open(URLS_FILE, encoding="utf-8") as f:
+            our_pages = set(json.load(f))
+        summary = summarise_edits(fetch_recent_changes(days), our_pages)
+        print(f"Tracked pages edited in the last {days} days: {len(summary)}")
+    else:
+        with open(EDIT_SUMMARY_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+        summary = saved["pages"]
+        print(f"Wiki edits behind the {saved['queried']} update (window {saved['days']} days): "
+              f"{len(summary)} tracked page(s)")
+    print_edit_summary(summary, args.top)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -740,8 +869,9 @@ def main():
 
     # update subcommand
     p_update = sub.add_parser("update", help="Re-crawl pages changed recently")
-    p_update.add_argument("--days", type=int, default=30,
-                          help=f"Days of RecentChanges to check (max {RC_RETENTION_DAYS}); size it from the last run")
+    p_update.add_argument("--days", type=int, default=None,
+                          help=f"Days of RecentChanges to check (max {RC_RETENTION_DAYS}; "
+                               "default: days since the last run in findings.md + 2)")
     p_update.add_argument("--workers", type=int, default=1,
                           help="Concurrent crawlers (default 1; free tier: 1 req/10s)")
     p_update.add_argument("--dry-run", action="store_true")
@@ -751,13 +881,24 @@ def main():
     # newpages subcommand
     p_new = sub.add_parser("newpages",
                            help="Report untracked RecentChanges pages (read-only)")
-    p_new.add_argument("--days", type=int, default=30,
-                       help=f"Days of RecentChanges to check (max {RC_RETENTION_DAYS}); size it from the last run")
+    p_new.add_argument("--days", type=int, default=None,
+                       help=f"Days of RecentChanges to check (max {RC_RETENTION_DAYS}; "
+                            "default: days since the last run in findings.md + 2)")
     p_new.add_argument("--show-filtered", action="store_true",
                        help="Also list the meta and translation pages that were filtered out")
 
+    # changes subcommand
+    p_chg = sub.add_parser("changes",
+                           help="Wiki byte deltas + edit comments for tracked pages (read-only)")
+    p_chg.add_argument("--live", action="store_true",
+                       help=f"Query RecentChanges now instead of reading {EDIT_SUMMARY_FILE}")
+    p_chg.add_argument("--days", type=int, default=None,
+                       help="Window to query; implies --live (default: days since the last run + 2)")
+    p_chg.add_argument("--top", type=int, default=0, help="Only the N pages with the most churn")
+
     args = parser.parse_args()
-    {"crawl": cmd_crawl, "update": cmd_update, "newpages": cmd_newpages}[args.command](args)
+    {"crawl": cmd_crawl, "update": cmd_update, "newpages": cmd_newpages,
+     "changes": cmd_changes}[args.command](args)
 
 
 if __name__ == "__main__":

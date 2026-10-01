@@ -165,6 +165,12 @@ building a normal platform and hoping to upgrade the hub in orbit.
 - Automate rocket launches: set the platform hub to "request" items;
   planetary silos auto-launch when the platform is in orbit and requests
   are pending
+- Since 2.1.7, orbital requests are far more flexible: the hub can **set its
+  requests from the circuit network**, a request can **import from any planet**
+  (not just the one below), and platforms can **request from other platforms**.
+  Small requests are batched into one rocket, and automated launches can use
+  **mixed rockets** filled by hand or by inserters — so low-volume items no
+  longer each cost a dedicated rocket
 - Create dedicated platforms per route — don't use the same platform as
   both a cargo hauler and a science producer
 

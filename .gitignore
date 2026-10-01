@@ -36,6 +36,7 @@ dev/wiki/findings.md
 dev/wiki/changes.diff
 dev/wiki/errors.log
 dev/wiki/update_queue.json
+dev/wiki/edit_summary.json
 
 # Crawl logs — the maintenance routine redirects command output to these
 *.log

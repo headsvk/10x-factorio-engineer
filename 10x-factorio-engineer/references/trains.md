@@ -22,11 +22,11 @@ ramps. Supports are required every **16 straight tiles**. Players cannot walk on
 Buildings too tall for elevated rail: big electric pole, roboport, oil refinery, rocket silo,
 cargo landing pad, agricultural tower, cargo bay, lightning rod/collector.
 
-### Locomotive quality and fuel (2.1.10+)
+### Locomotive and wagon quality (2.1.7+)
 
 **Wiki:** https://wiki.factorio.com/Locomotive
 
-Since **2.1.10**, locomotive quality improves both **max speed** and **acceleration** —
+Since **2.1.7** (Space Age), locomotive quality improves both **max speed** and **power** (acceleration) —
 it is no longer just a survivability stat. On wood/coal the max-speed ladder runs
 259 → 267 → 275 → 283 → **298 km/h** from normal to legendary (~+15%), and acceleration
 scales alongside it. The gain applies on top of whatever fuel you burn, so quality
@@ -39,14 +39,22 @@ Planning implications:
   quoted for any fuel is a *minimum*. Real-world fuel life on long straight runs is
   longer than the table suggests, which makes refuelling intervals easier than they look
   on paper.
-- **Quality locomotives are more fuel-efficient, not less.** A locomotive always burns at
-  its listed energy-consumption rate — a flat **600 kW**, identical in vanilla and Space
-  Age — so the extra acceleration power that quality grants is *free*: the same fuel buys
-  more accelerating force. Combined with the throttling above, a quality loco spends less
-  of the trip accelerating and more of it coasting at max speed, so it travels further per
-  unit of fuel. The effect is marginal on light trains and **large on trains heavy enough
-  to accelerate badly** — which is exactly where you would otherwise be tempted to add a
-  second locomotive. Quality fuel stacks with this for the same reason.
+- **Quality locomotives burn fuel faster.** The extra acceleration comes from extra power,
+  and power *is* energy consumption: 600 kW normal → 720 kW uncommon → 840 kW rare →
+  960 kW epic → **1.2 MW legendary** (the general rule: fuel-burning entities scale
+  consumption with quality, except crafting machines, burner mining drills, cars and tanks;
+  burner inserters burn more only because they swing faster). A legendary loco empties a given fuel load in roughly **half the time**, so
+  size refuelling stations and fuel trains for the higher burn rate. Older guidance that
+  quality locos "always burn a flat 600 kW, so the acceleration is free" predates this.
+- **Per distance they can still come out ahead.** Thanks to the throttling above, a quality
+  loco spends less of the trip accelerating and more of it coasting at max speed; the wiki
+  holds that this outweighs the higher burn rate — marginal on light trains, **large on
+  trains heavy enough to accelerate badly**, which is exactly where you would otherwise add
+  a second locomotive. Quality fuel (not wood/coal, which ignore quality) stacks with this.
+- **Cargo wagon inventory scales with quality** (2.1.7, Space Age) — the normal wagon's 40
+  slots is no longer fixed, so quality wagons cut train length/count for the same haul.
+- Since 2.1.7, a locomotive **auto-pulls fuel from its passengers' inventories** when it
+  runs low — a safety net for manually driven trains, not a substitute for refuel stops.
 
 ### Signals and deadlock prevention
 

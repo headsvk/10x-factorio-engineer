@@ -28,20 +28,31 @@ Two things this cannot paper over, both of which need a full re-crawl
   its first re-crawl regardless. Normalise the corpus rather than trusting the
   ranking during a transition.
 
-If a future run again reports nearly every page as changed, suspect renderer
-drift before wiki activity, and cross-check against the MediaWiki RecentChanges
-API's own byte-delta and edit-comment metadata — that signal bypasses the
-renderer entirely and is what the 2026-08-15 run fell back to.
+"Nearly every page changed" is NOT a drift signal on its own. Since `--days`
+started bounding the RecentChanges query (2026-09-15), `update` queues only pages
+the wiki itself reports as edited, so a clean run legitimately shows ~all of them
+changed (2026-10-01: 65 of 66, every one a real edit). Drift instead shows up as
+pages with many changed lines behind tiny wiki edits. So this script reads
+`dev/wiki/edit_summary.json` (written by `crawl.py update`: per-page byte deltas
+and edit comments straight from the MediaWiki API, bypassing the renderer) and:
+
+* annotates each page header with the wiki's byte delta, edit count and latest
+  edit comment — usually the fastest pointer to what changed;
+* runs a drift check: a page is a suspect when it shows >= DRIFT_MIN_LINES
+  changed lines from < DRIFT_MAX_CHURN bytes of wiki edits (or was diffed with
+  no wiki edit recorded at all). A WARNING prints when suspects make up at least
+  a quarter of the diffed pages (and at least DRIFT_MIN_SUSPECTS of them).
 
 Known tradeoff: collapsing the renderer's doubled icon labels also collapses
 genuine doubled words ("had had" -> "had"). It is applied to both sides of the
 diff, so the only edit it can hide is one whose sole change is a doubled word.
 
 Usage:
-    python dev/wiki/triage_changes.py [--diff PATH] [--top N] [--context N]
-                                      [--pages NAME,NAME] [--quiet]
+    python dev/wiki/triage_changes.py [--diff PATH] [--edits PATH] [--top N]
+                                      [--context N] [--pages NAME,NAME] [--quiet]
 
     --diff PATH     diff to read (default: dev/wiki/changes.diff)
+    --edits PATH    wiki edit summary (default: dev/wiki/edit_summary.json; optional)
     --top N         only show the N pages with the most changes (default: all)
     --context N     max changed lines shown per page, per direction (default: 8)
     --pages LIST    comma-separated page names to show (substring match)
@@ -52,12 +63,21 @@ Exit status is 0 even when nothing substantive changed — check the printed
 """
 
 import argparse
+import io
+import json
 import re
 import sys
 from collections import OrderedDict
 
 DEFAULT_DIFF = "dev/wiki/changes.diff"
 DEFAULT_PAGES = "dev/wiki/pages"
+DEFAULT_EDITS = "dev/wiki/edit_summary.json"
+
+# Drift check thresholds (see "Renderer drift" above). On 2026-10-01, a clean run, one
+# page of 66 tripped them (Cargo_landing_pad: 10 lines from 155 B of edits, mostly stub removal).
+DRIFT_MIN_LINES = 10
+DRIFT_MAX_CHURN = 200
+DRIFT_MIN_SUSPECTS = 5
 
 IMG = re.compile(r"!\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)")
 # One level of nested parens is allowed in the target, because wiki URLs routinely
@@ -251,10 +271,35 @@ def substantive_changes(pages) -> list[tuple[str, list[str], list[str]]]:
     return real
 
 
+def load_edits(path: str) -> dict[str, dict] | None:
+    """Per-page wiki edit metadata keyed like the diff's page names, or None if absent."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)["pages"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def drift_suspects(pages, real, edits: dict[str, dict]) -> list[str]:
+    """Diffed pages whose changed-line volume the wiki's own edits can't explain."""
+    lines = {page: len(r) + len(a) for page, r, a in real}
+    suspects = []
+    for page in pages:
+        e = edits.get(page)
+        if e is None:
+            if lines.get(page, 0):
+                suspects.append(f"{page} ({lines[page]} lines, no wiki edit recorded)")
+        elif lines.get(page, 0) >= DRIFT_MIN_LINES and e["churn"] < DRIFT_MAX_CHURN:
+            suspects.append(f"{page} ({lines[page]} lines from {e['churn']} B of edits)")
+    return suspects
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--diff", default=DEFAULT_DIFF)
+    p.add_argument("--edits", default=DEFAULT_EDITS,
+                   help="wiki edit summary written by `crawl.py update` (optional)")
     p.add_argument("--pages-dir", default=DEFAULT_PAGES,
                    help="crawled pages, used to recover table headers")
     p.add_argument("--top", type=int, default=0)
@@ -264,7 +309,7 @@ def main() -> int:
     args = p.parse_args()
 
     # Wiki content is full of non-cp1252 characters; never let a print crash the run.
-    if hasattr(sys.stdout, "reconfigure"):
+    if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     try:
@@ -274,8 +319,21 @@ def main() -> int:
         return 0
 
     real = substantive_changes(pages)
+    edits = load_edits(args.edits)
     print(f"pages in diff: {len(pages)}")
     print(f"pages with substantive prose changes: {len(real)}")
+    if edits is None:
+        print(f"no wiki edit summary at {args.edits} — drift check skipped "
+              "(cross-check with `python dev/wiki/crawl.py changes --live`)")
+    else:
+        suspects = drift_suspects(pages, real, edits)
+        print(f"drift check: {len(suspects)} of {len(pages)} page(s) show changes "
+              "the wiki's own edits don't explain")
+        for s in suspects[:10]:
+            print(f"    {s}")
+        if len(suspects) >= max(DRIFT_MIN_SUSPECTS, len(pages) / 4):
+            print("WARNING: likely renderer drift — rank by `crawl.py changes` instead of "
+                  "this output, and normalise the corpus with a full re-crawl.")
     if not real or args.quiet:
         return 0
 
@@ -287,6 +345,11 @@ def main() -> int:
     print("=" * 70)
     for page, removed, added in shown:
         print(f"\n### {page}  (-{len(removed)} / +{len(added)})")
+        e = edits.get(page) if edits else None
+        if e:
+            # RecentChanges lists newest first, so comments[0] is the latest edit.
+            latest = e["comments"][0] if e["comments"] else "(no edit comment)"
+            print(f"    [wiki] {e['net']:+d} B, {e['edits']} edit(s); latest: {latest[:100]}")
         seen_headers: set[str] = set()
 
         def emit(marker: str, rows: list[str]) -> None:

@@ -35,8 +35,8 @@ dev/
   quality_planner.py        # Legendary production planner — DP/LP quality loop solver
   test_quality_planner.py   # unittest suite (411 tests) for quality_planner
   wiki/
-    crawl.py                # Wiki crawler — `crawl` (full, resume-safe), `update` (RecentChanges re-crawl), `newpages` (report untracked pages)
-    triage_changes.py       # Reduces changes.diff to real content changes (strips renderer noise, labels table columns)
+    crawl.py                # Wiki crawler — `crawl` (full, resume-safe), `update` (RecentChanges re-crawl), `changes` (wiki edit comments + byte deltas), `newpages` (report untracked pages)
+    triage_changes.py       # Reduces changes.diff to real content changes (strips renderer noise, labels table columns, checks for renderer drift)
     urls.json               # 647 curated English gameplay wiki page titles
     pages/                  # Crawled corpus (gitignored — regenerate with crawl.py)
   artifact-api/

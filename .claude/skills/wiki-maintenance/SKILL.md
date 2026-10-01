@@ -31,38 +31,35 @@ line is how the routine decides whether it's due, so it must be appended on ever
 
 ### Workflow
 
-**Step 1 — Fetch recently changed pages via MediaWiki API:**
-```
-https://wiki.factorio.com/api.php?action=query&list=recentchanges&rcnamespace=0&rclimit=500&rcdays=30&rctype=edit|new&format=json
-```
-This returns all English main-namespace pages edited since `rcend`. Filter out
-translations (`/zh`, `/ru`, `/de`, etc.) and non-article pages (`Special:`, `File:`, etc.).
-
-**Step 2 — Cross-reference against our crawled page list:**
-Our 647-page list is in `dev/wiki/urls.json`. Check which recently-changed wiki pages
-appear in that list — those are the ones to re-crawl.
-
-Also check which split reference files embed facts from those changed pages — if any of those changed,
-update the embedded summaries too (Step 4).
-
-**Step 3 — Re-crawl changed pages using `dev/wiki/crawl.py`:**
+**Steps 1–3 — Query RecentChanges, cross-reference, re-crawl: all one command.**
 ```bash
-python dev/wiki/crawl.py update [--days N] [--dry-run]
+python dev/wiki/crawl.py update --workers 1 > wiki-update.log 2>&1
 ```
-This automates Steps 1–3: queries RecentChanges, cross-references against
-`dev/wiki/urls.json`, deletes stale files, and re-crawls via Cloudflare.
+`update` queries the MediaWiki RecentChanges API (paginated, main namespace, translations
+and non-article titles filtered), intersects it with the 647 titles in `dev/wiki/urls.json`,
+and re-crawls the matches via Cloudflare into `pages/.staging/`, then diffs and promotes them.
+Do not hand-roll the API query — `crawl.py`'s `fetch_recent_changes()` is the one place
+the query (and its `rcend` bound) lives.
 
 Credentials come from env vars `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`.
 
-**Size `--days` from the last run, not at a flat 30:** `min(30, days_since_last_run + 2)`,
-where the last run's date is the final `wiki update complete` line in `dev/wiki/findings.md`.
-On the intended cadence that is `--days 16`. A flat 30 re-covers ~16 days the previous run
-already crawled — on 2026-09-15 it queued 110 pages when only ~20 tracked pages had changed
-since the last run, ~18 minutes of redundant wall-clock (no token or quota cost; the free
-tier has no daily cap). Never go below `days_since_last_run`: the window must reach back to
-the last run, or the gap is simply never inspected. `--days` has no effect
-when `dev/wiki/update_queue.json` exists — that run resumes the saved queue without
-re-querying.
+**The window sizes itself.** With no `--days`, `update` reads the last `wiki update complete`
+line in `dev/wiki/findings.md` and uses `min(90, days_since_last_run + 2)` — the `+2` is
+overlap for pages edited after the previous run's query, the 90 is RecentChanges retention.
+On the intended cadence that is ~16–18 days. Pass `--days N` only to override; never go below
+`days_since_last_run`, or the gap between runs is never inspected. (A flat 30 on 2026-09-15
+queued 110 pages when only ~20 had changed since the previous run — wasted wall-clock, no
+token or quota cost.) `--days` has no effect when `dev/wiki/update_queue.json` exists —
+that run resumes the saved queue without re-querying.
+
+**`update` also writes `dev/wiki/edit_summary.json`**: per tracked page, the wiki's own byte
+delta, edit count and edit comments for this cycle. Read it with
+```bash
+python dev/wiki/crawl.py changes            # --top N; --live re-queries instead of reading the file
+```
+It is the best first pointer into a run: on 2026-10-01 the edit comments alone
+("Railgun shooting speed no longer capped", "2.1.7 Pull fuel from passengers") identified
+every page that touched a reference fact before triage ran.
 
 > **`rcdays` is a trap (found 2026-09-15).** `crawl.py` used to build its query with
 > `&rcdays={days}`, but `rcdays` is a Special:RecentChanges **UI** parameter, not an API one.
@@ -75,7 +72,7 @@ re-querying.
 > **Note:** Do NOT use Cloudflare's `modifiedSince` parameter for this — tested and confirmed
 > that the Factorio wiki does not serve `Last-Modified` headers that Cloudflare can use.
 > All pages are returned as "completed" regardless of whether they changed. Use the
-> MediaWiki RecentChanges API (Step 1) to determine what actually changed.
+> MediaWiki RecentChanges API (via `crawl.py update`) to determine what actually changed.
 
 **Step 4 — Update the relevant split reference file(s) for changed embedded pages:**
 
@@ -86,7 +83,16 @@ python dev/wiki/triage_changes.py --top 20
 The raw diff is mostly renderer noise (link resolution, heading markers, TOC renumbering
 change between crawls, so nearly every page shows as modified). `triage_changes.py` strips
 those axes and ranks pages by surviving prose changes. Use `--pages NAME` to drill into one
-page and `--context N` to see more lines.
+page and `--context N` to see more lines. Each page header carries a `[wiki]` line from
+`edit_summary.json` — byte delta, edit count and latest edit comment — and the summary
+block at the top runs a drift check (below).
+
+Before writing a mechanic change into a reference, confirm it against the official patch
+notes — `Version history/2.1.0` on the wiki (fetch its wikitext via the MediaWiki API,
+`action=query&prop=revisions&rvprop=content&rvslots=main&titles=Version_history/2.1.0`, and
+grep it). Pages contradict themselves while editors catch up: on 2026-10-01 the Locomotive
+infobox said consumption scales with quality while older prose on the same page said a flat
+600 kW; the 2.1.7 changelog settled it.
 
 Then compare the surviving changes against what's embedded in the split reference files in `10x-factorio-engineer/references/`.
 Update any facts that changed. Focus on **mechanics, strategic constraints, and planning guidance** — not raw stats or recipe ingredients (the CLI provides those on demand). Prioritise: spoilage timers, planet-specific constraints, combat mechanics, circuit patterns, and infrastructure ratios (solar/nuclear/fusion) that the CLI doesn't model.
@@ -101,19 +107,22 @@ Update any facts that changed. Focus on **mechanics, strategic constraints, and 
 > walk back to the `|---|` separator) and can come back empty for nested or malformed
 > tables, in which case no `[columns]` line is printed and the numbers are unlabelled.
 
-> **⚠️ If triage reports ~every page as changed, suspect renderer drift — not the wiki.**
+> **⚠️ Renderer drift — trust triage's drift check, not the changed-page count.**
 > The Cloudflare renderer's output format is not stable across time. On 2026-08-15 it
 > started emitting YAML frontmatter, a duplicated `Space Age` badge, the TOC as list
 > items, doubled icon alt-text in nav templates, and nested `<table>` HTML in stat cells;
 > triage reported **111 of 111** pages substantively changed and was useless for that run.
 > Those axes are filtered now, but the failure mode will recur if the format shifts again.
 >
-> **Fallback signal:** the MediaWiki RecentChanges API returns its own byte delta and edit
-> comment per revision, which bypasses the renderer completely. Add
-> `&rcprop=title|timestamp|comment|sizes|user` to the Step 1 query, drop revisions older
-> than the last run's date (the window overlaps work already done), and rank pages
-> by `newlen - oldlen`. On 2026-08-15 that reduced 86 flagged pages to 25 genuinely edited
-> ones, of which only 3 touched an embedded fact.
+> "~Every page changed" is **not** itself the symptom any more. Since `--days` bounds the
+> query, `update` only queues pages the wiki reports as edited, so a clean run shows nearly
+> all of them changed (2026-10-01: 65 of 66, all real edits). Drift looks different: many
+> changed lines behind tiny wiki edits. Triage checks exactly that against
+> `edit_summary.json` — a page is a suspect at ≥10 changed lines from <200 B of edits — and
+> prints `WARNING: likely renderer drift` when suspects reach a quarter of the diffed pages
+> (2026-10-01: 1 suspect of 66). On a warning, rank by `python dev/wiki/crawl.py changes`
+> instead; on 2026-08-15 that signal cut 86 flagged pages to 25 genuinely edited ones, of
+> which only 3 touched an embedded fact.
 >
 > **Keep the corpus single-format.** A `pages/` directory holding a mix of renderer
 > formats diffs dirty on every page's first re-crawl regardless of filtering. After any
@@ -122,10 +131,12 @@ Update any facts that changed. Focus on **mechanics, strategic constraints, and 
 
 **Step 5 — Also check for new high-value pages:**
 ```bash
-python dev/wiki/crawl.py newpages --days 30      # add --show-filtered to see what was dropped
+python dev/wiki/crawl.py newpages      # add --show-filtered to see what was dropped
 ```
 Read-only — it writes nothing, so it is safe to run *after* `update` (`update --dry-run`
-is not: it truncates `changes.diff` before the dry-run check).
+is not: it truncates `changes.diff` before the dry-run check). Its window defaults the same
+way as `update`'s, ignoring the findings line `update` wrote today, so both cover the same
+cycle.
 
 It reports RecentChanges titles missing from `dev/wiki/urls.json`, bucketed so that only
 the **candidates** need a decision; add the player-relevant ones (new buildings, mechanics,
